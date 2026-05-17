@@ -1,14 +1,27 @@
 name: Daily Trade
 
 # ──────────────────────────────────────────────────────────────
-# Runs every trading day at 9:40 AM ET (13:40 UTC in summer).
-# Also triggerable manually from the GitHub Actions UI.
+# Runs every hour during US market hours (Mon–Fri).
+# The agent checks if the market is open; if not, it exits
+# cleanly without placing orders.
+#
+# Schedule: 9:40, 10:40, 11:40, 12:40, 13:40, 14:40, 15:40 ET
+# Summer UTC-4: 13:40–19:40 UTC
+# Winter UTC-5: 14:40–20:40 UTC  (both rows active — harmless overlap)
 # ──────────────────────────────────────────────────────────────
 on:
   schedule:
-    - cron: '40 13 * * 1-5'   # Summer (EDT, UTC-4): 9:40 AM ET
-    - cron: '40 14 * * 1-5'   # Winter (EST, UTC-5): 9:40 AM ET
-  workflow_dispatch:            # Manual trigger from GitHub UI
+    # Summer (EDT, UTC-4)
+    - cron: '40 13 * * 1-5'
+    - cron: '40 14 * * 1-5'
+    - cron: '40 15 * * 1-5'
+    - cron: '40 16 * * 1-5'
+    - cron: '40 17 * * 1-5'
+    - cron: '40 18 * * 1-5'
+    - cron: '40 19 * * 1-5'
+    # Winter (EST, UTC-5) — extra hour shift
+    - cron: '40 20 * * 1-5'
+  workflow_dispatch:   # Manual trigger from GitHub UI
 
 jobs:
   trade:
@@ -16,26 +29,24 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # ── 1. Checkout code + model files ───────────────────────
+      # ── 1. Checkout ───────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          lfs: false   # set true if you use Git LFS for model
 
-      # ── 2. Python setup with pip cache ───────────────────────
+      # ── 2. Python + pip cache ─────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      # ── 3. Install dependencies ───────────────────────────────
+      # ── 3. Dependencies ───────────────────────────────────────
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 4. Run ONE trading decision and exit ──────────────────
+      # ── 4. Trade decision ─────────────────────────────────────
       - name: Run trading decision
         env:
           ALPACA_API_KEY:      ${{ secrets.ALPACA_API_KEY }}
@@ -45,7 +56,7 @@ jobs:
           TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py --mode live_once --auto-approve
 
-      # ── 5. Upload logs as artifacts (keep 30 days) ────────────
+      # ── 5. Upload logs ────────────────────────────────────────
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4

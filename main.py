@@ -200,7 +200,7 @@ def step_live_stub(model, aligned_data: dict[str, pd.DataFrame]):
 # שלב 5: Live Paper – Alpaca Paper Account
 # ══════════════════════════════════════════════════════════════════════════════
 
-def step_live_paper(model, vec_norm, auto_approve: bool = False):
+def step_live_paper(model, vec_norm, auto_approve: bool = False, ensemble=False):
     """
     מריץ לולאת מסחר חיה מול חשבון Paper של Alpaca.
     כסף וירטואלי בלבד – אך API אמיתי.
@@ -451,8 +451,8 @@ def parse_args():
     parser.add_argument(
         "--mode",
         choices=[
-            "download", "train", "simulate", "full",
-            "live_stub", "live_paper", "live_once", "live", "dashboard",
+            "download", "train", "train_ensemble", "simulate", "full",
+            "live_stub", "live_paper", "live_once", "live_ensemble", "live", "dashboard",
         ],
         default="full",
         help=(
@@ -506,6 +506,14 @@ def main():
         model, pipeline = step_train(aligned_data, n_optuna_trials=args.optuna_trials)
         vec_norm = pipeline.vec_norm
 
+    # ── Train Ensemble ────────────────────────────────────────────────────────
+    if args.mode == "train_ensemble":
+        _, pipeline = step_train(aligned_data, n_optuna_trials=args.optuna_trials)
+        pipeline.train_ensemble()
+        print_banner("Ensemble training complete")
+        print("  Models saved: models/ensemble_0.zip, ensemble_1.zip, ensemble_2.zip")
+        return
+
     # ── Simulate (Backtest) ───────────────────────────────────────────────────
     if args.mode == "simulate":
         try:
@@ -526,6 +534,12 @@ def main():
             print("[WARN] No trained model found. Using random actions for demo.")
             model = None
         step_live_stub(model, aligned_data)
+
+    # ── Live Ensemble ─────────────────────────────────────────────────────────
+    if args.mode == "live_ensemble":
+        from ensemble_agent import load_ensemble
+        ensemble = load_ensemble()
+        step_live_paper(ensemble, vec_norm=None, auto_approve=args.auto_approve)
 
     # ── Live Once (GitHub Actions / cron) ────────────────────────────────────
     if args.mode == "live_once":

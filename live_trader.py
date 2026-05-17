@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from broker_api import AlpacaBrokerAPI
     from risk_manager import RiskManager
     from data_manager import DataManager
+    from ensemble_agent import EnsembleAgent
 
 log = logging.getLogger("LiveTrader")
 
@@ -54,11 +55,11 @@ class LiveTrader:
 
     def __init__(
         self,
-        model: "PPO",
+        model: "PPO | EnsembleAgent",
         broker: "AlpacaBrokerAPI",
         data_manager: "DataManager",
         risk_manager: "RiskManager",
-        vec_norm: "VecNormalize",
+        vec_norm: "VecNormalize | None",
         tickers: list[str],
         initial_capital: float = 100_000.0,
     ):
@@ -66,10 +67,13 @@ class LiveTrader:
         self.broker         = broker
         self.data_manager   = data_manager
         self.risk_manager   = risk_manager
-        self.vec_norm       = vec_norm
+        self.vec_norm       = vec_norm      # None when using EnsembleAgent
         self.tickers        = tickers
         self.initial_capital = initial_capital
         self.num_stocks     = len(tickers)
+
+        # Detect ensemble mode (EnsembleAgent has its own normalisation)
+        self._is_ensemble = hasattr(model, "members")
 
         # מעקב שווי תיק
         self._peak_net_worth = initial_capital
@@ -180,9 +184,14 @@ class LiveTrader:
             return
 
         # ── חיזוי פעולה ─────────────────────────────────────────────────────
-        obs_norm = self.vec_norm.normalize_obs(obs[np.newaxis])  # (1, W, F)
-        action, _ = self.model.predict(obs_norm, deterministic=True)
-        action = np.array(action).flatten()
+        if self._is_ensemble:
+            # EnsembleAgent handles normalisation internally per member
+            action = self.model.predict(obs[np.newaxis], deterministic=True)
+            log.info(f"Ensemble vote summary: {self.model.vote_summary(obs[np.newaxis])}")
+        else:
+            obs_norm = self.vec_norm.normalize_obs(obs[np.newaxis])  # (1, W, F)
+            action, _ = self.model.predict(obs_norm, deterministic=True)
+            action = np.array(action).flatten()
 
         # התאמת גודל פוזיציה לפי סיכון
         action = self.risk_manager.scale_action(action)

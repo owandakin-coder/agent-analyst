@@ -17,9 +17,14 @@ from stable_baselines3.common.callbacks import (
     StopTrainingOnRewardThreshold,
 )
 from trading_env import TradingEnvironment
+from transformer_policy import TransformerExtractor
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+# ─── Ensemble config ─────────────────────────────────────────────────────────
+ENSEMBLE_SEEDS  = [0, 42, 123]          # one model per seed
+ENSEMBLE_STEPS  = 500_000               # timesteps per ensemble member
 
 # ─── תקופות Walk-Forward ─────────────────────────────────────────────────────
 TRAIN_START = "2015-01-01"
@@ -180,8 +185,14 @@ class TrainingPipeline:
             clip_obs=10.0,
         )
 
-        # Deeper network architecture
-        policy_kwargs = dict(net_arch=[256, 256, 128])
+        # Transformer feature extractor + small MLP head
+        policy_kwargs = dict(
+            features_extractor_class=TransformerExtractor,
+            features_extractor_kwargs=dict(
+                d_model=128, nhead=4, num_layers=2, dropout=0.1
+            ),
+            net_arch=[64, 64],
+        )
 
         model = PPO(
             "MlpPolicy",
@@ -194,6 +205,48 @@ class TrainingPipeline:
         model.learn(total_timesteps=total_timesteps, progress_bar=False)
         model.save(os.path.join(MODEL_DIR, model_name))
         return model, vec_env, vec_norm
+
+    def train_ensemble(self, params: dict | None = None) -> None:
+        """
+        Trains ENSEMBLE_SEEDS independent PPO models on train+val combined.
+        Each is saved as models/ensemble_N.zip + models/ensemble_norm_N.pkl.
+
+        Using different random seeds ensures diversity — each model will
+        explore slightly different policies, reducing collective variance.
+        """
+        _params = params or self.best_params
+        if not _params:
+            raise RuntimeError(
+                "Call run() first to get best_params, or pass params explicitly."
+            )
+
+        # Build combined train+val data (same as _train_final)
+        combined_data = {}
+        for ticker in self.train_data:
+            combined_data[ticker] = pd.concat(
+                [self.train_data[ticker], self.val_data[ticker]]
+            ).sort_index()
+            combined_data[ticker] = combined_data[ticker][
+                ~combined_data[ticker].index.duplicated(keep="last")
+            ]
+
+        print(f"\n[Ensemble] Training {len(ENSEMBLE_SEEDS)} models "
+              f"(seeds={ENSEMBLE_SEEDS}, steps={ENSEMBLE_STEPS:,}) ...")
+
+        for i, seed in enumerate(ENSEMBLE_SEEDS):
+            print(f"\n  [Ensemble {i}] seed={seed} ...")
+            np.random.seed(seed)
+
+            model, _, vec_norm = self._train_model(
+                combined_data,
+                _params,
+                total_timesteps=ENSEMBLE_STEPS,
+                model_name=f"ensemble_{i}",
+            )
+            vec_norm.save(os.path.join(MODEL_DIR, f"ensemble_norm_{i}.pkl"))
+            print(f"  [Ensemble {i}] Saved ensemble_{i}.zip + ensemble_norm_{i}.pkl")
+
+        print("\n[Ensemble] All members trained and saved.")
 
     # ──────────────────────────────────────────────────────────────────────────
     # הערכה
