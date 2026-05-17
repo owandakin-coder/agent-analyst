@@ -12,6 +12,9 @@ nohup.out
 # Cache & data (too large for git)
 cache/
 
+# TensorBoard logs (large binary files, not needed in CI)
+logs/
+
 # Results (generated files)
 results/
 
