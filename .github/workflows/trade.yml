@@ -1,0 +1,58 @@
+name: Daily Trade
+
+# ──────────────────────────────────────────────────────────────
+# Runs every trading day at 9:40 AM ET (13:40 UTC in summer).
+# Also triggerable manually from the GitHub Actions UI.
+# ──────────────────────────────────────────────────────────────
+on:
+  schedule:
+    - cron: '40 13 * * 1-5'   # Summer (EDT, UTC-4): 9:40 AM ET
+    - cron: '40 14 * * 1-5'   # Winter (EST, UTC-5): 9:40 AM ET
+  workflow_dispatch:            # Manual trigger from GitHub UI
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── 1. Checkout code + model files ───────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: false   # set true if you use Git LFS for model
+
+      # ── 2. Python setup with pip cache ───────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ── 3. Install dependencies ───────────────────────────────
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. Run ONE trading decision and exit ──────────────────
+      - name: Run trading decision
+        env:
+          ALPACA_API_KEY:      ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY:   ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_BASE_URL:     https://paper-api.alpaca.markets
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py --mode live_once --auto-approve
+
+      # ── 5. Upload logs as artifacts (keep 30 days) ────────────
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-logs-${{ github.run_number }}
+          path: |
+            agent_analyst.log
+            paper_orders.log
+            trades_history.csv
+          retention-days: 30

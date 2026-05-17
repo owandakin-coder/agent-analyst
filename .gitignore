@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Logs
+*.log
+nohup.out
+
+# Cache & data (too large for git)
+cache/
+
+# Results (generated files)
+results/
+
+# Secrets
+.env
+
+# Keep model files (needed for GitHub Actions)
+!models/final_model.zip
+!models/vec_normalize.pkl
+!models/training_meta.pkl
+
+# Trades history (runtime file)
+trades_history.csv
+paper_orders.log
+agent_analyst.log
+watchdog.log
