@@ -1,0 +1,152 @@
+name: Monthly Retrain
+
+# ──────────────────────────────────────────────────────────────
+# Runs on the 1st of every month at 06:00 UTC (before market open).
+# Also available via manual trigger (workflow_dispatch).
+#
+# What it does:
+#   1. Downloads fresh historical data
+#   2. Runs Optuna hyperparameter search (10 trials)
+#   3. Trains the final base model (500k steps)
+#   4. Trains ensemble (3 seeds × 500k steps)
+#   5. Commits updated model files back to the repository
+#   6. Sends Telegram notification with training results
+#
+# Total estimated runtime: ~45 minutes (GitHub Actions free tier)
+# ──────────────────────────────────────────────────────────────
+on:
+  schedule:
+    - cron: '0 6 1 * *'   # 1st of every month, 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      optuna_trials:
+        description: 'Number of Optuna trials'
+        required: false
+        default: '10'
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120   # 2 hours max
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Python + pip cache ─────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ── 3. Dependencies ───────────────────────────────────────
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. Train base model ───────────────────────────────────
+      - name: Train base model (Optuna + 500k steps)
+        env:
+          ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_BASE_URL:    https://paper-api.alpaca.markets
+        run: |
+          TRIALS=${{ github.event.inputs.optuna_trials || '10' }}
+          echo "Running Optuna with $TRIALS trials..."
+          python -u main.py --mode train --optuna-trials $TRIALS 2>&1 | tee train_base.log
+          echo "Base model training complete."
+
+      # ── 5. Train ensemble ─────────────────────────────────────
+      - name: Train ensemble (3 seeds × 500k steps)
+        env:
+          ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_BASE_URL:    https://paper-api.alpaca.markets
+        run: |
+          python -u main.py --mode train_ensemble 2>&1 | tee train_ensemble.log
+          echo "Ensemble training complete."
+
+      # ── 6. Show model files ───────────────────────────────────
+      - name: List trained models
+        run: |
+          ls -lh models/ || echo "models/ directory not found"
+
+      # ── 7. Commit models back to repo ─────────────────────────
+      - name: Commit updated models
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add models/final_model.zip \
+                  models/vec_normalize.pkl \
+                  models/ensemble_0.zip \
+                  models/ensemble_1.zip \
+                  models/ensemble_2.zip \
+                  models/ensemble_norm_0.pkl \
+                  models/ensemble_norm_1.pkl \
+                  models/ensemble_norm_2.pkl \
+                  models/training_meta.pkl 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No model changes to commit."
+          else
+            MONTH=$(date '+%Y-%m')
+            git commit -m "chore: monthly retrain ${MONTH} [skip ci]"
+            git push
+            echo "Models committed and pushed."
+          fi
+
+      # ── 8. Upload training logs ───────────────────────────────
+      - name: Upload training logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrain-logs-${{ github.run_number }}
+          path: |
+            train_base.log
+            train_ensemble.log
+            agent_analyst.log
+          retention-days: 60
+
+      # ── 9. Telegram notification ──────────────────────────────
+      - name: Notify via Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          STATUS="${{ job.status }}"
+          MONTH=$(date '+%B %Y')
+          if [ "$STATUS" = "success" ]; then
+            EMOJI="✅"
+            MSG="Training complete — models updated."
+          else
+            EMOJI="❌"
+            MSG="Training FAILED — check logs in GitHub Actions."
+          fi
+
+          python - <<EOF
+          import os, urllib.request, urllib.parse
+          token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+          if token and chat_id:
+              msg = (
+                  f"${EMOJI} *Monthly Retrain — ${MONTH}*\n\n"
+                  f"${MSG}\n\n"
+                  f"Run: https://github.com/\${{ github.repository }}/actions/runs/\${{ github.run_id }}"
+              )
+              url  = f"https://api.telegram.org/bot{token}/sendMessage"
+              data = urllib.parse.urlencode({
+                  "chat_id": chat_id, "text": msg, "parse_mode": "Markdown"
+              }).encode()
+              try:
+                  urllib.request.urlopen(url, data, timeout=10)
+                  print("Telegram notification sent.")
+              except Exception as e:
+                  print(f"Telegram failed: {e}")
+          EOF

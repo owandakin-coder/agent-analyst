@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from regime_detector import RegimeDetector
+from alternative_data import AlternativeDataFetcher, enrich_observation
+
 if TYPE_CHECKING:
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import VecNormalize
@@ -74,6 +77,10 @@ class LiveTrader:
 
         # Detect ensemble mode (EnsembleAgent has its own normalisation)
         self._is_ensemble = hasattr(model, "members")
+
+        # Regime detection + alternative data
+        self._regime_detector = RegimeDetector()
+        self._alt_fetcher     = AlternativeDataFetcher()
 
         # מעקב שווי תיק
         self._peak_net_worth = initial_capital
@@ -177,11 +184,28 @@ class LiveTrader:
                 self._notify_halt(net_worth, drawdown)
             return
 
+        # ── Regime detection ─────────────────────────────────────────────────
+        regime_signal = self._detect_regime(fresh_data)
+        if regime_signal is not None:
+            multiplier = regime_signal.regime.position_multiplier()
+            self.risk_manager.set_regime_multiplier(multiplier)
+            log.info(
+                f"Regime: {regime_signal.regime.value} "
+                f"(conf={regime_signal.confidence:.0%}, multiplier={multiplier}) | "
+                f"{regime_signal.description}"
+            )
+
+        # ── Alternative data ─────────────────────────────────────────────────
+        alt_data = self._alt_fetcher.fetch_all()
+
         # ── תצפית למודל ─────────────────────────────────────────────────────
         obs = self._build_observation(fresh_data, cash, net_worth, drawdown)
         if obs is None:
             log.error("Could not build observation. Skipping cycle.")
             return
+
+        # Enrich observation with alternative data features
+        obs = enrich_observation(obs, alt_data)
 
         # ── חיזוי פעולה ─────────────────────────────────────────────────────
         if self._is_ensemble:
@@ -193,9 +217,14 @@ class LiveTrader:
             action, _ = self.model.predict(obs_norm, deterministic=True)
             action = np.array(action).flatten()
 
-        # התאמת גודל פוזיציה לפי סיכון
-        action = self.risk_manager.scale_action(action)
-        log.info(f"Raw action: {action.round(3)}")
+        # התאמת גודל פוזיציה לפי סיכון (with regime multiplier + kelly + correlation)
+        price_history = {t: fresh_data[t]["close"] for t in self.tickers if t in fresh_data}
+        action = self.risk_manager.scale_action(
+            action,
+            tickers=self.tickers,
+            price_history=price_history,
+        )
+        log.info(f"Scaled action: {action.round(3)}")
 
         # ── המרה לפקודות ────────────────────────────────────────────────────
         self._execute_actions(action, current_prices, cash, positions)
@@ -500,6 +529,30 @@ class LiveTrader:
         log.info("HALT alert sent to Telegram.")
 
     # ──────────────────────────────────────────────────────────────────────────
+    # Regime detection helper
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _detect_regime(self, fresh_data: dict[str, "pd.DataFrame"]):
+        """
+        Downloads SPY data and runs RegimeDetector.
+        Returns RegimeSignal or None on failure.
+        """
+        try:
+            import yfinance as yf
+            spy_raw = yf.download("SPY", period="300d", progress=False, auto_adjust=True)
+            if spy_raw.empty:
+                log.warning("SPY data empty — skipping regime detection.")
+                return None
+            # Normalise column names to lowercase
+            spy_df = spy_raw.rename(columns=str.lower).reset_index()
+            if "date" not in spy_df.columns and "index" in spy_df.columns:
+                spy_df = spy_df.rename(columns={"index": "date"})
+            return self._regime_detector.detect(spy_df)
+        except Exception as exc:
+            log.warning(f"Regime detection failed: {exc}")
+            return None
+
+    # ──────────────────────────────────────────────────────────────────────────
     # דוח יומי
     # ──────────────────────────────────────────────────────────────────────────
 
@@ -516,6 +569,7 @@ class LiveTrader:
         pnl_abs = net_worth - self.initial_capital
         sign    = "+" if pnl_abs >= 0 else ""
 
+        rs = self.risk_manager.get_status()
         lines = [
             f"📊 *Daily Trading Report* — {datetime.now().strftime('%Y-%m-%d')}",
             f"",
@@ -523,7 +577,8 @@ class LiveTrader:
             f"💵 Cash:       ${cash:,.0f}",
             f"📈 Total P&L:  {sign}{pnl_abs:,.0f} ({sign}{pnl_pct:.1f}%)",
             f"📉 Drawdown:   {drawdown:.1%}",
-            f"⚠️  Risk Level: {self.risk_manager.risk_level.value}",
+            f"⚠️  Risk Level: {rs['risk_level']}",
+            f"🌐 Regime mult: {rs['regime_multiplier']:.2f}",
             f"",
             f"🎯 *Actions taken:*",
         ]
