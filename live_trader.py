@@ -85,9 +85,10 @@ class LiveTrader:
         # מעקב שווי תיק
         self._peak_net_worth = initial_capital
 
-        # Per-stock stop-loss: מחיר כניסה ממוצע לכל מניה
-        self._entry_prices: dict[str, float] = {}
-        self.stop_loss_pct: float = 0.08   # מכור אם מניה ירדה 8% ממחיר הכניסה
+        # Per-stock trailing stop-loss tracking
+        self._entry_prices:   dict[str, float] = {}
+        self._trailing_highs: dict[str, float] = {}   # max price since entry
+        self.stop_loss_pct: float = 0.08   # sell if price drops 8% from trailing high
 
     # ──────────────────────────────────────────────────────────────────────────
     # לולאה ראשית
@@ -374,27 +375,38 @@ class LiveTrader:
         BUY_THRESHOLD  =  0.05
         SELL_THRESHOLD = -0.05
 
-        # ── Stop-loss: מכור אוטומטית אם מניה ירדה מעל stop_loss_pct ────────
+        # ── Trailing Stop-Loss ────────────────────────────────────────────────
+        # Updates the high-water mark per ticker and sells if price drops
+        # more than stop_loss_pct below that mark (protects accumulated gains).
         for ticker in list(positions.keys()):
             held  = positions.get(ticker, 0.0)
             price = prices.get(ticker, 0.0)
             entry = self._entry_prices.get(ticker, 0.0)
-            if held > 0 and entry > 0 and price > 0:
-                loss_pct = (entry - price) / entry
-                if loss_pct >= self.stop_loss_pct:
-                    log.warning(
-                        f"STOP-LOSS triggered: {ticker} dropped {loss_pct:.1%} "
-                        f"(entry=${entry:.2f} → now=${price:.2f}). Selling all."
+            if held <= 0 or entry <= 0 or price <= 0:
+                continue
+
+            # Update trailing high-water mark
+            prev_high = self._trailing_highs.get(ticker, entry)
+            trail_high = max(prev_high, price)
+            self._trailing_highs[ticker] = trail_high
+
+            # Check if price has fallen stop_loss_pct below the trailing high
+            drop_pct = (trail_high - price) / trail_high
+            if drop_pct >= self.stop_loss_pct:
+                log.warning(
+                    f"TRAILING STOP triggered: {ticker} dropped {drop_pct:.1%} "
+                    f"from high ${trail_high:.2f} → now ${price:.2f}. Selling all."
+                )
+                result = self.broker.sell(ticker, int(held), price)
+                if result.get("status") not in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
+                    self._entry_prices.pop(ticker, None)
+                    self._trailing_highs.pop(ticker, None)
+                    self._telegram(
+                        f"🛑 *Trailing Stop triggered*\n"
+                        f"{ticker}: -{drop_pct:.1%} from high\n"
+                        f"High: ${trail_high:.2f} → Now: ${price:.2f}\n"
+                        f"Sold {int(held)} shares."
                     )
-                    result = self.broker.sell(ticker, int(held), price)
-                    if result.get("status") not in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
-                        self._entry_prices.pop(ticker, None)
-                        self._telegram(
-                            f"🛑 *Stop-Loss triggered*\n"
-                            f"{ticker}: dropped {loss_pct:.1%} "
-                            f"(${entry:.2f} → ${price:.2f})\n"
-                            f"Sold {int(held)} shares."
-                        )
 
         # ── מכירות קודם (לשחרר מזומן) ──────────────────────────────────────
         sells_executed = 0
@@ -467,6 +479,10 @@ class LiveTrader:
                 if total_shares > 0:
                     self._entry_prices[ticker] = (
                         (prev_held * prev_entry + shares_to_buy * price) / total_shares
+                    )
+                    # Reset trailing high to current price on new buy
+                    self._trailing_highs[ticker] = max(
+                        self._trailing_highs.get(ticker, price), price
                     )
 
     # ──────────────────────────────────────────────────────────────────────────

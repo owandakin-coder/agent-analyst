@@ -91,6 +91,24 @@ class TradingEnvironment(gym.Env):
             dtype=np.float32,
         )
 
+        # ── Pre-compute numpy arrays for fast step() access ──────────────
+        # pandas .loc per-step is ~100x slower than direct numpy indexing.
+        # Pre-computing once here makes step() pure numpy → major speedup.
+        self._price_arr = np.array(
+            [data[t]["close"].reindex(self._aligned_index).values for t in self.tickers],
+            dtype=np.float64,
+        )  # shape: (num_stocks, n_timestamps)
+
+        self._feature_arr = np.array(
+            [data[t][self._feature_cols].reindex(self._aligned_index).values
+             for t in self.tickers],
+            dtype=np.float32,
+        )  # shape: (num_stocks, n_timestamps, num_features)
+
+        # Replace any NaN from reindex with 0
+        np.nan_to_num(self._price_arr,   nan=0.0, copy=False)
+        np.nan_to_num(self._feature_arr, nan=0.0, copy=False)
+
         # ── מצב פנימי (מאוחר יותר ב-reset) ─────────────────────────────
         self.current_step: int = 0
         self.cash: float = initial_cash
@@ -254,18 +272,20 @@ class TradingEnvironment(gym.Env):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _get_observation(self) -> np.ndarray:
-        """בונה מטריצת תצפית (window_size, features)."""
+        """בונה מטריצת תצפית (window_size, features) — pure numpy, no pandas."""
         start = self.current_step
         end   = self.current_step + self.window_size
-        idx   = self._aligned_index[start:end]
+
+        # _feature_arr: (num_stocks, n_timestamps, num_features)
+        # slice window: (num_stocks, window_size, num_features)
+        window = self._feature_arr[:, start:end, :]  # (S, W, F)
 
         frames = []
-        for ticker in self.tickers:
-            df    = self.data[ticker]
-            slice_df = df.loc[idx, self._feature_cols]
-            # נרמול z-score בתוך החלון (למניעת data leakage)
-            normed = (slice_df - slice_df.mean()) / (slice_df.std() + 1e-9)
-            frames.append(normed.values)
+        for i in range(self.num_stocks):
+            s = window[i]                             # (W, F)
+            mean = s.mean(axis=0)
+            std  = s.std(axis=0) + 1e-9
+            frames.append((s - mean) / std)           # z-score per feature
 
         # פיצ'רי תיק (3 ערכים, קבועים לאורך החלון)
         prices = self._get_current_prices()
@@ -274,21 +294,17 @@ class TradingEnvironment(gym.Env):
         unrealized_pnl   = (total - self.initial_cash) / self.initial_cash
         drawdown         = (self.peak_net_worth - total) / (self.peak_net_worth + 1e-9)
 
-        portfolio_row = np.array([cash_ratio, unrealized_pnl, drawdown])
+        portfolio_row   = np.array([cash_ratio, unrealized_pnl, drawdown], dtype=np.float32)
         portfolio_block = np.tile(portfolio_row, (self.window_size, 1))
 
-        # שרשור: [stock_features..., portfolio_features]
         obs = np.concatenate(frames + [portfolio_block], axis=1).astype(np.float32)
-        obs = np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
+        np.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0, copy=False)
         return obs
 
     def _get_current_prices(self) -> np.ndarray:
-        """מחיר סגירה נוכחי לכל מניה."""
-        idx = self._aligned_index[self.current_step + self.window_size]
-        return np.array(
-            [self.data[ticker].loc[idx, "close"] for ticker in self.tickers],
-            dtype=np.float64,
-        )
+        """מחיר סגירה נוכחי לכל מניה — direct numpy index, no pandas."""
+        step_idx = self.current_step + self.window_size
+        return self._price_arr[:, step_idx]   # (num_stocks,)
 
     def _get_info(self, drawdown: float = 0.0, daily_ret: float = 0.0) -> dict:
         return {

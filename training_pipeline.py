@@ -194,15 +194,23 @@ class TrainingPipeline:
             net_arch=[64, 64],
         )
 
+        # verbose=1 for final model, 0 for Optuna trials (keep output clean)
+        is_final = not model_name.startswith("trial_") and not model_name.startswith("ensemble_")
+        verbosity = 1 if is_final else 0
+
+        # Extract seed from params if present, else default 0
+        seed = params.pop("seed", 0)
+
         model = PPO(
             "MlpPolicy",
             vec_norm,
-            verbose=0,
+            verbose=verbosity,
+            seed=seed,
             tensorboard_log=LOG_DIR,
             policy_kwargs=policy_kwargs,
             **params,
         )
-        model.learn(total_timesteps=total_timesteps, progress_bar=False)
+        model.learn(total_timesteps=total_timesteps, progress_bar=is_final)
         model.save(os.path.join(MODEL_DIR, model_name))
         return model, vec_env, vec_norm
 
@@ -237,9 +245,12 @@ class TrainingPipeline:
             print(f"\n  [Ensemble {i}] seed={seed} ...")
             np.random.seed(seed)
 
+            # Pass seed into params so _train_model can set it on PPO
+            params_with_seed = {**_params, "seed": seed}
+
             model, _, vec_norm = self._train_model(
                 combined_data,
-                _params,
+                params_with_seed,
                 total_timesteps=ENSEMBLE_STEPS,
                 model_name=f"ensemble_{i}",
             )

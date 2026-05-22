@@ -498,7 +498,7 @@ def main():
     vec_norm     = None
 
     # ── Download ──────────────────────────────────────────────────────────────
-    if args.mode in ("download", "train", "simulate", "full", "live_stub"):
+    if args.mode in ("download", "train", "train_ensemble", "simulate", "full", "live_stub"):
         aligned_data = step_download(force=args.force_download)
 
     # ── Train ─────────────────────────────────────────────────────────────────
@@ -508,6 +508,23 @@ def main():
 
     # ── Train Ensemble ────────────────────────────────────────────────────────
     if args.mode == "train_ensemble":
+        meta_path = os.path.join(MODEL_DIR, "training_meta.pkl")
+        if os.path.exists(meta_path):
+            # Reuse best params from previous run — skip Optuna + base training
+            with open(meta_path, "rb") as f:
+                meta = pickle.load(f)
+            best_params = meta.get("best_params", {})
+            if best_params:
+                print_banner("Train Ensemble (reusing saved best params)")
+                print(f"  Loaded best_params: {best_params}")
+                pipeline = TrainingPipeline(aligned_data, n_optuna_trials=0)
+                pipeline.best_params = best_params
+                pipeline.train_ensemble()
+                print_banner("Ensemble training complete")
+                print("  Models saved: models/ensemble_0.zip, ensemble_1.zip, ensemble_2.zip")
+                return
+        # No saved params: run full Optuna + base first, then ensemble
+        print_banner("Train Ensemble (running Optuna first — no saved params found)")
         _, pipeline = step_train(aligned_data, n_optuna_trials=args.optuna_trials)
         pipeline.train_ensemble()
         print_banner("Ensemble training complete")

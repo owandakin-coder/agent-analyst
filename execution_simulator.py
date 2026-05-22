@@ -151,14 +151,21 @@ class ExecutionSimulator:
         # ── תשואה כוללת ───────────────────────────────────────────────────────
         total_return = (equity[-1] - equity[0]) / equity[0]
 
+        # ── Calmar Ratio (annualised return / max drawdown) ───────────────────
+        n_years = len(returns) / 252
+        annualised_return = (1 + total_return) ** (1 / max(n_years, 1e-9)) - 1
+        calmar = annualised_return / (max_dd + 1e-9)
+
         # ── Buy & Hold ─────────────────────────────────────────────────────────
         bh_return = self._buy_hold_return()
 
         spy_label = "SPY" if "SPY" in self.test_data else "avg_stocks"
         return {
             "total_return":    total_return,
+            "annualised_return": annualised_return,
             "sharpe":          sharpe,
             "sortino":         sortino,
+            "calmar":          calmar,
             "max_drawdown":    max_dd,
             "win_rate":        win_rate,
             "profit_factor":   profit_factor,
@@ -198,15 +205,17 @@ class ExecutionSimulator:
         print("\n" + "=" * 50)
         print("  Paper Trading Results")
         print("=" * 50)
-        print(f"  תשואה כוללת:       {m['total_return']:+.1%}")
+        print(f"  Total Return:      {m['total_return']:+.1%}")
+        print(f"  Annualised Return: {m['annualised_return']:+.1%}")
         print(f"  Buy & Hold ({m.get('buy_hold_label','SPY')}): {m['buy_hold_return']:+.1%}")
         print(f"  Sharpe Ratio:      {m['sharpe']:.2f}")
         print(f"  Sortino Ratio:     {m['sortino']:.2f}")
+        print(f"  Calmar Ratio:      {m['calmar']:.2f}")
         print(f"  Max Drawdown:      {m['max_drawdown']:.1%}")
         print(f"  Win Rate:          {m['win_rate']:.1%}")
         print(f"  Profit Factor:     {m['profit_factor']:.2f}")
-        print(f"  מספר פעולות:       {m['num_trades']}")
-        print(f"  שווי סופי:         ${m['final_equity']:,.0f}")
+        print(f"  Number of Trades:  {m['num_trades']}")
+        print(f"  Final Equity:      ${m['final_equity']:,.0f}")
         print("=" * 50)
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -225,12 +234,19 @@ class ExecutionSimulator:
         ax = axes[0]
         ax.plot(dates, equity / equity[0] * 100, label="Agent Portfolio", color="#2196F3", lw=2)
 
-        # Buy & Hold לכל מניה
-        colors_bh = ["#FF9800", "#4CAF50", "#9C27B0"]
-        for (ticker, df), col in zip(self.test_data.items(), colors_bh):
-            close = df["close"].values
+        # Buy & Hold — SPY benchmark + top-3 by volume (AAPL, MSFT, NVDA)
+        bh_show = []
+        if "SPY" in self.test_data:
+            bh_show.append(("SPY", "#FF9800"))
+        for t, col in [("AAPL", "#4CAF50"), ("MSFT", "#9C27B0"), ("NVDA", "#F44336")]:
+            if t in self.test_data and t != "SPY":
+                bh_show.append((t, col))
+        bh_show = bh_show[:4]   # max 4 B&H lines for readability
+
+        for ticker, col in bh_show:
+            close = self.test_data[ticker]["close"].values
             bh = close / close[0] * 100
-            bh_dates = df.index[: len(dates)]
+            bh_dates = self.test_data[ticker].index[: len(dates)]
             ax.plot(bh_dates, bh[: len(dates)], label=f"B&H {ticker}",
                     color=col, lw=1.2, alpha=0.7, linestyle="--")
 
