@@ -204,10 +204,13 @@ class LiveTrader:
             log.error("Could not build observation. Skipping cycle.")
             return
 
-        # Enrich observation with alternative data features
-        obs = enrich_observation(obs, alt_data)
-
         # ── חיזוי פעולה ─────────────────────────────────────────────────────
+        # NOTE: enrich_observation (alt data features) is only appended AFTER
+        # normalisation, and only when the model was trained with those extra
+        # features (i.e. after a retrain that includes alt-data in obs space).
+        # The current deployed model was trained on the original 183-feature obs,
+        # so we skip enrichment here to avoid shape mismatch with VecNormalize.
+        # Alt data still influences decisions via the regime multiplier above.
         if self._is_ensemble:
             # EnsembleAgent handles normalisation internally per member
             action = self.model.predict(obs[np.newaxis], deterministic=True)
@@ -536,6 +539,10 @@ class LiveTrader:
         """
         Downloads SPY data and runs RegimeDetector.
         Returns RegimeSignal or None on failure.
+
+        Handles both yfinance column formats:
+        - Simple:      Open, High, Low, Close, Volume
+        - Multi-level: (Open, SPY), (Close, SPY), ...  [newer yfinance]
         """
         try:
             import yfinance as yf
@@ -543,10 +550,19 @@ class LiveTrader:
             if spy_raw.empty:
                 log.warning("SPY data empty — skipping regime detection.")
                 return None
-            # Normalise column names to lowercase
-            spy_df = spy_raw.rename(columns=str.lower).reset_index()
-            if "date" not in spy_df.columns and "index" in spy_df.columns:
-                spy_df = spy_df.rename(columns={"index": "date"})
+
+            # Flatten multi-level columns: ('Close', 'SPY') → 'close'
+            if isinstance(spy_raw.columns, pd.MultiIndex):
+                spy_raw.columns = [col[0].lower() for col in spy_raw.columns]
+            else:
+                spy_raw.columns = [c.lower() for c in spy_raw.columns]
+
+            spy_df = spy_raw.reset_index()
+            # Ensure date column is named 'date'
+            date_col = [c for c in spy_df.columns if "date" in c.lower() or c.lower() == "index"]
+            if date_col and date_col[0] != "date":
+                spy_df = spy_df.rename(columns={date_col[0]: "date"})
+
             return self._regime_detector.detect(spy_df)
         except Exception as exc:
             log.warning(f"Regime detection failed: {exc}")
