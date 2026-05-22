@@ -160,7 +160,10 @@ class AlpacaBrokerAPI:
         בודק שיש אחזקה מספקת לפני הגשה.
         """
         shares = max(1, int(shares))
-        held   = self._get_held_shares(ticker)
+        # Fetch positions once and reuse — avoids duplicate API call
+        # (_get_held_shares also calls get_positions internally)
+        current_positions = self.get_positions()
+        held = current_positions.get(ticker, 0.0)
 
         if held <= 0:
             log.warning(f"SELL rejected: no position in {ticker}")

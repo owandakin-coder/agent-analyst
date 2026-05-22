@@ -399,6 +399,11 @@ class LiveTrader:
                 )
                 result = self.broker.sell(ticker, int(held), price)
                 if result.get("status") not in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
+                    # Record Kelly outcome
+                    entry = self._entry_prices.get(ticker, 0.0)
+                    if entry > 0:
+                        pnl_pct = (price - entry) / entry
+                        self.risk_manager.record_trade_outcome(ticker, pnl_pct)
                     self._entry_prices.pop(ticker, None)
                     self._trailing_highs.pop(ticker, None)
                     self._telegram(
@@ -423,6 +428,12 @@ class LiveTrader:
                     log.warning(f"SELL {ticker} failed: {result}")
                 else:
                     sells_executed += 1
+                    # Record outcome for Kelly Criterion — P&L from entry to exit
+                    entry = self._entry_prices.get(ticker, 0.0)
+                    if entry > 0:
+                        pnl_pct = (price - entry) / entry
+                        self.risk_manager.record_trade_outcome(ticker, pnl_pct)
+                        log.debug(f"Kelly record: {ticker} pnl={pnl_pct:+.2%}")
 
         # ── רענון מזומן אחרי מכירות ─────────────────────────────────────────
         if sells_executed > 0:

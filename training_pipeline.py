@@ -103,13 +103,17 @@ class TrainingPipeline:
         self._cleanup_trial_models(self.n_optuna_trials)
         return study.best_params
 
-    def _cleanup_trial_models(self, n_trials: int):
-        """Deletes temporary Optuna trial model files."""
-        for i in range(n_trials):
-            path = os.path.join(MODEL_DIR, f"trial_{i}.zip")
-            if os.path.exists(path):
+    def _cleanup_trial_models(self, n_trials: int = 0):
+        """Deletes ALL temporary Optuna trial model files (trial_*.zip)."""
+        import glob as _glob
+        removed = 0
+        for path in _glob.glob(os.path.join(MODEL_DIR, "trial_*.zip")):
+            try:
                 os.remove(path)
-        print("[Pipeline] Cleaned up trial model files.")
+                removed += 1
+            except OSError:
+                pass
+        print(f"[Pipeline] Cleaned up {removed} trial model file(s).")
 
     def _optuna_objective(self, trial: optuna.Trial) -> float:
         """Single Optuna trial: train briefly, evaluate on validation (avg of 3 seeds)."""

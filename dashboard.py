@@ -108,26 +108,31 @@ def render_sidebar():
 def render_metrics(metrics: dict):
     st.subheader("Performance Metrics")
 
+    # Row 1 — returns and risk-adjusted ratios
     cols = st.columns(5)
     kpis = [
-        ("Total Return",   f"{metrics.get('total_return', 0):.1%}"),
-        ("Sharpe Ratio",   f"{metrics.get('sharpe', 0):.2f}"),
-        ("Max Drawdown",   f"{metrics.get('max_drawdown', 0):.1%}"),
-        ("Win Rate",       f"{metrics.get('win_rate', 0):.1%}"),
-        ("Profit Factor",  f"{metrics.get('profit_factor', 0):.2f}"),
+        ("Total Return",      f"{metrics.get('total_return', 0):.1%}"),
+        ("Annualised Return",  f"{metrics.get('annualised_return', 0):.1%}"),
+        ("Sharpe Ratio",      f"{metrics.get('sharpe', 0):.2f}"),
+        ("Sortino Ratio",     f"{metrics.get('sortino', 0):.2f}"),
+        ("Calmar Ratio",      f"{metrics.get('calmar', 0):.2f}"),
     ]
     for col, (label, value) in zip(cols, kpis):
         col.metric(label, value)
 
-    cols2 = st.columns(4)
+    # Row 2 — risk and trade stats
+    cols2 = st.columns(5)
     kpis2 = [
-        ("Sortino Ratio",  f"{metrics.get('sortino', 0):.2f}"),
+        ("Max Drawdown",      f"{metrics.get('max_drawdown', 0):.1%}"),
+        ("Win Rate",          f"{metrics.get('win_rate', 0):.1%}"),
+        ("Profit Factor",     f"{metrics.get('profit_factor', 0):.2f}"),
         (f"B&H ({metrics.get('buy_hold_label','SPY')})", f"{metrics.get('buy_hold_return', 0):.1%}"),
-        ("Final Equity",   f"${metrics.get('final_equity', 0):,.0f}"),
-        ("Total Trades",   str(metrics.get('num_trades', 0))),
+        ("Final Equity",      f"${metrics.get('final_equity', 0):,.0f}"),
     ]
     for col, (label, value) in zip(cols2, kpis2):
         col.metric(label, value)
+
+    st.caption(f"Total Trades: {metrics.get('num_trades', 0)}")
 
 
 def render_equity_chart(equity: list, dates: list):
