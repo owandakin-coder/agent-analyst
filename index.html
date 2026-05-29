@@ -738,9 +738,16 @@ select.m-input { appearance:none; cursor:pointer; }
 <div class="sheet-overlay" id="profile-sheet" onclick="closeSheet('profile-sheet')">
   <div class="sheet-box" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">Account Profile</div>
-    <div id="profile-content">
-      <div class="profile-row"><span class="profile-key">Name</span><span class="profile-val" id="p-name">—</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+      <div class="sheet-title" style="margin-bottom:0">Account Profile</div>
+      <button id="profile-edit-btn" onclick="toggleProfileEdit()" style="background:var(--c3);border:none;color:var(--blue);font-size:13px;font-weight:700;padding:6px 14px;border-radius:10px;cursor:pointer;font-family:inherit;">Edit</button>
+    </div>
+
+    <!-- VIEW MODE -->
+    <div id="profile-view">
+      <div class="profile-row"><span class="profile-key">Display Name</span><span class="profile-val" id="p-name">—</span></div>
+      <div class="profile-row"><span class="profile-key">Email</span><span class="profile-val" id="p-email-view">—</span></div>
+      <div class="profile-row"><span class="profile-key">Phone</span><span class="profile-val" id="p-phone-view">—</span></div>
       <div class="profile-row"><span class="profile-key">Account Type</span><span class="profile-val" id="p-type">—</span></div>
       <div class="profile-row"><span class="profile-key">Account #</span><span class="profile-val" id="p-acct">—</span></div>
       <div class="profile-row"><span class="profile-key">Portfolio Value</span><span class="profile-val" id="p-equity">—</span></div>
@@ -748,6 +755,28 @@ select.m-input { appearance:none; cursor:pointer; }
       <div class="profile-row"><span class="profile-key">Cash</span><span class="profile-val" id="p-cash">—</span></div>
       <div class="profile-row"><span class="profile-key">Open Positions</span><span class="profile-val" id="p-pos">—</span></div>
       <div class="profile-row"><span class="profile-key">Status</span><span class="profile-val" style="color:var(--green)" id="p-status">—</span></div>
+    </div>
+
+    <!-- EDIT MODE (hidden by default) -->
+    <div id="profile-edit" style="display:none;">
+      <p style="font-size:11.5px;color:var(--g3);margin-bottom:14px;">Edit your personal details. Account data is read-only from Alpaca.</p>
+      <label style="font-size:11px;color:var(--g3);margin-bottom:4px;display:block;">Display Name</label>
+      <input class="m-input" type="text" id="edit-name" placeholder="Your name">
+      <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Email</label>
+      <input class="m-input" type="email" id="edit-email" placeholder="your@email.com">
+      <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Phone (optional)</label>
+      <input class="m-input" type="tel" id="edit-phone" placeholder="+972-50-000-0000">
+      <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Timezone</label>
+      <select class="m-input" id="edit-tz">
+        <option value="Asia/Jerusalem">Israel (UTC+3)</option>
+        <option value="America/New_York">New York (UTC-5)</option>
+        <option value="Europe/London">London (UTC+0)</option>
+        <option value="America/Los_Angeles">Los Angeles (UTC-8)</option>
+      </select>
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button onclick="cancelProfileEdit()" style="flex:1;padding:13px;background:var(--c3);border:none;border-radius:12px;color:var(--g2);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
+        <button onclick="saveProfile()" style="flex:2;padding:13px;background:var(--green);border:none;border-radius:12px;color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;">Save Changes</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1559,26 +1588,71 @@ function closeSheet(id) { document.getElementById(id).classList.remove('open'); 
 // ── Profile ──
 function openProfile() {
   openSheet('profile-sheet');
+  cancelProfileEdit(); // always open in view mode
   const acc = alpacaAccount;
+  const name = S.profile_name || 'EA Arage';
+  const email = S.profile_email || S.daily_email || '—';
+  const phone = S.profile_phone || '—';
+  document.getElementById('p-name').textContent       = name;
+  document.getElementById('p-email-view').textContent = email;
+  document.getElementById('p-phone-view').textContent = phone;
+  document.getElementById('profile-sub').textContent  = name + ' · Paper Account';
   if (acc) {
-    document.getElementById('p-name').textContent    = 'EA Arage';
-    document.getElementById('p-type').textContent    = (acc.account_type || 'paper').toUpperCase() + ' Account';
-    document.getElementById('p-acct').textContent    = acc.id ? acc.id.slice(0,8).toUpperCase() + '…' : '—';
+    document.getElementById('p-type').textContent    = (acc.account_type || 'Paper').charAt(0).toUpperCase() + (acc.account_type||'paper').slice(1) + ' Account';
+    document.getElementById('p-acct').textContent    = acc.id ? '****' + acc.id.slice(-4).toUpperCase() : '—';
     document.getElementById('p-equity').textContent  = '$' + parseFloat(acc.equity || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('p-bp').textContent      = '$' + parseFloat(acc.buying_power || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('p-cash').textContent    = '$' + parseFloat(acc.cash || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('p-pos').textContent     = STOCKS.length + ' positions';
     document.getElementById('p-status').textContent  = (acc.status || 'ACTIVE').toUpperCase() + ' ✓';
-    document.getElementById('profile-sub').textContent = 'EA Arage · ' + (acc.account_type || 'Paper').toUpperCase();
   } else {
-    ['p-name','p-type','p-acct','p-equity','p-bp','p-cash','p-pos','p-status'].forEach(id => {
+    ['p-type','p-acct','p-equity','p-bp','p-cash','p-pos','p-status'].forEach(id => {
       document.getElementById(id).textContent = 'Loading…';
     });
-    fetch(API_BASE + '/account', {cache:'no-store'}).then(r=>r.json()).then(acc => {
-      alpacaAccount = acc;
+    fetch(API_BASE + '/account', {cache:'no-store'}).then(r=>r.json()).then(a => {
+      alpacaAccount = a;
       openProfile();
     }).catch(() => toast('Could not load account data'));
   }
+}
+
+function toggleProfileEdit() {
+  const isEditing = document.getElementById('profile-edit').style.display !== 'none';
+  if (isEditing) { cancelProfileEdit(); return; }
+  // populate inputs with saved values
+  document.getElementById('edit-name').value  = S.profile_name  || 'EA Arage';
+  document.getElementById('edit-email').value = S.profile_email || S.daily_email || '';
+  document.getElementById('edit-phone').value = S.profile_phone || '';
+  const tzSel = document.getElementById('edit-tz');
+  if (S.profile_tz) { for (let o of tzSel.options) if (o.value === S.profile_tz) o.selected = true; }
+  document.getElementById('profile-view').style.display = 'none';
+  document.getElementById('profile-edit').style.display = 'block';
+  document.getElementById('profile-edit-btn').textContent = 'Cancel';
+  document.getElementById('profile-edit-btn').style.color = 'var(--red)';
+}
+
+function cancelProfileEdit() {
+  document.getElementById('profile-view').style.display = 'block';
+  document.getElementById('profile-edit').style.display = 'none';
+  document.getElementById('profile-edit-btn').textContent = 'Edit';
+  document.getElementById('profile-edit-btn').style.color = 'var(--blue)';
+}
+
+function saveProfile() {
+  const name  = document.getElementById('edit-name').value.trim();
+  const email = document.getElementById('edit-email').value.trim();
+  const phone = document.getElementById('edit-phone').value.trim();
+  const tz    = document.getElementById('edit-tz').value;
+  if (!name) { toast('Name cannot be empty'); return; }
+  saveS('profile_name',  name);
+  saveS('profile_email', email || null);
+  saveS('profile_phone', phone || null);
+  saveS('profile_tz',    tz);
+  if (email) saveS('daily_email', email);
+  // Refresh view
+  cancelProfileEdit();
+  openProfile();
+  toast('Profile saved ✓');
 }
 
 // ── Alpaca info ──
