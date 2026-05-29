@@ -1,105 +1,84 @@
 """
-broker_api.py
-=============
-ממשק ברוקר Alpaca – תומך במצב Paper ו-Live.
-
-⚠️  DISCLAIMER
-    מצב Live מחובר לכסף אמיתי. כל פקודה שתבוצע היא באחריות
-    בלעדית של המשתמש. היוצרים אינם אחראים להפסדים כלשהם.
-    לעולם אל תגדיר auto_approve=True אלא אם הבנת לחלוטין את הסיכון.
+Broker integrations for Alpaca paper/live trading and a local stub.
 """
 
 from __future__ import annotations
 
 import csv
-import os
+import json
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 try:
     from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
-    from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
+    from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
+    from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestQuoteRequest
     _ALPACA_AVAILABLE = True
 except ImportError:
     TradingClient = None
     StockHistoricalDataClient = None
+    GetOrdersRequest = None
+    MarketOrderRequest = None
+    OrderSide = None
+    QueryOrderStatus = None
+    TimeInForce = None
     _ALPACA_AVAILABLE = False
 
-# ─── טעינת משתני סביבה מקובץ .env ─────────────────────────────────────────
+try:
+    from config_loader import CFG
+    LOG_FILE = str(Path(CFG.logs_dir) / "paper_orders.log")
+    TRADES_CSV = "trades_history.csv"
+    SUBMITTED_ORDERS_FILE = CFG.broker_submitted_orders_file
+    DUPLICATE_WINDOW_DAYS = CFG.broker_duplicate_window_days
+    RECENT_ORDERS_LIMIT = CFG.broker_recent_orders_limit
+except Exception:
+    LOG_FILE = "paper_orders.log"
+    TRADES_CSV = "trades_history.csv"
+    SUBMITTED_ORDERS_FILE = "logs/submitted_orders.json"
+    DUPLICATE_WINDOW_DAYS = 1
+    RECENT_ORDERS_LIMIT = 100
+
 load_dotenv()
 
-# ─── לוגר ──────────────────────────────────────────────────────────────────
-LOG_FILE   = "paper_orders.log"
-TRADES_CSV = "trades_history.csv"
 log = logging.getLogger("BrokerAPI")
 
-# ─── קבועים ────────────────────────────────────────────────────────────────
 PAPER_BASE_URL = "https://paper-api.alpaca.markets"
-LIVE_BASE_URL  = "https://api.alpaca.markets"
+LIVE_BASE_URL = "https://api.alpaca.markets"
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# מחלקת Alpaca Broker
-# ══════════════════════════════════════════════════════════════════════════════
 
 class AlpacaBrokerAPI:
-    """
-    ממשק מסחר מחובר ל-Alpaca.
-
-    Parameters
-    ----------
-    paper : bool
-        True  = חשבון Paper (כסף וירטואלי, בטוח לבדיקות).
-        False = חשבון Live  (כסף אמיתי – מסוכן!).
-    auto_approve : bool
-        False (ברירת מחדל) = כל פקודה תחכה לאישור ידני.
-        True               = פקודות מבוצעות אוטומטית.
-        ⚠️ לא לשנות ל-True אלא בהחלטה מודעת!
-    """
-
-    def __init__(
-        self,
-        paper: bool = True,
-        auto_approve: bool = False,
-    ):
-        # ── טעינת קרדנציאלים ─────────────────────────────────────────────
-        self.api_key    = os.getenv("ALPACA_API_KEY", "")
+    def __init__(self, paper: bool = True, auto_approve: bool = False):
+        self.api_key = os.getenv("ALPACA_API_KEY", "")
         self.secret_key = os.getenv("ALPACA_SECRET_KEY", "")
-        base_url_env    = os.getenv("ALPACA_BASE_URL", "")
+        self.base_url = os.getenv("ALPACA_BASE_URL", "") or (PAPER_BASE_URL if paper else LIVE_BASE_URL)
+        self.paper = paper
+        self.auto_approve = auto_approve
 
-        # base_url: env גובר על ה-flag paper
-        if base_url_env:
-            self.base_url = base_url_env
-        else:
-            self.base_url = PAPER_BASE_URL if paper else LIVE_BASE_URL
-
-        self.paper        = paper
-        self.auto_approve = auto_approve  # ⚠️ לא לשנות ל-True בלי הבנה מלאה
-
-        # Idempotency: מניעת פקודות כפולות באותו יום
-        self._submitted_keys: set[str] = set()
+        self._idempotency_path = Path(SUBMITTED_ORDERS_FILE)
+        self._submitted_orders = self._load_submitted_orders()
+        self._submitted_keys = set(self._submitted_orders.keys())
 
         self._validate_credentials()
         self._init_client()
 
         mode_label = "PAPER (virtual money)" if paper else "LIVE (REAL MONEY!)"
-        log.info(f"AlpacaBrokerAPI initialized | Mode: {mode_label} | "
-                 f"auto_approve={auto_approve} | base_url={self.base_url}")
+        log.info(
+            "AlpacaBrokerAPI initialized | Mode: %s | auto_approve=%s | base_url=%s",
+            mode_label,
+            auto_approve,
+            self.base_url,
+        )
 
         if not paper:
             self._live_warning()
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # אתחול
-    # ──────────────────────────────────────────────────────────────────────────
-
     def _validate_credentials(self):
-        """מוודא שהמפתחות קיימים."""
         missing = []
         if not self.api_key:
             missing.append("ALPACA_API_KEY")
@@ -112,93 +91,55 @@ class AlpacaBrokerAPI:
             )
 
     def _init_client(self):
-        """יוצר את לקוחות Alpaca."""
         if not _ALPACA_AVAILABLE:
-            raise ImportError(
-                "alpaca-py is not installed. Run: pip install alpaca-py"
-            )
-        self._trading = TradingClient(
-            api_key=self.api_key,
-            secret_key=self.secret_key,
-            paper=self.paper,
-        )
-        self._data = StockHistoricalDataClient(
-            api_key=self.api_key,
-            secret_key=self.secret_key,
-        )
+            raise ImportError("alpaca-py is not installed. Run: pip install alpaca-py")
+        self._trading = TradingClient(api_key=self.api_key, secret_key=self.secret_key, paper=self.paper)
+        self._data = StockHistoricalDataClient(api_key=self.api_key, secret_key=self.secret_key)
 
     @staticmethod
     def _live_warning():
         print("\n" + "!" * 60)
-        print("  WARNING: LIVE MODE – REAL MONEY AT RISK")
+        print("  WARNING: LIVE MODE - REAL MONEY AT RISK")
         print("  All orders will affect your real brokerage account.")
         print("!" * 60 + "\n")
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # פקודות מסחר
-    # ──────────────────────────────────────────────────────────────────────────
-
     def buy(self, ticker: str, shares: float, price: float | None = None) -> dict:
-        """
-        פקודת קנייה.
-        אם auto_approve=False, מחכה לאישור המשתמש לפני ביצוע.
-        """
-        shares = max(1, int(shares))  # Alpaca דורש מניות שלמות
+        shares = max(1, int(shares))
         order_info = {
-            "side":    "BUY",
-            "ticker":  ticker,
-            "shares":  shares,
-            "price":   price,
-            "time":    datetime.now(timezone.utc).isoformat(),
+            "side": "BUY",
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+            "time": datetime.now(timezone.utc).isoformat(),
         }
-
         if not self._request_approval(order_info):
             return self._log_rejected(order_info)
-
         return self._submit_order(ticker, shares, "buy")
 
     def sell(self, ticker: str, shares: float, price: float | None = None) -> dict:
-        """
-        פקודת מכירה.
-        בודק שיש אחזקה מספקת לפני הגשה.
-        """
         shares = max(1, int(shares))
-        # Fetch positions once and reuse — avoids duplicate API call
-        # (_get_held_shares also calls get_positions internally)
-        current_positions = self.get_positions()
-        held = current_positions.get(ticker, 0.0)
-
+        snapshot = self.reconcile_account_state()
+        held = snapshot["positions"].get(ticker, 0.0)
         if held <= 0:
-            log.warning(f"SELL rejected: no position in {ticker}")
+            log.warning("SELL rejected: no position in %s", ticker)
             return {"status": "REJECTED", "reason": "no_position"}
 
-        shares = min(shares, held)  # לא למכור יותר ממה שיש
+        shares = min(shares, int(held))
         order_info = {
-            "side":    "SELL",
-            "ticker":  ticker,
-            "shares":  shares,
-            "price":   price,
-            "time":    datetime.now(timezone.utc).isoformat(),
+            "side": "SELL",
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+            "time": datetime.now(timezone.utc).isoformat(),
         }
-
         if not self._request_approval(order_info):
             return self._log_rejected(order_info)
-
-        return self._submit_order(ticker, shares, "sell")
+        return self._submit_order(ticker, shares, "sell", account_snapshot=snapshot)
 
     def hold(self, ticker: str):
-        """החזק – אין פעולה."""
-        log.info(f"HOLD {ticker} (no order submitted)")
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # אישור פקודה
-    # ──────────────────────────────────────────────────────────────────────────
+        log.info("HOLD %s (no order submitted)", ticker)
 
     def _request_approval(self, order_info: dict) -> bool:
-        """
-        מחכה לאישור המשתמש (או מאשר אוטומטית אם auto_approve=True).
-        החזרת True = מאושר, False = נדחה.
-        """
         msg = (
             f"\n>>> Order pending approval:\n"
             f"    {order_info['side']} {order_info['shares']} {order_info['ticker']}"
@@ -207,195 +148,298 @@ class AlpacaBrokerAPI:
             msg += f" @ ${order_info['price']:.2f}"
         msg += f"\n    Time: {order_info['time']}"
 
-        # שליחה לטלגרם (אם מוגדר)
         self._notify_telegram(msg)
 
         if self.auto_approve:
-            log.info(f"AUTO-APPROVED: {order_info['side']} {order_info['shares']} {order_info['ticker']}")
+            log.info(
+                "AUTO-APPROVED: %s %s %s",
+                order_info["side"],
+                order_info["shares"],
+                order_info["ticker"],
+            )
             return True
 
-        # המתנה לאישור ידני דרך הקונסול
         print(msg)
         try:
             response = input("    Approve? [y/N]: ").strip().lower()
         except EOFError:
-            # אין טרמינל אינטראקטיבי (למשל CI) – דחה
             response = "n"
 
         approved = response in ("y", "yes")
-        status   = "APPROVED" if approved else "REJECTED"
-        log.info(f"{status}: {order_info['side']} {order_info['shares']} {order_info['ticker']}")
+        status = "APPROVED" if approved else "REJECTED"
+        log.info("%s: %s %s %s", status, order_info["side"], order_info["shares"], order_info["ticker"])
         return approved
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # גשת פקודה ל-Alpaca
-    # ──────────────────────────────────────────────────────────────────────────
+    def _submit_order(
+        self,
+        ticker: str,
+        shares: int,
+        side: str,
+        account_snapshot: dict | None = None,
+    ) -> dict:
+        if shares <= 0:
+            return {"status": "REJECTED", "reason": "invalid_shares"}
 
-    def _submit_order(self, ticker: str, shares: int, side: str) -> dict:
-        """
-        מגיש פקודת Market Order ל-Alpaca.
-        כולל בדיקת idempotency — מונע פקודות כפולות באותו יום מסחר.
-        """
-        # ── Idempotency check ──────────────────────────────────────────────────
-        if self._is_duplicate_order(ticker, side, shares):
+        key = self._order_key(ticker, side, shares)
+        client_order_id = self._client_order_id_from_key(key)
+
+        duplicate = self._check_duplicate_order(ticker, side, shares, client_order_id)
+        if duplicate:
             log.warning(
-                f"DUPLICATE ORDER BLOCKED | {side.upper()} {shares} {ticker} | "
-                f"Same order already submitted today."
+                "DUPLICATE ORDER BLOCKED | %s %s %s | source=%s",
+                side.upper(),
+                shares,
+                ticker,
+                duplicate["source"],
             )
-            return {"status": "DUPLICATE_BLOCKED", "ticker": ticker,
-                    "side": side.upper(), "shares": shares}
+            return {
+                "status": "DUPLICATE_BLOCKED",
+                "ticker": ticker,
+                "side": side.upper(),
+                "shares": shares,
+                "source": duplicate["source"],
+                "client_order_id": client_order_id,
+            }
+
+        snapshot = account_snapshot or self.reconcile_account_state()
+        if side == "sell" and snapshot["positions"].get(ticker, 0.0) < shares:
+            log.warning("SELL rejected after reconciliation: insufficient shares in %s", ticker)
+            return {"status": "REJECTED", "reason": "insufficient_position"}
 
         alpaca_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
-
-        req = MarketOrderRequest(
+        request = MarketOrderRequest(
             symbol=ticker,
             qty=int(shares),
             side=alpaca_side,
             time_in_force=TimeInForce.DAY,
+            client_order_id=client_order_id,
         )
 
         try:
-            order = self._trading.submit_order(req)
+            order = self._trading.submit_order(request)
+            now_iso = datetime.now(timezone.utc).isoformat()
             result = {
                 "order_id": str(order.id),
-                "status":   str(order.status),
-                "side":     side.upper(),
-                "ticker":   ticker,
-                "shares":   shares,
-                "time":     datetime.now(timezone.utc).isoformat(),
+                "client_order_id": str(getattr(order, "client_order_id", client_order_id) or client_order_id),
+                "status": str(order.status),
+                "side": side.upper(),
+                "ticker": ticker,
+                "shares": shares,
+                "time": now_iso,
             }
             log.info(
-                f"ORDER SUBMITTED | {side.upper()} {shares} {ticker} | "
-                f"id={order.id} status={order.status}"
+                "ORDER SUBMITTED | %s %s %s | id=%s status=%s client_order_id=%s",
+                side.upper(),
+                shares,
+                ticker,
+                order.id,
+                order.status,
+                result["client_order_id"],
             )
+            self._record_order_key(key, result)
             self._write_log(result)
-            self._record_order_key(ticker, side, shares)   # idempotency record
             return result
-
         except Exception as exc:
-            log.error(f"ORDER FAILED | {side.upper()} {shares} {ticker} | {exc}")
+            log.error("ORDER FAILED | %s %s %s | %s", side.upper(), shares, ticker, exc)
             return {"status": "ERROR", "error": str(exc)}
 
     def _order_key(self, ticker: str, side: str, shares: int) -> str:
-        """מפתח ייחודי לפקודה: תאריך + מניה + כיוון + כמות."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return f"{today}:{ticker}:{side.upper()}:{shares}"
 
-    def _is_duplicate_order(self, ticker: str, side: str, shares: int) -> bool:
-        """בודק האם כבר שלחנו פקודה זהה היום."""
+    def _client_order_id_from_key(self, key: str) -> str:
+        return f"ATZMA-{key.replace(':', '-')}"
+
+    def _check_duplicate_order(self, ticker: str, side: str, shares: int, client_order_id: str) -> dict | None:
         key = self._order_key(ticker, side, shares)
-        return key in self._submitted_keys
+        if key in self._submitted_keys:
+            return {"source": "local_state"}
 
-    def _record_order_key(self, ticker: str, side: str, shares: int):
-        """מתעד פקודה שנשלחה (זיכרון תוך-session בלבד)."""
-        self._submitted_keys.add(self._order_key(ticker, side, shares))
+        try:
+            order = self._find_matching_broker_order(ticker, side, shares, client_order_id)
+        except Exception as exc:
+            log.warning("Duplicate check against broker failed: %s", exc)
+            return None
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # מידע על חשבון ופוזיציות
-    # ──────────────────────────────────────────────────────────────────────────
+        if order is not None:
+            return {"source": "broker_history", "order_id": getattr(order, "id", None)}
+        return None
+
+    def _find_matching_broker_order(self, ticker: str, side: str, shares: int, client_order_id: str):
+        if GetOrdersRequest is None or QueryOrderStatus is None:
+            return None
+
+        after = datetime.now(timezone.utc) - timedelta(days=max(DUPLICATE_WINDOW_DAYS, 1))
+        request = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=RECENT_ORDERS_LIMIT, after=after)
+        orders = self._trading.get_orders(filter=request)
+
+        for order in orders or []:
+            order_side = str(getattr(order, "side", "")).split(".")[-1].upper()
+            order_symbol = getattr(order, "symbol", "")
+            order_qty = int(float(getattr(order, "qty", 0) or 0))
+            order_client_id = getattr(order, "client_order_id", "")
+            if order_client_id == client_order_id:
+                return order
+            if order_symbol == ticker and order_side == side.upper() and order_qty == shares:
+                submitted_at = getattr(order, "submitted_at", None)
+                if submitted_at is None or self._same_utc_day(submitted_at, datetime.now(timezone.utc)):
+                    return order
+        return None
+
+    def _same_utc_day(self, dt1, dt2: datetime) -> bool:
+        if dt1 is None:
+            return False
+        if getattr(dt1, "tzinfo", None) is None:
+            dt1 = dt1.replace(tzinfo=timezone.utc)
+        return dt1.astimezone(timezone.utc).date() == dt2.astimezone(timezone.utc).date()
+
+    def _load_submitted_orders(self) -> dict[str, dict]:
+        try:
+            if self._idempotency_path.exists():
+                with open(self._idempotency_path, encoding="utf-8") as handle:
+                    data = json.load(handle) or {}
+                    if isinstance(data, dict):
+                        return data
+        except Exception as exc:
+            log.warning("Could not load submitted order state: %s", exc)
+        return {}
+
+    def _save_submitted_orders(self):
+        try:
+            self._idempotency_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._idempotency_path, "w", encoding="utf-8") as handle:
+                json.dump(self._submitted_orders, handle, ensure_ascii=True, indent=2, sort_keys=True)
+        except Exception as exc:
+            log.warning("Could not save submitted order state: %s", exc)
+
+    def _record_order_key(self, key: str, result: dict):
+        self._submitted_keys.add(key)
+        self._submitted_orders[key] = {
+            "time": result.get("time"),
+            "ticker": result.get("ticker"),
+            "side": result.get("side"),
+            "shares": result.get("shares"),
+            "client_order_id": result.get("client_order_id"),
+            "order_id": result.get("order_id"),
+            "status": result.get("status"),
+        }
+        self._submitted_orders = self._prune_submitted_orders(self._submitted_orders)
+        self._submitted_keys = set(self._submitted_orders.keys())
+        self._save_submitted_orders()
+
+    def _prune_submitted_orders(self, submitted: dict[str, dict]) -> dict[str, dict]:
+        cutoff = datetime.now(timezone.utc).date() - timedelta(days=max(DUPLICATE_WINDOW_DAYS, 1))
+        kept: dict[str, dict] = {}
+        for key, payload in submitted.items():
+            key_date = key.split(":", 1)[0]
+            try:
+                day = datetime.strptime(key_date, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if day >= cutoff:
+                kept[key] = payload
+        return kept
 
     def get_account(self) -> dict:
-        """מחזיר פרטי חשבון (מזומן, equity וכו')."""
         acc = self._trading.get_account()
         return {
-            "cash":            float(acc.cash),
-            "equity":          float(acc.equity),
-            "buying_power":    float(acc.buying_power),
+            "cash": float(acc.cash),
+            "equity": float(acc.equity),
+            "buying_power": float(acc.buying_power),
             "portfolio_value": float(acc.portfolio_value),
-            "status":          str(acc.status),
+            "status": str(acc.status),
         }
 
     def get_cash(self) -> float:
         return self.get_account()["cash"]
 
     def get_positions(self) -> dict[str, float]:
-        """מחזיר {ticker: shares} לכל הפוזיציות הפתוחות."""
-        positions = {}
+        positions: dict[str, float] = {}
         try:
             for pos in self._trading.get_all_positions():
-                positions[pos.symbol] = float(pos.qty)
+                symbol = getattr(pos, "symbol", None)
+                qty = getattr(pos, "qty", None)
+                if not symbol or qty in (None, ""):
+                    continue
+                positions[symbol] = float(qty)
         except Exception as exc:
-            log.warning(f"Could not fetch positions: {exc}")
+            log.warning("Could not fetch positions: %s", exc)
         return positions
 
+    def reconcile_account_state(self) -> dict:
+        account = self.get_account()
+        positions = self.get_positions()
+        return {
+            "cash": account["cash"],
+            "equity": account["equity"],
+            "buying_power": account["buying_power"],
+            "portfolio_value": account["portfolio_value"],
+            "status": account["status"],
+            "positions": positions,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:
-        """מחזיר מחיר אחרון עבור רשימת מניות."""
-        prices = {}
+        prices: dict[str, float] = {}
         try:
-            req    = StockLatestQuoteRequest(symbol_or_symbols=tickers)
-            quotes = self._data.get_stock_latest_quote(req)
+            request = StockLatestQuoteRequest(symbol_or_symbols=tickers)
+            quotes = self._data.get_stock_latest_quote(request)
             for ticker in tickers:
-                if ticker in quotes:
-                    q = quotes[ticker]
-                    bid = float(q.bid_price)
-                    ask = float(q.ask_price)
-                    # Use mid-price only when both sides are valid (market hours).
-                    # Pre/post-market one side may be 0 — fall back gracefully.
-                    if bid > 0 and ask > 0:
-                        prices[ticker] = (bid + ask) / 2
-                    elif ask > 0:
-                        prices[ticker] = ask
-                    elif bid > 0:
-                        prices[ticker] = bid
-                    # else: omit ticker; validate_prices() will use last-close fallback
+                if ticker not in quotes:
+                    continue
+                quote = quotes[ticker]
+                bid = float(getattr(quote, "bid_price", 0.0) or 0.0)
+                ask = float(getattr(quote, "ask_price", 0.0) or 0.0)
+                if bid > 0 and ask > 0:
+                    prices[ticker] = (bid + ask) / 2
+                elif ask > 0:
+                    prices[ticker] = ask
+                elif bid > 0:
+                    prices[ticker] = bid
         except Exception as exc:
-            log.warning(f"Could not fetch prices: {exc}")
+            log.warning("Could not fetch prices: %s", exc)
         return prices
 
     def is_market_open(self) -> bool:
-        """בודק אם השוק פתוח כעת."""
         try:
-            clock = self._trading.get_clock()
-            return bool(clock.is_open)
+            return bool(self._trading.get_clock().is_open)
         except Exception:
             return False
 
     def next_market_open(self) -> datetime | None:
-        """מחזיר מתי יפתח השוק הבא."""
         try:
-            clock = self._trading.get_clock()
-            return clock.next_open
+            return self._trading.get_clock().next_open
         except Exception:
             return None
 
     def cancel_all_orders(self):
-        """מבטל את כל הפקודות הפתוחות."""
         try:
             self._trading.cancel_orders()
             log.info("All open orders cancelled.")
         except Exception as exc:
-            log.warning(f"Could not cancel orders: {exc}")
+            log.warning("Could not cancel orders: %s", exc)
 
     def get_account_summary(self) -> dict:
-        acc = self.get_account()
-        return {
-            "mode":       "PAPER" if self.paper else "LIVE",
-            "auto_approve": self.auto_approve,
-            **acc,
-            "positions":  self.get_positions(),
-        }
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # עזר פנימי
-    # ──────────────────────────────────────────────────────────────────────────
+        snapshot = self.reconcile_account_state()
+        return {"mode": "PAPER" if self.paper else "LIVE", "auto_approve": self.auto_approve, **snapshot}
 
     def _get_held_shares(self, ticker: str) -> float:
-        """כמה מניות של ticker מוחזקות כרגע."""
         return self.get_positions().get(ticker, 0.0)
 
     def _notify_telegram(self, message: str):
-        """שולח הודעה לטלגרם אם הוגדרו פרטים (אופציונלי)."""
-        token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         if not token or not chat_id:
             return
         try:
-            import urllib.request, urllib.parse, json
-            url  = f"https://api.telegram.org/bot{token}/sendMessage"
+            import urllib.parse
+            import urllib.request
+
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
             data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
             urllib.request.urlopen(url, data, timeout=5)
         except Exception as exc:
-            log.debug(f"Telegram notification failed: {exc}")
+            log.debug("Telegram notification failed: %s", exc)
 
     def _log_rejected(self, order_info: dict) -> dict:
         result = {**order_info, "status": "REJECTED_BY_USER"}
@@ -403,61 +447,49 @@ class AlpacaBrokerAPI:
         return result
 
     def _write_log(self, entry: dict):
-        """Appends a structured trade record to the audit log and CSV.
-
-        paper_orders.log is the explicit trade audit trail (written here).
-        agent_analyst.log (configured in main.py) is the general process log.
-        These are intentionally separate files.
-        """
-        log.info(f"TRADE RECORD | {entry}")
+        log.info("TRADE RECORD | %s", entry)
         try:
-            with open(LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(str(entry) + "\n")
+            Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+            with open(LOG_FILE, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
         except Exception as exc:
-            log.warning(f"Failed to write to trade audit log ({LOG_FILE}): {exc}")
+            log.warning("Failed to write to trade audit log (%s): %s", LOG_FILE, exc)
         self._write_csv(entry)
 
     def _write_csv(self, entry: dict):
-        """Appends a trade record to trades_history.csv for later analysis."""
-        fieldnames = ["time", "side", "ticker", "shares", "price",
-                      "order_id", "status"]
+        fieldnames = ["time", "side", "ticker", "shares", "price", "order_id", "client_order_id", "status"]
         write_header = not os.path.exists(TRADES_CSV)
         try:
-            with open(TRADES_CSV, "a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            with open(TRADES_CSV, "a", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
                 if write_header:
                     writer.writeheader()
-                writer.writerow({k: entry.get(k, "") for k in fieldnames})
+                writer.writerow({key: entry.get(key, "") for key in fieldnames})
         except Exception as exc:
-            log.warning(f"Failed to write trade to CSV ({TRADES_CSV}): {exc}")
+            log.warning("Failed to write trade to CSV (%s): %s", TRADES_CSV, exc)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Stub ישן – נשמר לתאימות אחורה ולמצב --mode live_stub
-# ══════════════════════════════════════════════════════════════════════════════
 
 class BrokerAPIStub:
-    """
-    ממשק מדומה (ללא חיבור לברוקר).
-    משמש ב---mode live_stub לבדיקות ללא API.
-    """
-
     def __init__(self, account_id: str = "PAPER_ACCOUNT_001"):
-        self.account_id    = account_id
+        self.account_id = account_id
         self.positions: dict[str, float] = {}
-        self.cash: float   = 0.0
+        self.cash = 0.0
         self.order_counter = 0
-        log.info(f"[STUB] BrokerAPIStub initialized. Account: {account_id}")
+        log.info("[STUB] BrokerAPIStub initialized. Account: %s", account_id)
 
     def buy(self, ticker: str, shares: float, price: float) -> dict:
         self.order_counter += 1
-        oid = f"STUB-{self.order_counter:06d}"
-        msg = f"[STUB] BUY {shares:.0f} {ticker} @ ${price:.2f}"
-        log.info(msg)
+        order_id = f"STUB-{self.order_counter:06d}"
         self.positions[ticker] = self.positions.get(ticker, 0.0) + shares
         self.cash -= shares * price
-        return {"order_id": oid, "status": "FILLED_STUB", "side": "BUY",
-                "ticker": ticker, "shares": shares, "price": price}
+        return {
+            "order_id": order_id,
+            "status": "FILLED_STUB",
+            "side": "BUY",
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+        }
 
     def sell(self, ticker: str, shares: float, price: float) -> dict:
         held = self.positions.get(ticker, 0.0)
@@ -465,16 +497,20 @@ class BrokerAPIStub:
         if shares <= 0:
             return {"status": "REJECTED", "reason": "no_position"}
         self.order_counter += 1
-        oid = f"STUB-{self.order_counter:06d}"
-        msg = f"[STUB] SELL {shares:.0f} {ticker} @ ${price:.2f}"
-        log.info(msg)
+        order_id = f"STUB-{self.order_counter:06d}"
         self.positions[ticker] = max(0.0, held - shares)
         self.cash += shares * price
-        return {"order_id": oid, "status": "FILLED_STUB", "side": "SELL",
-                "ticker": ticker, "shares": shares, "price": price}
+        return {
+            "order_id": order_id,
+            "status": "FILLED_STUB",
+            "side": "SELL",
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+        }
 
     def hold(self, ticker: str):
-        log.info(f"[STUB] HOLD {ticker}")
+        log.info("[STUB] HOLD %s", ticker)
 
     def get_cash(self) -> float:
         return self.cash
@@ -485,16 +521,38 @@ class BrokerAPIStub:
     def get_positions(self) -> dict:
         return dict(self.positions)
 
+    def reconcile_account_state(self) -> dict:
+        cash = self.get_cash()
+        positions = self.get_positions()
+        equity = cash
+        return {
+            "cash": cash,
+            "equity": equity,
+            "buying_power": cash,
+            "portfolio_value": equity,
+            "status": "ACTIVE",
+            "positions": dict(positions),
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+
     def is_market_open(self) -> bool:
         return True
 
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:
         return {}
 
+    def get_account(self) -> dict:
+        snapshot = self.reconcile_account_state()
+        return {
+            "cash": snapshot["cash"],
+            "equity": snapshot["equity"],
+            "buying_power": snapshot["buying_power"],
+            "portfolio_value": snapshot["portfolio_value"],
+            "status": snapshot["status"],
+        }
+
     def get_account_summary(self) -> dict:
         return {"mode": "STUB", "cash": self.cash, "positions": self.positions}
 
 
-# ── ייצוא ידידותי ──────────────────────────────────────────────────────────
-# BrokerAPI = BrokerAPIStub  (ברירת מחדל ישנה)
 BrokerAPI = BrokerAPIStub
