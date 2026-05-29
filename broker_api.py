@@ -81,6 +81,9 @@ class AlpacaBrokerAPI:
         self.paper        = paper
         self.auto_approve = auto_approve  # ⚠️ לא לשנות ל-True בלי הבנה מלאה
 
+        # Idempotency: מניעת פקודות כפולות באותו יום
+        self._submitted_keys: set[str] = set()
+
         self._validate_credentials()
         self._init_client()
 
@@ -229,7 +232,19 @@ class AlpacaBrokerAPI:
     # ──────────────────────────────────────────────────────────────────────────
 
     def _submit_order(self, ticker: str, shares: int, side: str) -> dict:
-        """מגיש פקודת Market Order ל-Alpaca."""
+        """
+        מגיש פקודת Market Order ל-Alpaca.
+        כולל בדיקת idempotency — מונע פקודות כפולות באותו יום מסחר.
+        """
+        # ── Idempotency check ──────────────────────────────────────────────────
+        if self._is_duplicate_order(ticker, side, shares):
+            log.warning(
+                f"DUPLICATE ORDER BLOCKED | {side.upper()} {shares} {ticker} | "
+                f"Same order already submitted today."
+            )
+            return {"status": "DUPLICATE_BLOCKED", "ticker": ticker,
+                    "side": side.upper(), "shares": shares}
+
         alpaca_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
 
         req = MarketOrderRequest(
@@ -254,11 +269,26 @@ class AlpacaBrokerAPI:
                 f"id={order.id} status={order.status}"
             )
             self._write_log(result)
+            self._record_order_key(ticker, side, shares)   # idempotency record
             return result
 
         except Exception as exc:
             log.error(f"ORDER FAILED | {side.upper()} {shares} {ticker} | {exc}")
             return {"status": "ERROR", "error": str(exc)}
+
+    def _order_key(self, ticker: str, side: str, shares: int) -> str:
+        """מפתח ייחודי לפקודה: תאריך + מניה + כיוון + כמות."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return f"{today}:{ticker}:{side.upper()}:{shares}"
+
+    def _is_duplicate_order(self, ticker: str, side: str, shares: int) -> bool:
+        """בודק האם כבר שלחנו פקודה זהה היום."""
+        key = self._order_key(ticker, side, shares)
+        return key in self._submitted_keys
+
+    def _record_order_key(self, ticker: str, side: str, shares: int):
+        """מתעד פקודה שנשלחה (זיכרון תוך-session בלבד)."""
+        self._submitted_keys.add(self._order_key(ticker, side, shares))
 
     # ──────────────────────────────────────────────────────────────────────────
     # מידע על חשבון ופוזיציות
