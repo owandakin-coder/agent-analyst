@@ -157,6 +157,8 @@ def evaluate_window(
     peak         = np.maximum.accumulate(equity)
     max_dd       = ((peak - equity) / (peak + 1e-9)).max()
     win_rate     = float(np.mean(returns > 0))
+    annualized_return = _annualized_return(total_return, len(returns))
+    calmar = annualized_return / (max_dd + 1e-9)
 
     # ── SPY benchmark ─────────────────────────────────────────────
     spy_return = 0.0
@@ -171,7 +173,9 @@ def evaluate_window(
         "test_start":   window["test_start"],
         "test_end":     window["test_end"],
         "total_return": total_return,
+        "annualized_return": annualized_return,
         "sharpe":       sharpe,
+        "calmar":       calmar,
         "max_drawdown": max_dd,
         "win_rate":     win_rate,
         "spy_return":   spy_return,
@@ -182,7 +186,7 @@ def evaluate_window(
 
     print(f"  Return: {total_return:+.1%} | SPY: {spy_return:+.1%} | "
           f"Alpha: {result['alpha']:+.1%} | Sharpe: {sharpe:.2f} | "
-          f"MaxDD: {max_dd:.1%}")
+          f"Calmar: {calmar:.2f} | MaxDD: {max_dd:.1%}")
     return result
 
 
@@ -225,49 +229,82 @@ def run_walk_forward(timesteps: int = 100_000) -> list[dict]:
 
     # ── סיכום ─────────────────────────────────────────────────────
     valid = [r for r in results if not r.get("skipped")]
-    _print_summary(valid)
-    _save_results(valid)
+    summary = _build_summary(valid)
+    _print_summary(summary)
+    _save_results(valid, summary)
     if HAS_PLOT:
         _plot_results(valid)
 
     return results
 
 
-def _print_summary(results: list[dict]):
+def _annualized_return(total_return: float, n_periods: int, periods_per_year: int = 252) -> float:
+    years = max(n_periods / periods_per_year, 1e-9)
+    return (1 + total_return) ** (1 / years) - 1
+
+
+def _build_summary(results: list[dict]) -> dict:
     if not results:
+        return {}
+
+    returns = np.array([r["total_return"] for r in results], dtype=float)
+    alphas = np.array([r["alpha"] for r in results], dtype=float)
+    sharpes = np.array([r["sharpe"] for r in results], dtype=float)
+    calmars = np.array([r.get("calmar", 0.0) for r in results], dtype=float)
+    max_dds = np.array([r["max_drawdown"] for r in results], dtype=float)
+    annualized = np.array([r.get("annualized_return", 0.0) for r in results], dtype=float)
+    return {
+        "windows_evaluated": len(results),
+        "avg_return": float(np.mean(returns)),
+        "median_return": float(np.median(returns)),
+        "avg_alpha": float(np.mean(alphas)),
+        "positive_alpha_windows": int(np.sum(alphas > 0)),
+        "avg_sharpe": float(np.mean(sharpes)),
+        "avg_calmar": float(np.mean(calmars)),
+        "avg_max_drawdown": float(np.mean(max_dds)),
+        "avg_annualized_return": float(np.mean(annualized)),
+        "positive_return_windows": int(np.sum(returns > 0)),
+        "consistency_ratio": float(np.mean(returns > 0)),
+    }
+
+
+def _print_summary(summary: dict):
+    if not summary:
         print("[WalkForward] No valid windows to summarize.")
         return
-
-    returns  = [r["total_return"] for r in results]
-    alphas   = [r["alpha"]        for r in results]
-    sharpes  = [r["sharpe"]       for r in results]
-    max_dds  = [r["max_drawdown"] for r in results]
 
     print("\n" + "═" * 55)
     print("  WALK-FORWARD SUMMARY")
     print("═" * 55)
-    print(f"  Windows evaluated    : {len(results)}")
-    print(f"  Avg Return / window  : {np.mean(returns):>+8.1%}")
-    print(f"  Avg Alpha vs SPY     : {np.mean(alphas):>+8.1%}")
-    print(f"  Positive Alpha       : {sum(a > 0 for a in alphas)}/{len(alphas)}")
-    print(f"  Avg Sharpe           : {np.mean(sharpes):>8.2f}")
-    print(f"  Avg Max Drawdown     : {np.mean(max_dds):>8.1%}")
-    print(f"  Consistency (>0 ret) : {sum(r > 0 for r in returns)}/{len(returns)}")
+    print(f"  Windows evaluated    : {summary['windows_evaluated']}")
+    print(f"  Avg Return / window  : {summary['avg_return']:>+8.1%}")
+    print(f"  Median Return        : {summary['median_return']:>+8.1%}")
+    print(f"  Avg Annualized Ret   : {summary['avg_annualized_return']:>+8.1%}")
+    print(f"  Avg Alpha vs SPY     : {summary['avg_alpha']:>+8.1%}")
+    print(f"  Positive Alpha       : {summary['positive_alpha_windows']}/{summary['windows_evaluated']}")
+    print(f"  Avg Sharpe           : {summary['avg_sharpe']:>8.2f}")
+    print(f"  Avg Calmar           : {summary['avg_calmar']:>8.2f}")
+    print(f"  Avg Max Drawdown     : {summary['avg_max_drawdown']:>8.1%}")
+    print(f"  Consistency (>0 ret) : {summary['positive_return_windows']}/{summary['windows_evaluated']}")
     print("═" * 55)
 
-    if np.mean(alphas) > 0 and sum(a > 0 for a in alphas) > len(alphas) / 2:
+    if summary["avg_alpha"] > 0 and summary["positive_alpha_windows"] > summary["windows_evaluated"] / 2:
         print("  ✅ Model generates positive alpha consistently")
     else:
         print("  ⚠️  Inconsistent alpha — review features and data leakage")
 
 
-def _save_results(results: list[dict]):
+def _save_results(results: list[dict], summary: dict):
     RESULTS_DIR.mkdir(exist_ok=True)
     save = [{k: v for k, v in r.items() if k != "equity"} for r in results]
     import json
     with open(RESULTS_DIR / "walk_forward_results.json", "w") as f:
         json.dump(save, f, indent=2, default=float)
+    with open(RESULTS_DIR / "walk_forward_summary.json", "w") as f:
+        json.dump(summary, f, indent=2, default=float)
+    pd.DataFrame(save).to_csv(RESULTS_DIR / "walk_forward_results.csv", index=False)
     print(f"\n[WalkForward] Results → {RESULTS_DIR}/walk_forward_results.json")
+    print(f"[WalkForward] Summary → {RESULTS_DIR}/walk_forward_summary.json")
 
 
 def _plot_results(results: list[dict]):
@@ -341,5 +378,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args    = parse_args()
-    steps   = args.steps or (50_000 if args.fast else CFG.timesteps // 4)
+    steps   = args.steps or (CFG.trial_timesteps if args.fast else CFG.timesteps // 4)
     run_walk_forward(timesteps=steps)
