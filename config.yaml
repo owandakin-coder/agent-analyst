@@ -1,0 +1,93 @@
+# ================================================================
+# config.yaml - ATZMA Agent Analyst · Central Configuration
+# ================================================================
+
+universe:
+  tickers:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - NVDA
+    - AMZN
+    - META
+    - TSLA
+    - JPM
+    - V
+    - BAC
+    - JNJ
+    - UNH
+    - XOM
+    - WMT
+    - SPY
+  benchmark: SPY
+
+periods:
+  data_start: "2015-01-01"
+  data_end: "2024-12-31"
+  train_start: "2015-01-01"
+  train_end: "2019-12-31"
+  val_start: "2020-01-01"
+  val_end: "2021-12-31"
+  test_start: "2022-01-01"
+  test_end: "2024-12-31"
+
+capital:
+  initial: 100000.0
+  min_trade_value: 500.0
+
+training:
+  timesteps: 500000
+  trial_timesteps: 50000
+  optuna_trials: 10
+  ensemble_seeds: [0, 42, 123]
+  ensemble_timesteps: 500000
+  window_size: 30
+
+risk:
+  drawdown_reduce: 0.10
+  drawdown_halt: 0.15
+  position_normal: 1.0
+  position_reduced: 0.5
+  kelly_fraction: 0.25
+  kelly_min: 0.10
+  kelly_max: 1.00
+  corr_threshold: 0.80
+  corr_window: 60
+
+costs:
+  commission_pct: 0.001
+  slippage_pct: 0.0005
+
+live:
+  min_data_days: 200
+  buy_threshold: 0.05
+  sell_threshold: -0.05
+  max_concentration: 0.30
+  cash_buffer_pct: 0.05
+  stop_loss_pct: 0.08
+  price_min: 1.0
+  price_max: 10000.0
+  poll_seconds: 60
+  market_open_buffer_minutes: 5
+
+broker:
+  duplicate_window_days: 1
+  recent_orders_limit: 100
+  submitted_orders_file: "logs/submitted_orders.json"
+
+walk_forward:
+  n_windows: 4
+  train_months: 36
+  test_months: 6
+
+paths:
+  models: "models"
+  results: "results"
+  logs: "logs"
+  plots: "results/plots"
+
+github:
+  repo: ""
+  branch: "main"
+  control_state_path: "runtime/control_state.json"
+  trade_workflow: "trade.yml"

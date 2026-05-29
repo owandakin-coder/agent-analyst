@@ -54,26 +54,25 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)   # suppress noisy libs
 logging.getLogger("alpaca").setLevel(logging.WARNING)
 
 # ─── ייבוא מודולים מקומיים ────────────────────────────────────────────────
+from config_loader       import CFG                          # ← config.yaml
 from data_manager        import DataManager
 from trading_env         import TradingEnvironment
 from training_pipeline   import TrainingPipeline
 from execution_simulator import ExecutionSimulator
 from broker_api          import BrokerAPIStub, AlpacaBrokerAPI
+from control_plane       import can_trade, load_control_state
 from risk_manager        import RiskManager
 from live_trader         import LiveTrader
 
-# ─── קבועים גלובליים ──────────────────────────────────────────────────────
-TICKERS         = [
-    "AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "META",
-    "TSLA", "JPM", "V", "BAC", "JNJ", "UNH", "XOM", "WMT", "SPY",
-]
-START_DATE      = "2015-01-01"
-END_DATE        = "2024-12-31"
-INITIAL_CAPITAL = 100_000.0
-RESULTS_DIR     = "results"
-MODEL_DIR       = "models"
-TEST_START      = "2022-01-01"
-TEST_END        = "2024-12-31"
+# ─── קבועים גלובליים (מ-config.yaml) ─────────────────────────────────────
+TICKERS         = CFG.tickers
+START_DATE      = CFG.data_start
+END_DATE        = CFG.data_end
+INITIAL_CAPITAL = CFG.initial_capital
+RESULTS_DIR     = CFG.results_dir
+MODEL_DIR       = CFG.model_dir
+TEST_START      = CFG.test_start
+TEST_END        = CFG.test_end
 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR,   exist_ok=True)
@@ -111,9 +110,9 @@ def step_train(aligned_data: dict[str, pd.DataFrame], n_optuna_trials: int = 15)
     meta = {
         "best_params":  pipeline.best_params,
         "tickers":      TICKERS,
-        "train_period": ("2015-01-01", "2019-12-31"),
-        "val_period":   ("2020-01-01", "2021-12-31"),
-        "test_period":  ("2022-01-01", "2024-12-31"),
+        "train_period": (CFG.train_start, CFG.train_end),
+        "val_period":   (CFG.val_start, CFG.val_end),
+        "test_period":  (CFG.test_start, CFG.test_end),
     }
     with open(os.path.join(MODEL_DIR, "training_meta.pkl"), "wb") as f:
         pickle.dump(meta, f)
@@ -215,6 +214,18 @@ def step_live_paper(model, vec_norm, auto_approve: bool = False, ensemble=False)
     print("  Mode: PAPER (virtual money, real API)\n")
 
     # ── בניית ברוקר ────────────────────────────────────────────────────────
+    try:
+        control_state = load_control_state()
+        trade_allowed, block_reason = can_trade(control_state)
+    except Exception as exc:
+        print(f"  [WARN] Control state unavailable: {exc}")
+        trade_allowed, block_reason = True, None
+
+    if not trade_allowed:
+        status = "EMERGENCY STOP" if block_reason == "emergency_stop" else "PAUSED"
+        print(f"  Trading skipped by control plane: {status}.")
+        return
+
     try:
         broker = AlpacaBrokerAPI(paper=True, auto_approve=auto_approve)
     except EnvironmentError as exc:
@@ -453,18 +464,22 @@ def parse_args():
         choices=[
             "download", "train", "train_ensemble", "simulate", "full",
             "live_stub", "live_paper", "live_once", "live_ensemble", "live", "dashboard",
+            "benchmark", "walk_forward", "leakage_check",
         ],
         default="full",
         help=(
-            "download     - Download market data\n"
-            "train        - Train PPO model\n"
-            "simulate     - Backtest on test data (no API)\n"
-            "full         - download + train + simulate\n"
-            "live_stub    - Demo with stub broker (no API)\n"
-            "live_paper   - Live loop on Alpaca Paper account\n"
-            "live_once    - ONE decision then exit (for GitHub Actions / cron)\n"
-            "live         - Live loop on Alpaca REAL account (DANGER)\n"
-            "dashboard    - Launch Streamlit dashboard"
+            "download       - Download market data\n"
+            "train          - Train PPO model\n"
+            "simulate       - Backtest on test data (no API)\n"
+            "full           - download + train + simulate\n"
+            "benchmark      - Compare vs SPY, Equal-Weight, Momentum\n"
+            "walk_forward   - Multi-window Walk-Forward evaluation\n"
+            "leakage_check  - Check for data leakage issues\n"
+            "live_stub      - Demo with stub broker (no API)\n"
+            "live_paper     - Live loop on Alpaca Paper account\n"
+            "live_once      - ONE decision then exit (for GitHub Actions / cron)\n"
+            "live           - Live loop on Alpaca REAL account (DANGER)\n"
+            "dashboard      - Launch Streamlit dashboard"
         ),
     )
     parser.add_argument(
@@ -584,6 +599,25 @@ def main():
             print(f"[ERROR] {exc}")
             sys.exit(1)
         step_live_real(model, vec_norm, auto_approve=args.auto_approve)
+
+    # ── Benchmark ─────────────────────────────────────────────────────────────
+    if args.mode == "benchmark":
+        from benchmark import run_benchmark
+        run_benchmark()
+        return
+
+    # ── Walk-Forward Evaluation ───────────────────────────────────────────────
+    if args.mode == "walk_forward":
+        from walk_forward_eval import run_walk_forward
+        steps = args.optuna_trials * 10_000   # reuse --optuna-trials as step multiplier
+        run_walk_forward(timesteps=max(steps, 50_000))
+        return
+
+    # ── Leakage Check ─────────────────────────────────────────────────────────
+    if args.mode == "leakage_check":
+        from leakage_check import run_all_checks
+        run_all_checks(verbose=True)
+        return
 
     # ── Dashboard ─────────────────────────────────────────────────────────────
     if args.mode == "dashboard":

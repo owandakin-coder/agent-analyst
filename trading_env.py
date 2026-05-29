@@ -14,13 +14,22 @@ from typing import Optional
 
 log = logging.getLogger("TradingEnv")
 
-# ─── קבועים ───────────────────────────────────────────────────────────────────
-COMMISSION_RATE   = 0.001   # 0.1% עמלת עסקה
-SLIPPAGE_RATE     = 0.0005  # 0.05% החלקת מחיר
-INITIAL_CASH      = 100_000.0  # הון התחלתי בדולרים
-WINDOW_SIZE       = 30      # חלון תצפית (ימים)
-SHARPE_WINDOW     = 21      # חלון לחישוב Sharpe בתגמול
-MAX_DRAWDOWN_STOP = 0.15    # עצירה ב-15% drawdown
+# ─── קבועים (נטענים מ-config.yaml, fallback לברירת מחדל) ────────────────────
+try:
+    from config_loader import CFG
+    COMMISSION_RATE   = CFG.commission_pct
+    SLIPPAGE_RATE     = CFG.slippage_pct
+    INITIAL_CASH      = CFG.initial_capital
+    WINDOW_SIZE       = CFG.window_size
+    MAX_DRAWDOWN_STOP = CFG.drawdown_halt
+except Exception:
+    COMMISSION_RATE   = 0.001
+    SLIPPAGE_RATE     = 0.0005
+    INITIAL_CASH      = 100_000.0
+    WINDOW_SIZE       = 30
+    MAX_DRAWDOWN_STOP = 0.15
+
+SHARPE_WINDOW     = 21      # חלון לחישוב Sharpe בתגמול (פנימי)
 
 
 class TradingEnvironment(gym.Env):

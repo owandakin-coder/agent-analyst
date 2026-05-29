@@ -129,6 +129,7 @@ def broker(mock_alpaca_account, mock_alpaca_order, tmp_path, monkeypatch):
     trading_mock.get_account.return_value  = mock_alpaca_account
     trading_mock.submit_order.return_value = mock_alpaca_order
     trading_mock.get_all_positions.return_value = []
+    trading_mock.get_orders.return_value   = []
     trading_mock.get_clock.return_value    = MagicMock(is_open=True)
 
     data_mock = MagicMock()
@@ -136,6 +137,8 @@ def broker(mock_alpaca_account, mock_alpaca_order, tmp_path, monkeypatch):
     # הפנה את לוג הפקודות לתיקייה זמנית
     import broker_api as ba
     monkeypatch.setattr(ba, "LOG_FILE", str(tmp_path / "paper_orders.log"))
+    monkeypatch.setattr(ba, "TRADES_CSV", str(tmp_path / "trades_history.csv"))
+    monkeypatch.setattr(ba, "SUBMITTED_ORDERS_FILE", str(tmp_path / "submitted_orders.json"))
 
     with patch("broker_api.TradingClient", return_value=trading_mock), \
          patch("broker_api.StockHistoricalDataClient", return_value=data_mock):

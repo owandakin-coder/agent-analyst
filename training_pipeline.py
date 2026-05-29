@@ -22,20 +22,32 @@ from transformer_policy import TransformerExtractor
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-# ─── Ensemble config ─────────────────────────────────────────────────────────
-ENSEMBLE_SEEDS  = [0, 42, 123]          # one model per seed
-ENSEMBLE_STEPS  = 500_000               # timesteps per ensemble member
-
-# ─── תקופות Walk-Forward ─────────────────────────────────────────────────────
-TRAIN_START = "2015-01-01"
-TRAIN_END   = "2019-12-31"
-VAL_START   = "2020-01-01"
-VAL_END     = "2021-12-31"
-TEST_START  = "2022-01-01"
-TEST_END    = "2024-12-31"
-
-MODEL_DIR   = "models"
-LOG_DIR     = "logs"
+# ─── קבועים מ-config.yaml ────────────────────────────────────────────────────
+try:
+    from config_loader import CFG as _CFG
+    ENSEMBLE_SEEDS  = _CFG.ensemble_seeds
+    ENSEMBLE_STEPS  = _CFG.ensemble_timesteps
+    TRIAL_TIMESTEPS = _CFG.trial_timesteps
+    TRAIN_START     = _CFG.train_start
+    TRAIN_END       = _CFG.train_end
+    VAL_START       = _CFG.val_start
+    VAL_END         = _CFG.val_end
+    TEST_START      = _CFG.test_start
+    TEST_END        = _CFG.test_end
+    MODEL_DIR       = _CFG.model_dir
+    LOG_DIR         = _CFG.logs_dir
+except Exception:
+    ENSEMBLE_SEEDS  = [0, 42, 123]
+    ENSEMBLE_STEPS  = 500_000
+    TRIAL_TIMESTEPS = 50_000
+    TRAIN_START     = "2015-01-01"
+    TRAIN_END       = "2019-12-31"
+    VAL_START       = "2020-01-01"
+    VAL_END         = "2021-12-31"
+    TEST_START      = "2022-01-01"
+    TEST_END        = "2024-12-31"
+    MODEL_DIR       = "models"
+    LOG_DIR         = "logs"
 
 
 class TrainingPipeline:
@@ -131,7 +143,7 @@ class TrainingPipeline:
         model, _, vec_norm = self._train_model(
             self.train_data,
             params,
-            total_timesteps=50_000,
+            total_timesteps=TRIAL_TIMESTEPS,
             model_name=f"trial_{trial.number}",
         )
 
@@ -166,7 +178,7 @@ class TrainingPipeline:
         model, vec_env, vec_norm = self._train_model(
             combined_data,
             params,
-            total_timesteps=500_000,
+            total_timesteps=ENSEMBLE_STEPS,
             model_name="final_model",
         )
         vec_norm.save(os.path.join(MODEL_DIR, "vec_normalize.pkl"))

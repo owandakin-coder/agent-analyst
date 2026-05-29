@@ -19,20 +19,29 @@ import numpy as np
 
 logger = logging.getLogger("RiskManager")
 
-# ─── Drawdown thresholds ──────────────────────────────────────────────────────
-DRAWDOWN_REDUCE  = 0.10
-DRAWDOWN_HALT    = 0.15
-POSITION_NORMAL  = 1.0
-POSITION_REDUCED = 0.5
-
-# ─── Kelly Criterion ──────────────────────────────────────────────────────────
-KELLY_FRACTION   = 0.25   # fractional Kelly (full Kelly is too aggressive)
-KELLY_MIN        = 0.10   # never go below 10% of suggested position
-KELLY_MAX        = 1.00   # cap at 100%
-
-# ─── Correlation ──────────────────────────────────────────────────────────────
-CORR_HIGH        = 0.80   # above this → reduce position by 50%
-CORR_WINDOW      = 60     # days for rolling correlation
+# ─── Load from config (fallback to hardcoded if config not available) ─────────
+try:
+    from config_loader import CFG
+    DRAWDOWN_REDUCE  = CFG.drawdown_reduce
+    DRAWDOWN_HALT    = CFG.drawdown_halt
+    POSITION_NORMAL  = CFG.get("risk", "position_normal",  default=1.0)
+    POSITION_REDUCED = CFG.get("risk", "position_reduced", default=0.5)
+    KELLY_FRACTION   = CFG.kelly_fraction
+    KELLY_MIN        = CFG.kelly_min
+    KELLY_MAX        = CFG.kelly_max
+    CORR_HIGH        = CFG.corr_threshold
+    CORR_WINDOW      = CFG.corr_window
+except Exception:
+    # Fallback defaults
+    DRAWDOWN_REDUCE  = 0.10
+    DRAWDOWN_HALT    = 0.15
+    POSITION_NORMAL  = 1.0
+    POSITION_REDUCED = 0.5
+    KELLY_FRACTION   = 0.25
+    KELLY_MIN        = 0.10
+    KELLY_MAX        = 1.00
+    CORR_HIGH        = 0.80
+    CORR_WINDOW      = 60
 
 
 class RiskLevel(Enum):
