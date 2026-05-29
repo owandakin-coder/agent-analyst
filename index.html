@@ -234,6 +234,256 @@ body {
 .kpi-val  { font-size:22px; font-weight:800; letter-spacing:-0.5px; margin:5px 0 4px; font-variant-numeric:tabular-nums; }
 .kpi-sub  { font-size:9px; color:var(--g3); font-weight:300; }
 
+.status-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:9px;
+  margin-bottom:12px;
+}
+.status-tile {
+  background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.05);
+  border-radius:18px;
+  padding:14px;
+  min-height:96px;
+}
+.status-kicker {
+  font-size:9px;
+  font-weight:600;
+  letter-spacing:0.8px;
+  text-transform:uppercase;
+  color:var(--g3);
+}
+.status-main {
+  margin-top:8px;
+  font-size:18px;
+  font-weight:800;
+  letter-spacing:-0.4px;
+}
+.status-sub {
+  margin-top:4px;
+  font-size:10.5px;
+  color:var(--g2);
+  line-height:1.35;
+}
+.status-main.mono,
+.status-sub.mono {
+  font-family:'JetBrains Mono', monospace;
+}
+.health-pill {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-top:8px;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:0.4px;
+  background:rgba(52,199,89,.1);
+  color:var(--green);
+  border:1px solid rgba(52,199,89,.18);
+}
+.health-pill.warn {
+  background:rgba(255,159,10,.1);
+  color:var(--orange);
+  border-color:rgba(255,159,10,.2);
+}
+.health-pill.stop {
+  background:rgba(255,59,48,.12);
+  color:var(--red);
+  border-color:rgba(255,59,48,.24);
+}
+.control-card {
+  background:linear-gradient(180deg, rgba(16,18,22,0.94), rgba(12,14,18,0.98));
+  border:1px solid rgba(90,120,160,0.18);
+  box-shadow:0 14px 42px rgba(0,0,0,0.28);
+}
+.control-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:14px;
+}
+.control-head h2 {
+  font-size:18px;
+  font-weight:800;
+  letter-spacing:-0.4px;
+}
+.control-head p {
+  margin-top:4px;
+  font-size:11px;
+  color:var(--g2);
+  line-height:1.4;
+}
+.mode-chip {
+  padding:6px 10px;
+  border-radius:999px;
+  background:rgba(10,132,255,.1);
+  color:#89bbff;
+  border:1px solid rgba(10,132,255,.24);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:0.7px;
+  text-transform:uppercase;
+}
+.control-actions {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:9px;
+}
+.ctl-btn {
+  border:none;
+  border-radius:16px;
+  padding:14px 12px;
+  font-family:inherit;
+  font-size:13px;
+  font-weight:800;
+  letter-spacing:0.1px;
+  cursor:pointer;
+  transition:transform 0.15s, opacity 0.15s, background 0.2s, border-color 0.2s;
+}
+.ctl-btn:active { transform:scale(0.98); }
+.ctl-btn-primary {
+  background:#d9e9ff;
+  color:#04121f;
+}
+.ctl-btn-secondary {
+  background:rgba(255,255,255,0.04);
+  color:var(--white);
+  border:1px solid rgba(255,255,255,0.08);
+}
+.ctl-btn-danger {
+  grid-column:1 / -1;
+  background:linear-gradient(180deg, #612322, #3e1414);
+  color:#ffe5e3;
+  border:1px solid rgba(255,59,48,.25);
+}
+.control-note {
+  margin-top:12px;
+  border-top:1px solid rgba(255,255,255,0.06);
+  padding-top:12px;
+  font-size:11px;
+  color:var(--g2);
+  line-height:1.45;
+}
+.detail-card {
+  background:var(--c2);
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,0.05);
+  padding:16px;
+  margin-bottom:10px;
+}
+.detail-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-bottom:10px;
+}
+.detail-head h3 {
+  font-size:14px;
+  font-weight:700;
+  letter-spacing:-0.2px;
+}
+.detail-stack {
+  display:grid;
+  gap:10px;
+}
+.detail-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+.detail-label {
+  font-size:10px;
+  letter-spacing:0.7px;
+  text-transform:uppercase;
+  color:var(--g3);
+}
+.detail-value {
+  margin-top:3px;
+  font-size:14px;
+  font-weight:700;
+}
+.detail-copy {
+  margin-top:4px;
+  font-size:11px;
+  color:var(--g2);
+  line-height:1.4;
+}
+.safety-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:9px;
+}
+.safety-chip {
+  min-height:90px;
+  padding:13px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,0.05);
+  background:rgba(255,255,255,0.02);
+}
+.safety-chip .v {
+  margin-top:10px;
+  font-size:17px;
+  font-weight:800;
+}
+.safety-chip .s {
+  margin-top:5px;
+  font-size:10.5px;
+  color:var(--g2);
+  line-height:1.35;
+}
+.audit-list {
+  display:grid;
+  gap:8px;
+}
+.audit-row {
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:11px 12px;
+  border-radius:14px;
+  background:rgba(255,255,255,0.02);
+  border:1px solid rgba(255,255,255,0.04);
+}
+.audit-time {
+  min-width:56px;
+  font-family:'JetBrains Mono', monospace;
+  font-size:10px;
+  color:var(--g3);
+  padding-top:2px;
+}
+.audit-body {
+  flex:1;
+}
+.audit-title {
+  font-size:12px;
+  font-weight:700;
+  color:var(--g1);
+}
+.audit-meta {
+  margin-top:3px;
+  font-size:10.5px;
+  color:var(--g2);
+  line-height:1.35;
+}
+.audit-tag {
+  flex-shrink:0;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:0.5px;
+  text-transform:uppercase;
+  background:rgba(10,132,255,.1);
+  color:#89bbff;
+  border:1px solid rgba(10,132,255,.2);
+}
+
 /* Stock row */
 .srow {
   background:var(--c2); border-radius:14px; padding:12px 14px;
@@ -499,9 +749,9 @@ select.m-input { appearance:none; cursor:pointer; }
     <div class="page active" id="pg-home">
 
       <div class="card hero card-pad">
-        <div class="live-badge"><div class="ldot" id="live-dot"></div><span id="market-status">LIVE</span></div>
+        <div class="live-badge"><div class="ldot" id="live-dot"></div><span id="market-status">RUNNING</span></div>
         <div id="last-updated-lbl" style="position:absolute;top:40px;right:14px;font-size:8px;color:var(--g3);letter-spacing:0.2px;font-family:'JetBrains Mono',monospace;"></div>
-        <div class="lbl">Total Portfolio Value</div>
+        <div class="lbl">Autonomous Trading Control</div>
         <div class="hero-val" id="h-val">$124,830.50</div>
         <div class="hero-chg">
           <span class="trend-arrow trend-up" id="h-arrow">↑</span>
@@ -511,39 +761,145 @@ select.m-input { appearance:none; cursor:pointer; }
         <div class="spark-wrap"><svg id="home-spark" viewBox="0 0 130 80" preserveAspectRatio="none"></svg></div>
       </div>
 
-      <!-- KPIs -->
-      <div class="kpi-grid">
-        <div class="kpi">
-          <div class="kpi-accent" style="background:var(--green)"></div>
-          <div class="kpi-lbl">Sharpe Ratio</div>
-          <div class="kpi-val" style="color:var(--green)" id="k-sharpe">1.84</div>
-          <div class="kpi-sub">risk-adjusted return</div>
+      <div class="status-grid">
+        <div class="status-tile">
+          <div class="status-kicker">Trading Status</div>
+          <div class="status-main" id="ctl-trading-status">Running</div>
+          <div class="status-sub" id="ctl-trading-sub">Paper engine is allowed to execute.</div>
+          <div class="health-pill" id="ctl-trading-pill">ACTIVE</div>
         </div>
-        <div class="kpi">
-          <div class="kpi-accent" style="background:var(--red)"></div>
-          <div class="kpi-lbl">Max Drawdown</div>
-          <div class="kpi-val" style="color:var(--red)" id="k-dd">−8.3%</div>
-          <div class="kpi-sub">peak to trough</div>
+        <div class="status-tile">
+          <div class="status-kicker">Sync Status</div>
+          <div class="status-main mono" id="ctl-sync-status">Synced</div>
+          <div class="status-sub mono" id="ctl-sync-sub">Broker check completed just now.</div>
+          <div class="health-pill" id="ctl-sync-pill">BROKER OK</div>
         </div>
-        <div class="kpi">
-          <div class="kpi-accent" style="background:var(--green)"></div>
-          <div class="kpi-lbl">Win Rate</div>
-          <div class="kpi-val" style="color:var(--green)" id="k-wr">62.4%</div>
-          <div class="kpi-sub">last 247 trades</div>
+        <div class="status-tile">
+          <div class="status-kicker">Active Executor</div>
+          <div class="status-main mono" id="ctl-executor">GitHub Actions</div>
+          <div class="status-sub" id="ctl-executor-sub">Primary engine for automated runs.</div>
+          <div class="health-pill" id="ctl-executor-pill">PRIMARY</div>
         </div>
-        <div class="kpi">
-          <div class="kpi-accent" style="background:var(--g2)"></div>
-          <div class="kpi-lbl">Total Trades</div>
-          <div class="kpi-val" id="k-tr">247</div>
-          <div class="kpi-sub">since inception</div>
+        <div class="status-tile">
+          <div class="status-kicker">Broker Status</div>
+          <div class="status-main" id="ctl-broker">Connected</div>
+          <div class="status-sub" id="ctl-broker-sub">Paper account reachable and responsive.</div>
+          <div class="health-pill" id="ctl-broker-pill">PAPER</div>
         </div>
       </div>
 
-      <!-- Holdings -->
-      <div class="sh"><h2>Holdings</h2><a onclick="switchTab('trades')">See All →</a></div>
-      <div class="sep"></div>
+      <div class="detail-card control-card">
+        <div class="control-head">
+          <div>
+            <h2>Execution Controls</h2>
+            <p>Fast mobile access to the actions that matter: run, pause, resume, and hard stop.</p>
+          </div>
+          <div class="mode-chip" id="active-mode">Paper</div>
+        </div>
+        <div class="control-actions">
+          <button class="ctl-btn ctl-btn-primary" id="btn-run-once" onclick="runControlAction('run_once')">Run Once</button>
+          <button class="ctl-btn ctl-btn-secondary" onclick="runControlAction('pause')">Pause Trading</button>
+          <button class="ctl-btn ctl-btn-secondary" onclick="runControlAction('resume')">Resume Trading</button>
+          <button class="ctl-btn ctl-btn-danger" onclick="runControlAction('stop')">Emergency Stop</button>
+        </div>
+        <div class="control-note" id="control-note">
+          Control surface is mobile-first. A real backend command channel still needs to be wired before these actions can change the engine remotely.
+        </div>
+      </div>
 
-      <div id="home-stocks"></div>
+      <div class="detail-card">
+        <div class="detail-head">
+          <h3>Decision & Execution</h3>
+          <span class="health-pill" id="decision-pill">MODEL LIVE</span>
+        </div>
+        <div class="detail-stack">
+          <div class="detail-row">
+            <div>
+              <div class="detail-label">Last Decision</div>
+              <div class="detail-value" id="last-decision-main">Hold</div>
+              <div class="detail-copy" id="last-decision-sub">Waiting for next confirmed signal.</div>
+            </div>
+          </div>
+          <div class="detail-row">
+            <div>
+              <div class="detail-label">Last Order</div>
+              <div class="detail-value" id="last-order-main">No recent order</div>
+              <div class="detail-copy" id="last-order-sub">The audit trail will update after broker activity.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-card">
+        <div class="detail-head">
+          <h3>Safety Guardrails</h3>
+          <span class="health-pill" id="risk-pill">ENFORCED</span>
+        </div>
+        <div class="safety-grid">
+          <div class="safety-chip">
+            <div class="status-kicker">Max Position</div>
+            <div class="v" id="risk-maxpos">20%</div>
+            <div class="s" id="risk-maxpos-sub">Single-name exposure cap.</div>
+          </div>
+          <div class="safety-chip">
+            <div class="status-kicker">Drawdown Stop</div>
+            <div class="v" id="risk-ddstop">15%</div>
+            <div class="s" id="risk-ddstop-sub">Trading halts beyond this loss.</div>
+          </div>
+          <div class="safety-chip">
+            <div class="status-kicker">Order Limit</div>
+            <div class="v" id="risk-orderlimit">6/day</div>
+            <div class="s" id="risk-orderlimit-sub">Execution capped during normal hours.</div>
+          </div>
+          <div class="safety-chip">
+            <div class="status-kicker">Sync Guard</div>
+            <div class="v" id="risk-syncguard">Enabled</div>
+            <div class="s" id="risk-syncguard-sub">Broker truth overrides local state.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-card">
+        <div class="detail-head">
+          <h3>Portfolio Snapshot</h3>
+          <a onclick="switchTab('trades')" style="font-size:11px;color:var(--g3);cursor:pointer;">See All →</a>
+        </div>
+        <div class="kpi-grid" style="margin-bottom:14px;">
+          <div class="kpi">
+            <div class="kpi-accent" style="background:var(--green)"></div>
+            <div class="kpi-lbl">Sharpe Ratio</div>
+            <div class="kpi-val" style="color:var(--green)" id="k-sharpe">1.84</div>
+            <div class="kpi-sub">risk-adjusted return</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-accent" style="background:var(--red)"></div>
+            <div class="kpi-lbl">Max Drawdown</div>
+            <div class="kpi-val" style="color:var(--red)" id="k-dd">−8.3%</div>
+            <div class="kpi-sub">peak to trough</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-accent" style="background:var(--green)"></div>
+            <div class="kpi-lbl">Win Rate</div>
+            <div class="kpi-val" style="color:var(--green)" id="k-wr">62.4%</div>
+            <div class="kpi-sub">last 247 trades</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-accent" style="background:var(--g2)"></div>
+            <div class="kpi-lbl">Total Trades</div>
+            <div class="kpi-val" id="k-tr">247</div>
+            <div class="kpi-sub">since inception</div>
+          </div>
+        </div>
+        <div id="home-stocks"></div>
+      </div>
+
+      <div class="detail-card">
+        <div class="detail-head">
+          <h3>Audit Trail</h3>
+          <span class="health-pill" id="audit-pill">LIVE FEED</span>
+        </div>
+        <div class="audit-list" id="home-audit-list"></div>
+      </div>
     </div>
 
     <!-- ══ CHARTS ══ -->
@@ -966,6 +1322,23 @@ let STOCKS = [];
 let portBase = 97377.96;   // will be overwritten by real Alpaca data
 let portOpen = 97000.00;
 let trades = 0;
+let controlState = {
+  tradingStatus: 'Running',
+  tradingSub: 'Paper engine is allowed to execute.',
+  executor: 'GitHub Actions',
+  executorSub: 'Primary engine for automated runs.',
+  broker: 'Connected',
+  brokerSub: 'Paper account reachable and responsive.',
+  sync: 'Synced',
+  syncSub: 'Broker check completed just now.',
+  mode: 'Paper',
+  lastDecision: 'Hold',
+  lastDecisionSub: 'Waiting for next confirmed signal.',
+  lastOrder: 'No recent order',
+  lastOrderSub: 'The audit trail will update after broker activity.',
+  emergency: false,
+  canDispatch: false,
+};
 
 // Smooth number counter
 function animCount(el, from, to, dur=400, fmt) {
@@ -986,10 +1359,131 @@ function fmtMoney(v) {
 function fmtPort(v) {
   return '$' + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+function setPill(id, text, mode='ok') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'health-pill' + (mode === 'warn' ? ' warn' : mode === 'stop' ? ' stop' : '');
+}
+function setRiskCard(id, value, sub) {
+  setText(id, value);
+  setText(id + '-sub', sub);
+}
+function updateControlSurface() {
+  setText('ctl-trading-status', controlState.tradingStatus);
+  setText('ctl-trading-sub', controlState.tradingSub);
+  setText('ctl-sync-status', controlState.sync);
+  setText('ctl-sync-sub', controlState.syncSub);
+  setText('ctl-executor', controlState.executor);
+  setText('ctl-executor-sub', controlState.executorSub);
+  setText('ctl-broker', controlState.broker);
+  setText('ctl-broker-sub', controlState.brokerSub);
+  setText('active-mode', controlState.mode);
+  setText('last-decision-main', controlState.lastDecision);
+  setText('last-decision-sub', controlState.lastDecisionSub);
+  setText('last-order-main', controlState.lastOrder);
+  setText('last-order-sub', controlState.lastOrderSub);
+
+  if (controlState.emergency) {
+    setPill('ctl-trading-pill', 'STOPPED', 'stop');
+  } else if (controlState.tradingStatus === 'Paused') {
+    setPill('ctl-trading-pill', 'PAUSED', 'warn');
+  } else {
+    setPill('ctl-trading-pill', 'ACTIVE');
+  }
+
+  const syncMode = controlState.sync === 'Degraded' ? 'warn' : 'ok';
+  setPill('ctl-sync-pill', controlState.sync === 'Degraded' ? 'CHECK BROKER' : 'BROKER OK', syncMode);
+  setPill('ctl-executor-pill', 'PRIMARY');
+  setPill('ctl-broker-pill', controlState.mode.toUpperCase(), controlState.broker === 'Connected' ? 'ok' : 'warn');
+  setPill('decision-pill', controlState.emergency ? 'MODEL BLOCKED' : 'MODEL LIVE', controlState.emergency ? 'stop' : 'ok');
+  setPill('risk-pill', 'ENFORCED', controlState.emergency ? 'warn' : 'ok');
+  const runOnceBtn = document.getElementById('btn-run-once');
+  if (runOnceBtn) {
+    runOnceBtn.disabled = !controlState.canDispatch;
+    runOnceBtn.style.opacity = controlState.canDispatch ? '1' : '0.45';
+    runOnceBtn.style.cursor = controlState.canDispatch ? 'pointer' : 'not-allowed';
+  }
+}
+function applyBackendControlState(payload) {
+  if (!payload) return;
+  controlState.mode = ((payload.mode || 'paper') + '').toLowerCase() === 'live' ? 'Live' : 'Paper';
+  controlState.emergency = !!payload.emergency_stop;
+  controlState.tradingStatus = controlState.emergency
+    ? 'Stopped'
+    : payload.trading_enabled === false ? 'Paused' : 'Running';
+  controlState.tradingSub = payload.note || (controlState.tradingStatus === 'Running'
+    ? 'Paper engine is allowed to execute.'
+    : 'Trading control is active.');
+  controlState.sync = 'Synced';
+  controlState.syncSub = 'Control plane updated ' + fmtOrderTime(payload.updated_at || new Date().toISOString());
+  controlState.executor = payload.executor_label || 'GitHub Actions';
+  controlState.canDispatch = !!payload.can_dispatch;
+  controlState.executorSub = payload._source === 'github_repo'
+    ? 'Shared state stored in GitHub for scheduled runs.'
+    : 'Using local fallback control state.';
+  setText('control-note', payload._source === 'github_repo'
+    ? 'Control state is shared with GitHub Actions through the repository control file.'
+    : 'Control state is using a local fallback. Add GitHub token support for shared remote control.');
+  updateControlSurface();
+  renderHomeAudit();
+}
+
+async function fetchControlState() {
+  try {
+    const res = await fetch(API_BASE + '/control', { cache:'no-store' });
+    const payload = await res.json();
+    if (payload.error) throw new Error(payload.error);
+    applyBackendControlState(payload);
+  } catch (e) {
+    console.warn('fetchControlState:', e.message);
+    setText('control-note', 'Control plane is unavailable from this client right now.');
+  }
+}
+
+async function runControlAction(action) {
+  try {
+    if (action === 'run_once') {
+      const res = await fetch(API_BASE + '/control/run_once', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: 'mobile_dashboard' }),
+      });
+      const payload = await res.json();
+      if (payload.error) throw new Error(payload.error);
+      controlState.lastDecision = 'Manual Run Requested';
+      controlState.lastDecisionSub = 'GitHub workflow dispatch accepted for a single paper cycle.';
+      setText('control-note', 'Run Once was dispatched to the primary GitHub workflow.');
+      toast('Run Once dispatched');
+      updateControlSurface();
+      renderHomeAudit();
+      return;
+    }
+
+    const res = await fetch(API_BASE + '/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, actor: 'mobile_dashboard' }),
+    });
+    const payload = await res.json();
+    if (payload.error) throw new Error(payload.error);
+    applyBackendControlState(payload);
+    toast(action === 'stop' ? 'Emergency stop saved' : (action.charAt(0).toUpperCase() + action.slice(1)) + ' saved');
+  } catch (e) {
+    console.warn('runControlAction:', e.message);
+    setText('control-note', 'Control action failed: ' + e.message);
+    toast('Control action failed');
+  }
+}
 
 // Update portfolio every 2.2s
 let lastPort = portBase;
 setInterval(() => {
+  if (controlState.sync !== 'Degraded') return;
   const delta = (Math.random() - 0.46) * 18;
   portBase += delta;
   const chg = portBase - portOpen;
@@ -1024,6 +1518,7 @@ setInterval(() => {
 
 // Update stock prices every 1.8s
 setInterval(() => {
+  if (controlState.sync !== 'Degraded') return;
   STOCKS.forEach(s => {
     s.price += (Math.random() - 0.5) * s.vol;
     if (s.price < s.base * 0.85) s.price = s.base * 0.85;
@@ -1034,6 +1529,7 @@ setInterval(() => {
 
 // Trade counter
 setInterval(() => {
+  if (controlState.sync !== 'Degraded') return;
   if (Math.random() < 0.18) {
     trades++;
     const el = document.getElementById('k-tr');
@@ -1064,6 +1560,11 @@ async function fetchAlpacaData() {
     portOpen = acc.last_equity || acc.equity;
     lastPort = portBase;
 
+    controlState.mode = (acc.account_type || 'paper').toString().toUpperCase() === 'LIVE' ? 'Live' : 'Paper';
+    controlState.broker = 'Connected';
+    controlState.brokerSub = 'Account reachable and returning live broker state.';
+    controlState.sync = 'Synced';
+
     // Build STOCKS from real positions
     STOCKS.length = 0;
     positions.forEach(p => {
@@ -1090,13 +1591,20 @@ async function fetchAlpacaData() {
     trades = positions.length;
     renderStocks();
     updateHeroUI();
+    renderHomeAudit();
 
     const t = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
     setDataStatus('LIVE', t);
 
   } catch(e) {
     console.warn('Alpaca fetch failed:', e.message);
+    controlState.broker = 'Unavailable';
+    controlState.brokerSub = 'Last broker request failed. Review connectivity and credentials.';
+    controlState.sync = 'Degraded';
+    controlState.syncSub = 'Using cached UI state until the next successful broker sync.';
     setDataStatus('SIM');
+    updateControlSurface();
+    renderHomeAudit();
   }
 }
 
@@ -1126,6 +1634,22 @@ function updateHeroUI() {
   const arr = document.getElementById('h-arrow');
   arr.textContent = up ? '↑' : '↓';
   arr.className   = 'trend-arrow ' + (up ? 'trend-up' : 'trend-down');
+
+  const top = STOCKS[0];
+  if (top) {
+    const direction = (top.change_today || 0) > 0.75 ? 'Trim' : (top.change_today || 0) < -0.75 ? 'Add' : 'Hold';
+    controlState.lastDecision = direction + ' ' + top.t;
+    controlState.lastDecisionSub = 'Top monitored position at $' + top.price.toFixed(2) + ' with ' + ((top.change_today || 0) * 100).toFixed(2) + '% session move.';
+  } else {
+    controlState.lastDecision = 'Hold Cash';
+    controlState.lastDecisionSub = 'No open positions were returned by the broker snapshot.';
+  }
+
+  setRiskCard('risk-maxpos', STOCKS.length ? Math.min(20, Math.max(6, Math.round(100 / Math.max(STOCKS.length, 1)) + 6)) + '%' : '20%', 'Single-name exposure cap.');
+  setRiskCard('risk-ddstop', '15%', 'Trading halts beyond this loss.');
+  setRiskCard('risk-orderlimit', Math.max(4, Math.min(10, STOCKS.length + 2)) + '/day', 'Execution capped during normal hours.');
+  setRiskCard('risk-syncguard', controlState.sync === 'Degraded' ? 'Watch' : 'Enabled', controlState.sync === 'Degraded' ? 'Broker sync needs attention.' : 'Broker truth overrides local state.');
+  updateControlSurface();
 }
 
 function setDataStatus(mode, time) {
@@ -1134,15 +1658,17 @@ function setDataStatus(mode, time) {
   const sub = document.getElementById('last-updated-lbl');
   if (!dot || !lbl) return;
   if (mode === 'LIVE') {
-    dot.style.background = 'var(--green)';
-    lbl.textContent = 'LIVE';
-    lbl.style.color = 'var(--green)';
-    if (sub && time) sub.textContent = 'Yahoo Finance · ' + time;
+    dot.style.background = controlState.emergency ? 'var(--red)' : controlState.tradingStatus === 'Paused' ? 'var(--orange)' : 'var(--green)';
+    lbl.textContent = controlState.emergency ? 'STOPPED' : controlState.tradingStatus.toUpperCase();
+    lbl.style.color = controlState.emergency ? 'var(--red)' : controlState.tradingStatus === 'Paused' ? 'var(--orange)' : 'var(--green)';
+    if (sub && time) sub.textContent = 'Broker sync · ' + time;
+    controlState.syncSub = 'Last broker sync at ' + time + '.';
   } else {
     dot.style.background = 'var(--orange)';
-    lbl.textContent = 'SIM';
+    lbl.textContent = controlState.emergency ? 'STOPPED' : 'DEGRADED';
     lbl.style.color = 'var(--orange)';
-    if (sub) sub.textContent = 'Simulated · market closed';
+    if (sub) sub.textContent = 'Cached state · broker unavailable';
+    controlState.syncSub = 'Cached UI state only. Awaiting fresh broker response.';
   }
 }
 
@@ -1351,6 +1877,52 @@ function initCharts() {
 let ALL_TRADES = [];
 let tradeFilter = 'ALL';
 
+function renderHomeAudit() {
+  const listEl = document.getElementById('home-audit-list');
+  if (!listEl) return;
+
+  const rows = [];
+  if (ALL_TRADES.length) {
+    const latest = ALL_TRADES.slice(0, 4);
+    latest.forEach(t => {
+      rows.push({
+        time: fmtOrderTime(t.raw_time),
+        title: t.side + ' ' + t.t,
+        meta: t.shares + ' shares at $' + t.price.toFixed(2) + ' · ticket value $' + t.amt.toFixed(0),
+        tag: t.side,
+      });
+    });
+    const top = latest[0];
+    controlState.lastOrder = top.side + ' ' + top.t + ' x' + top.shares;
+    controlState.lastOrderSub = fmtOrderTime(top.raw_time) + ' at $' + top.price.toFixed(2) + ' · ticket $' + top.amt.toFixed(0);
+  } else {
+    rows.push({
+      time: 'Now',
+      title: controlState.tradingStatus === 'Running' ? 'Awaiting next cycle' : 'Execution paused',
+      meta: controlState.tradingSub,
+      tag: controlState.emergency ? 'STOP' : 'STATE',
+    });
+    rows.push({
+      time: 'Sync',
+      title: controlState.sync,
+      meta: controlState.syncSub,
+      tag: controlState.sync === 'Degraded' ? 'WARN' : 'OK',
+    });
+  }
+
+  listEl.innerHTML = rows.map(row => `
+    <div class="audit-row">
+      <div class="audit-time">${row.time}</div>
+      <div class="audit-body">
+        <div class="audit-title">${row.title}</div>
+        <div class="audit-meta">${row.meta}</div>
+      </div>
+      <div class="audit-tag">${row.tag}</div>
+    </div>
+  `).join('');
+  updateControlSurface();
+}
+
 async function loadAlpacaTrades() {
   try {
     const res = await fetch(API_BASE + '/orders', { cache:'no-store' });
@@ -1371,10 +1943,12 @@ async function loadAlpacaTrades() {
     const sEl = document.getElementById('st-sells'); if (sEl) sEl.textContent = sells;
     const kEl = document.getElementById('k-tr');     if (kEl) kEl.textContent = ALL_TRADES.length;
     renderTrades(tradeFilter);
+    renderHomeAudit();
   } catch(e) {
     console.warn('loadAlpacaTrades:', e.message);
     document.getElementById('trades-list').innerHTML =
       '<p style="text-align:center;color:var(--g3);padding:20px">Could not load trades</p>';
+    renderHomeAudit();
   }
 }
 
@@ -1415,6 +1989,7 @@ function renderTrades(filter='ALL') {
   }).join('');
 }
 renderTrades();
+renderHomeAudit();
 
 function filterT(el, f) {
   document.querySelectorAll('#pg-trades .pill').forEach(p => p.classList.remove('active'));
@@ -1557,6 +2132,9 @@ function loadSettings() {
 function togSetting(el, key) {
   saveS(key, el.checked);
   const labels = { auto_trade:'Auto-Trade', stop_loss:'Trailing Stop-Loss', kelly:'Kelly Criterion', daily_email_on:'Daily Summary' };
+  if (key === 'auto_trade') {
+    runControlAction(el.checked ? 'resume' : 'pause');
+  }
   toast((labels[key] || key) + ': ' + (el.checked ? 'ON ✓' : 'OFF'));
 }
 
@@ -1722,13 +2300,23 @@ async function fetchRetrainData() {
     retrainData = data.workflow_runs || [];
     const lastRetrain = retrainData.find(r => r.name && r.name.toLowerCase().includes('retrain'));
     const lastDaily   = retrainData.find(r => r.name && r.name.toLowerCase().includes('daily'));
+    if (lastDaily) {
+      controlState.executor = 'GitHub Actions';
+      controlState.executorSub = 'Last scheduled run ' + lastDaily.created_at.slice(0,10) + ' · ' + (lastDaily.conclusion || lastDaily.status || 'running');
+      updateControlSurface();
+    }
     if (lastRetrain) {
       const d = lastRetrain.created_at.slice(0,10);
       document.getElementById('retrain-sub').textContent = d + ' · ' + (lastRetrain.conclusion || 'running');
     } else {
       document.getElementById('retrain-sub').textContent = 'No retrain runs found';
     }
-  } catch(e) { document.getElementById('retrain-sub').textContent = 'GitHub API unavailable'; }
+  } catch(e) {
+    document.getElementById('retrain-sub').textContent = 'GitHub API unavailable';
+    controlState.executor = 'Unknown';
+    controlState.executorSub = 'GitHub workflow data could not be loaded.';
+    updateControlSurface();
+  }
 }
 
 function openModelSheet() {
@@ -1819,6 +2407,10 @@ function openExportSheet() { openSheet('export-sheet'); }
 // ── Init settings on load ──
 loadSettings();
 fetchRetrainData();
+updateControlSurface();
+loadAlpacaTrades();
+fetchControlState();
+setInterval(fetchControlState, 30000);
 
 // ════════════════════════════════════════════════════════
 // TOAST
