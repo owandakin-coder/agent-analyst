@@ -1,321 +1,269 @@
 """
-health_check.py
-===============
-בדיקת תקינות מהירה של כל מרכיבי המערכת.
-מריץ לפני כל deploy או debugging session.
-
-שימוש:
-    python health_check.py           # בדיקה מלאה
-    python health_check.py --fast    # ללא בדיקת חיבור Alpaca
-
-יציאה עם exit code 0 = הכל תקין, 1 = יש בעיות.
+Fast system health checks for ATZMA.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import json
 import os
+import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
+OK = "[OK]"
+WARN = "[WARN]"
+FAIL = "[FAIL]"
 
-OK   = "✅"
-WARN = "⚠️ "
-FAIL = "❌"
 
-
-def check(label: str, ok: bool, detail: str = ""):
-    sym = OK if ok else FAIL
-    msg = f"  {sym} {label}"
+def check(label: str, ok: bool, detail: str = "") -> bool:
+    prefix = OK if ok else FAIL
+    message = f"  {prefix} {label}"
     if detail:
-        msg += f"  ({detail})"
-    print(msg)
+        message += f" ({detail})"
+    print(message)
     return ok
 
 
 def warn(label: str, detail: str = ""):
-    msg = f"  {WARN} {label}"
+    message = f"  {WARN} {label}"
     if detail:
-        msg += f"  ({detail})"
-    print(msg)
+        message += f" ({detail})"
+    print(message)
 
-
-# ══════════════════════════════════════════════════════════════════
-# 1. Config
-# ══════════════════════════════════════════════════════════════════
 
 def check_config() -> bool:
     print("\n[1] Config")
     try:
         from config_loader import CFG
-        ok = True
-        ok &= check("config.yaml loaded", True)
-        ok &= check("Tickers defined",    len(CFG.tickers) > 0,
-                    f"{len(CFG.tickers)} tickers")
-        ok &= check("Benchmark in tickers", CFG.benchmark in CFG.tickers,
-                    CFG.benchmark)
-        ok &= check("Capital > 0",         CFG.initial_capital > 0,
-                    f"${CFG.initial_capital:,.0f}")
-        ok &= check("Kelly fraction valid", 0 < CFG.kelly_fraction <= 1.0,
-                    f"{CFG.kelly_fraction}×")
-        ok &= check("DD halt > DD reduce",  CFG.drawdown_halt > CFG.drawdown_reduce,
-                    f"{CFG.drawdown_reduce:.0%} / {CFG.drawdown_halt:.0%}")
-        ok &= check("Train before test",
-                    CFG.train_end < CFG.test_start,
-                    f"{CFG.train_end} < {CFG.test_start}")
-        return ok
-    except Exception as e:
-        check("config.yaml", False, str(e))
-        return False
+    except Exception as exc:
+        return check("config.yaml", False, str(exc))
 
+    ok = True
+    ok &= check("config.yaml loaded", True)
+    ok &= check("Tickers defined", len(CFG.tickers) > 0, f"{len(CFG.tickers)} tickers")
+    ok &= check("Benchmark in universe", CFG.benchmark in CFG.tickers, CFG.benchmark)
+    ok &= check("Capital positive", CFG.initial_capital > 0, f"${CFG.initial_capital:,.0f}")
+    ok &= check("Train before validation", CFG.train_end < CFG.val_start)
+    ok &= check("Validation before test", CFG.val_end < CFG.test_start)
+    ok &= check("Drawdown hierarchy", CFG.drawdown_halt > CFG.drawdown_reduce)
+    ok &= check("Trade minimum positive", CFG.min_trade_value > 0, f"${CFG.min_trade_value:,.0f}")
+    ok &= check("Live thresholds ordered", CFG.live_sell_threshold < 0 < CFG.live_buy_threshold)
+    return ok
 
-# ══════════════════════════════════════════════════════════════════
-# 2. Dependencies
-# ══════════════════════════════════════════════════════════════════
 
 def check_dependencies() -> bool:
     print("\n[2] Dependencies")
     required = {
-        "numpy":         "numpy",
-        "pandas":        "pandas",
-        "gymnasium":     "gymnasium",
-        "stable_baselines3": "stable_baselines3",
-        "optuna":        "optuna",
-        "yfinance":      "yfinance",
-        "yaml":          "pyyaml",
-        "dotenv":        "python-dotenv",
-        "scipy":         "scipy",
-        "matplotlib":    "matplotlib",
+        "numpy": "numpy",
+        "pandas": "pandas",
+        "gymnasium": "gymnasium",
+        "stable_baselines3": "stable-baselines3",
+        "optuna": "optuna",
+        "yfinance": "yfinance",
+        "yaml": "pyyaml",
+        "dotenv": "python-dotenv",
     }
     optional = {
-        "alpaca":        "alpaca-py",
-        "telegram":      "python-telegram-bot",
+        "alpaca": "alpaca-py",
     }
     ok = True
-    for module, pkg in required.items():
+    for module, package in required.items():
         try:
-            __import__(module)
-            check(pkg, True)
+            found = importlib.util.find_spec(module) is not None
+            if not found:
+                raise ImportError(module)
+            check(package, True)
         except ImportError:
-            check(pkg, False, f"pip install {pkg}")
-            ok = False
-
-    for module, pkg in optional.items():
+            ok &= check(package, False, f"pip install {package}")
+    for module, package in optional.items():
         try:
-            __import__(module)
-            check(f"{pkg} (optional)", True)
+            found = importlib.util.find_spec(module) is not None
+            if not found:
+                raise ImportError(module)
+            check(f"{package} (optional)", True)
         except ImportError:
-            warn(f"{pkg} (optional)", f"pip install {pkg}")
-
+            warn(f"{package} (optional)", f"pip install {package}")
     return ok
 
-
-# ══════════════════════════════════════════════════════════════════
-# 3. Files & Directories
-# ══════════════════════════════════════════════════════════════════
 
 def check_files() -> bool:
-    print("\n[3] Files & Directories")
+    print("\n[3] Files")
     from config_loader import CFG
-    ok = True
 
-    # קבצי קוד
-    required_files = [
-        "main.py", "trading_env.py", "training_pipeline.py",
-        "execution_simulator.py", "data_manager.py", "risk_manager.py",
-        "broker_api.py", "live_trader.py", "config.yaml", "config_loader.py",
-        ".env",
+    required = [
+        "main.py",
+        "broker_api.py",
+        "live_trader.py",
+        "trading_env.py",
+        "training_pipeline.py",
+        "config.yaml",
+        "config_loader.py",
     ]
-    for f in required_files:
-        exists = Path(f).exists()
-        if f == ".env" and not exists:
-            warn(".env missing", "copy .env.example → .env and fill credentials")
-        else:
-            ok &= check(f, exists)
+    ok = True
+    for filename in required:
+        ok &= check(filename, Path(filename).exists())
 
-    # תיקיות
-    for d in [CFG.model_dir, CFG.results_dir, CFG.logs_dir]:
-        Path(d).mkdir(exist_ok=True)
-        check(f"dir: {d}/", True)
+    for directory in [CFG.model_dir, CFG.results_dir, CFG.logs_dir]:
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        check(f"dir: {directory}/", True)
 
-    # מודל מאומן
-    model_path = Path(CFG.model_dir) / "final_model.zip"
-    norm_path  = Path(CFG.model_dir) / "vec_normalize.pkl"
-    if model_path.exists() and norm_path.exists():
-        size_mb = model_path.stat().st_size / 1024 / 1024
-        check("Trained model exists", True, f"{size_mb:.1f} MB")
+    submitted_orders = Path(CFG.broker_submitted_orders_file)
+    if submitted_orders.exists():
+        check("submitted_orders.json", True, str(submitted_orders))
     else:
-        warn("No trained model", "run: python main.py --mode train")
+        warn("submitted_orders.json missing", "will be created on first order")
 
     return ok
 
-
-# ══════════════════════════════════════════════════════════════════
-# 4. Environment Variables
-# ══════════════════════════════════════════════════════════════════
 
 def check_env() -> bool:
-    print("\n[4] Environment Variables")
+    print("\n[4] Environment")
     from dotenv import load_dotenv
+
     load_dotenv()
-
     ok = True
-    vars_required = ["ALPACA_API_KEY", "ALPACA_SECRET_KEY"]
-    vars_optional = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ALPACA_BASE_URL"]
-
-    for var in vars_required:
-        val = os.getenv(var, "")
-        if val:
-            check(var, True, f"{'*' * 6}{val[-4:]}")
+    for key in ["ALPACA_API_KEY", "ALPACA_SECRET_KEY"]:
+        value = os.getenv(key, "")
+        ok &= check(key, bool(value), "set" if value else "missing")
+    for key in ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ALPACA_BASE_URL"]:
+        value = os.getenv(key, "")
+        if value:
+            check(f"{key} (optional)", True)
         else:
-            check(var, False, "not set in .env")
-            ok = False
-
-    for var in vars_optional:
-        val = os.getenv(var, "")
-        if val:
-            check(f"{var} (optional)", True)
-        else:
-            warn(f"{var} (optional)", "not set")
-
+            warn(f"{key} (optional)", "not set")
     return ok
 
 
-# ══════════════════════════════════════════════════════════════════
-# 5. Alpaca Connection
-# ══════════════════════════════════════════════════════════════════
-
 def check_alpaca() -> bool:
-    print("\n[5] Alpaca API Connection")
+    print("\n[5] Broker")
     try:
         from broker_api import AlpacaBrokerAPI
+
         broker = AlpacaBrokerAPI(paper=True, auto_approve=False)
-        acc    = broker.get_account()
-        equity = acc.get("equity", 0)
-        check("Alpaca Paper connected", True, f"equity=${equity:,.0f}")
-
-        is_open = broker.is_market_open()
-        if is_open:
-            check("Market status", True, "OPEN")
-        else:
-            next_open = broker.next_market_open()
-            warn("Market status", f"CLOSED · next open: {next_open}")
-
+        snapshot = broker.reconcile_account_state()
+        ok = True
+        ok &= check("Broker snapshot", isinstance(snapshot, dict))
+        ok &= check("Snapshot has cash", "cash" in snapshot, f"${snapshot.get('cash', 0):,.0f}")
+        ok &= check("Snapshot has positions", "positions" in snapshot)
+        return ok
+    except EnvironmentError:
+        warn("Broker check skipped", "credentials not set")
         return True
+    except Exception as exc:
+        return check("Broker connection", False, str(exc))
 
-    except EnvironmentError as e:
-        warn("Alpaca skipped", "credentials not set")
-        return True   # אל תכשיל אם אין credentials
-    except Exception as e:
-        check("Alpaca connection", False, str(e))
-        return False
-
-
-# ══════════════════════════════════════════════════════════════════
-# 6. Model Loading
-# ══════════════════════════════════════════════════════════════════
 
 def check_model() -> bool:
-    print("\n[6] Model Loading")
+    print("\n[6] Model")
     from config_loader import CFG
-    model_path = Path(CFG.model_dir) / "final_model.zip"
-    norm_path  = Path(CFG.model_dir) / "vec_normalize.pkl"
 
+    model_path = Path(CFG.model_dir) / "final_model.zip"
     if not model_path.exists():
-        warn("Model not found", "skipping load test")
+        warn("Model not found", "run: python main.py --mode train")
         return True
 
     try:
-        t0 = time.time()
         from stable_baselines3 import PPO
+
+        started = time.time()
         model = PPO.load(str(model_path))
-        elapsed = time.time() - t0
-        check("Model loads", True, f"{elapsed:.1f}s")
-
-        # בדיקת observation shape
-        obs_shape = model.observation_space.shape
-        check("Observation space defined", obs_shape is not None, str(obs_shape))
-
-        # בדיקת action space
-        act_shape = model.action_space.shape
-        check("Action space defined", act_shape is not None, str(act_shape))
-
-        return True
-    except Exception as e:
-        check("Model load", False, str(e))
-        return False
+        elapsed = time.time() - started
+        ok = True
+        ok &= check("Model loads", True, f"{elapsed:.1f}s")
+        ok &= check("Observation space", model.observation_space.shape is not None, str(model.observation_space.shape))
+        ok &= check("Action space", model.action_space.shape is not None, str(model.action_space.shape))
+        return ok
+    except Exception as exc:
+        return check("Model load", False, str(exc))
 
 
-# ══════════════════════════════════════════════════════════════════
-# 7. GitHub Actions
-# ══════════════════════════════════════════════════════════════════
+def infer_github_repo() -> str:
+    from config_loader import CFG
+
+    if CFG.github_repo:
+        return CFG.github_repo
+    if os.getenv("GITHUB_REPOSITORY"):
+        return os.getenv("GITHUB_REPOSITORY", "")
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        remote = result.stdout.strip()
+    except Exception:
+        return ""
+
+    if remote.endswith(".git"):
+        remote = remote[:-4]
+    if remote.startswith("git@github.com:"):
+        return remote.split("git@github.com:", 1)[1]
+    if "github.com/" in remote:
+        return remote.split("github.com/", 1)[1].strip("/")
+    return ""
+
 
 def check_github_actions() -> bool:
-    print("\n[7] GitHub Actions")
+    print("\n[7] GitHub")
+    repo = infer_github_repo()
+    if not repo:
+        warn("GitHub Actions check skipped", "repo not configured")
+        return True
+
+    url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=5"
     try:
-        import urllib.request, json
-        url = "https://api.github.com/repos/owandakin-coder/agent-analyst/actions/runs?per_page=5"
-        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-        runs = data.get("workflow_runs", [])
-        if runs:
-            last = runs[0]
-            status = last.get("conclusion") or last.get("status", "?")
-            name   = last["name"]
-            date   = last["created_at"][:10]
-            ok = last.get("conclusion") in ("success", None)
-            check(f"Last run: {name}", True if ok else False,
-                  f"{date} · {status}")
-        else:
-            warn("No workflow runs found")
-        return True
-    except Exception as e:
-        warn("GitHub Actions check", f"skipped ({e})")
+        request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read())
+        runs = payload.get("workflow_runs", [])
+        if not runs:
+            warn("No workflow runs found", repo)
+            return True
+        run = runs[0]
+        status = run.get("conclusion") or run.get("status", "?")
+        date = str(run.get("created_at", ""))[:10]
+        return check(f"Last run: {run.get('name', 'workflow')}", status in ("success", None), f"{repo} · {date} · {status}")
+    except Exception as exc:
+        warn("GitHub Actions check skipped", str(exc))
         return True
 
-
-# ══════════════════════════════════════════════════════════════════
-# Main
-# ══════════════════════════════════════════════════════════════════
 
 def main(fast: bool = False) -> int:
     print("=" * 55)
-    print("  ATZMA — System Health Check")
+    print("  ATZMA - System Health Check")
     print("=" * 55)
 
-    results = []
-    results.append(check_config())
-    results.append(check_dependencies())
-    results.append(check_files())
-    results.append(check_env())
-
+    results = [
+        check_config(),
+        check_dependencies(),
+        check_files(),
+        check_env(),
+    ]
     if not fast:
-        results.append(check_alpaca())
-        results.append(check_model())
-        results.append(check_github_actions())
+        results.extend([check_alpaca(), check_model(), check_github_actions()])
 
-    passed = sum(results)
-    total  = len(results)
-
-    print(f"\n{'=' * 55}")
+    passed = sum(1 for result in results if result)
+    total = len(results)
+    print("\n" + "=" * 55)
     if passed == total:
-        print(f"  ✅ All {total} checks passed — system is healthy")
+        print(f"  {OK} All {total} checks passed")
     else:
-        print(f"  ❌ {total - passed}/{total} checks failed — fix issues above")
-    print("=" * 55 + "\n")
-
+        print(f"  {FAIL} {total - passed}/{total} checks failed")
+    print("=" * 55)
     return 0 if passed == total else 1
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="ATZMA Health Check")
-    p.add_argument("--fast", action="store_true",
-                   help="Skip Alpaca + model loading (no network)")
-    return p.parse_args()
+    parser = argparse.ArgumentParser(description="ATZMA Health Check")
+    parser.add_argument("--fast", action="store_true", help="Skip network-dependent checks")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    sys.exit(main(fast=args.fast))
+    arguments = parse_args()
+    sys.exit(main(fast=arguments.fast))
