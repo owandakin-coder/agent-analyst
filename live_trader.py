@@ -33,15 +33,21 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("LiveTrader")
 
-# ─── קבועים ────────────────────────────────────────────────────────────────
-WINDOW_SIZE    = 30   # חלון תצפית (ימים) – חייב להתאים לאימון
-FEATURE_COLS   = [    # פיצ'רים שהמודל ראה באימון
+# ─── קבועים (מ-config.yaml) ─────────────────────────────────────────────────
+try:
+    from config_loader import CFG as _CFG
+    WINDOW_SIZE   = _CFG.window_size
+    MIN_DATA_DAYS = max(200, WINDOW_SIZE * 7)
+except Exception:
+    WINDOW_SIZE   = 30
+    MIN_DATA_DAYS = 200
+
+FEATURE_COLS   = [    # פיצ'רים שהמודל ראה באימון – חייב להתאים ל-DataManager
     "returns", "log_returns",
     "price_to_ma20", "price_to_ma50", "ma_cross",
     "rsi", "macd_hist", "boll_pct", "boll_width",
     "atr_pct", "volume_ratio", "volatility_20",
 ]
-MIN_DATA_DAYS  = 200  # enough rows after dropna (z-score warmup ~78 + WINDOW_SIZE 30)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
