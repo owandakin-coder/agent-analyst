@@ -1,0 +1,77 @@
+# ================================================================
+# config.yaml  —  ATZMA Agent Analyst · Central Configuration
+# ================================================================
+# כל הפרמטרים הקשיחים מרוכזים כאן. שנה כאן במקום לגעת בקוד.
+
+# ── Universe ─────────────────────────────────────────────────────
+universe:
+  tickers:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - NVDA
+    - AMZN
+    - META
+    - TSLA
+    - JPM
+    - V
+    - BAC
+    - JNJ
+    - UNH
+    - XOM
+    - WMT
+    - SPY
+  benchmark: SPY           # הבנצ'מרק הראשי
+
+# ── Time Periods ─────────────────────────────────────────────────
+periods:
+  data_start:  "2015-01-01"
+  data_end:    "2024-12-31"
+  train_start: "2015-01-01"
+  train_end:   "2019-12-31"
+  val_start:   "2020-01-01"
+  val_end:     "2021-12-31"
+  test_start:  "2022-01-01"
+  test_end:    "2024-12-31"
+
+# ── Capital ───────────────────────────────────────────────────────
+capital:
+  initial:          100_000.0
+  min_trade_value:  500.0      # מינימום ערך עסקה
+
+# ── Training ─────────────────────────────────────────────────────
+training:
+  timesteps:        500_000
+  optuna_trials:    10
+  ensemble_seeds:   [0, 42, 123]
+  window_size:      30          # ימי מסחר בחלון תצפית
+
+# ── Risk Management ───────────────────────────────────────────────
+risk:
+  drawdown_reduce:  0.10        # drawdown שמפעיל REDUCED mode
+  drawdown_halt:    0.15        # drawdown שמפעיל HALTED mode
+  position_normal:  1.0
+  position_reduced: 0.5
+  kelly_fraction:   0.25        # Kelly חלקי
+  kelly_min:        0.10
+  kelly_max:        1.00
+  corr_threshold:   0.80        # מתאם גבוה → הקטנת פוזיציה
+  corr_window:      60          # ימים לחישוב מתאם
+
+# ── Trading Costs ─────────────────────────────────────────────────
+costs:
+  commission_pct:   0.001       # 0.1% per trade
+  slippage_pct:     0.0005      # 0.05% slippage
+
+# ── Walk-Forward Evaluation ───────────────────────────────────────
+walk_forward:
+  n_windows:        4           # מספר חלונות
+  train_months:     36          # חודשי אימון לכל חלון
+  test_months:      6           # חודשי בדיקה לכל חלון
+
+# ── Paths ────────────────────────────────────────────────────────
+paths:
+  models:   "models"
+  results:  "results"
+  logs:     "logs"
+  plots:    "results/plots"
