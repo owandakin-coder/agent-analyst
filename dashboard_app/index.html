@@ -483,6 +483,263 @@ body {
   color:#89bbff;
   border:1px solid rgba(10,132,255,.2);
 }
+.meta-strip {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin:2px 0 12px;
+}
+.meta-chip {
+  flex:1;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 12px;
+  border-radius:16px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.05);
+  font-size:11px;
+  color:var(--g1);
+}
+.meta-dot {
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:var(--green);
+  box-shadow:0 0 12px rgba(72,235,117,0.35);
+  flex-shrink:0;
+}
+.meta-icon {
+  width:16px;
+  height:16px;
+  flex-shrink:0;
+  color:var(--green);
+}
+.status-panel {
+  border-radius:20px;
+  background:linear-gradient(180deg, rgba(18,22,28,0.98), rgba(13,16,22,0.94));
+  border:1px solid rgba(255,255,255,0.06);
+  overflow:hidden;
+  margin-bottom:12px;
+}
+.status-row {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:15px 16px;
+  border-bottom:1px solid rgba(255,255,255,0.05);
+}
+.status-row:last-child {
+  border-bottom:none;
+}
+.status-row-icon {
+  width:40px;
+  height:40px;
+  border-radius:12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(81,133,255,0.08);
+  color:#5ca3ff;
+  border:1px solid rgba(81,133,255,0.12);
+  flex-shrink:0;
+}
+.status-row-icon svg {
+  width:22px;
+  height:22px;
+}
+.status-row-body {
+  flex:1;
+  min-width:0;
+}
+.status-row-label {
+  font-size:10px;
+  letter-spacing:0.7px;
+  text-transform:uppercase;
+  color:var(--g3);
+}
+.status-row-value {
+  margin-top:4px;
+  font-size:15px;
+  font-weight:700;
+  color:var(--g1);
+}
+.status-row-value.good {
+  color:var(--green);
+}
+.status-row-value.paper {
+  color:#53a4ff;
+}
+.status-row-arrow {
+  color:var(--g3);
+  font-size:19px;
+  flex-shrink:0;
+}
+.action-strip {
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:9px;
+  margin-bottom:12px;
+}
+.action-mini {
+  border:none;
+  border-radius:16px;
+  padding:14px 10px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.06);
+  color:var(--white);
+  font-family:inherit;
+  cursor:pointer;
+  text-align:left;
+}
+.action-mini:active {
+  transform:scale(0.98);
+}
+.action-mini strong {
+  display:block;
+  font-size:14px;
+  font-weight:700;
+}
+.action-mini span {
+  display:block;
+  margin-top:4px;
+  font-size:10.5px;
+  color:var(--g2);
+}
+.action-mini.primary {
+  background:rgba(72,120,255,0.12);
+  border-color:rgba(72,120,255,0.28);
+  color:#7fb5ff;
+}
+.summary-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-bottom:12px;
+}
+.summary-card {
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(18,22,29,0.96), rgba(14,18,24,0.92));
+  border:1px solid rgba(255,255,255,0.05);
+  overflow:hidden;
+}
+.summary-card-pad {
+  padding:16px;
+}
+.summary-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:14px;
+}
+.summary-title {
+  font-size:11px;
+  letter-spacing:0.8px;
+  text-transform:uppercase;
+  color:var(--g2);
+}
+.summary-body {
+  display:grid;
+  gap:10px;
+}
+.metric-line {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:10px;
+}
+.metric-name {
+  font-size:12px;
+  color:var(--g2);
+}
+.metric-value {
+  font-size:13px;
+  font-weight:700;
+  color:var(--g1);
+}
+.metric-value.good {
+  color:var(--green);
+}
+.metric-progress {
+  display:grid;
+  gap:10px;
+}
+.progress-line {
+  display:grid;
+  gap:5px;
+}
+.progress-meta {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:8px;
+  font-size:11px;
+  color:var(--g2);
+}
+.progress-track {
+  height:7px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.08);
+  overflow:hidden;
+}
+.progress-fill {
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg, #3d8cff, #65b0ff);
+}
+.summary-link {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:12px 16px;
+  border-top:1px solid rgba(255,255,255,0.05);
+  color:#58a6ff;
+  font-size:12px;
+}
+.positions-stack {
+  display:grid;
+  gap:10px;
+}
+.position-card {
+  background:rgba(255,255,255,0.025);
+  border:1px solid rgba(255,255,255,0.05);
+  border-radius:16px;
+  padding:13px 14px;
+}
+.position-top {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+.position-symbol {
+  font-size:15px;
+  font-weight:800;
+}
+.position-name {
+  margin-top:3px;
+  font-size:11px;
+  color:var(--g3);
+}
+.position-pnl {
+  text-align:right;
+  font-size:12px;
+  font-weight:700;
+}
+.position-pnl.good { color:var(--green); }
+.position-pnl.bad { color:var(--red); }
+.position-meta {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  margin-top:10px;
+  font-size:11px;
+  color:var(--g2);
+}
 
 /* Stock row */
 .srow {
@@ -761,142 +1018,199 @@ select.m-input { appearance:none; cursor:pointer; }
         <div class="spark-wrap"><svg id="home-spark" viewBox="0 0 130 80" preserveAspectRatio="none"></svg></div>
       </div>
 
-      <div class="status-grid">
-        <div class="status-tile">
-          <div class="status-kicker">Trading Status</div>
-          <div class="status-main" id="ctl-trading-status">Running</div>
-          <div class="status-sub" id="ctl-trading-sub">Paper engine is allowed to execute.</div>
-          <div class="health-pill" id="ctl-trading-pill">ACTIVE</div>
+      <div class="meta-strip">
+        <div class="meta-chip">
+          <div class="meta-dot"></div>
+          <span id="meta-market-open">Markets Open</span>
         </div>
-        <div class="status-tile">
-          <div class="status-kicker">Sync Status</div>
-          <div class="status-main mono" id="ctl-sync-status">Synced</div>
-          <div class="status-sub mono" id="ctl-sync-sub">Broker check completed just now.</div>
-          <div class="health-pill" id="ctl-sync-pill">BROKER OK</div>
-        </div>
-        <div class="status-tile">
-          <div class="status-kicker">Active Executor</div>
-          <div class="status-main mono" id="ctl-executor">GitHub Actions</div>
-          <div class="status-sub" id="ctl-executor-sub">Primary engine for automated runs.</div>
-          <div class="health-pill" id="ctl-executor-pill">PRIMARY</div>
-        </div>
-        <div class="status-tile">
-          <div class="status-kicker">Broker Status</div>
-          <div class="status-main" id="ctl-broker">Connected</div>
-          <div class="status-sub" id="ctl-broker-sub">Paper account reachable and responsive.</div>
-          <div class="health-pill" id="ctl-broker-pill">PAPER</div>
+        <div class="meta-chip">
+          <svg class="meta-icon" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle>
+            <path d="M8.5 12.5L10.8 14.8L15.8 9.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+          <span id="meta-sync-line">Synced 3s ago</span>
         </div>
       </div>
 
-      <div class="detail-card control-card">
-        <div class="control-head">
-          <div>
-            <h2>Execution Controls</h2>
-            <p>Fast mobile access to the actions that matter: run, pause, resume, and hard stop.</p>
+      <div class="status-panel">
+        <div class="status-row">
+          <div class="status-row-icon" style="color:var(--green);border-color:rgba(72,235,117,0.18);background:rgba(72,235,117,0.06);">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M3 12H7L9 6L13 18L15 11L17 14H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
           </div>
-          <div class="mode-chip" id="active-mode">Paper</div>
+          <div class="status-row-body">
+            <div class="status-row-label">Trading Status</div>
+            <div class="status-row-value good" id="ctl-trading-status">Running</div>
+          </div>
+          <div class="status-row-arrow">›</div>
         </div>
-        <div class="control-actions">
-          <button class="ctl-btn ctl-btn-primary" id="btn-run-once" onclick="runControlAction('run_once')">Run Once</button>
-          <button class="ctl-btn ctl-btn-secondary" onclick="runControlAction('pause')">Pause Trading</button>
-          <button class="ctl-btn ctl-btn-secondary" onclick="runControlAction('resume')">Resume Trading</button>
-          <button class="ctl-btn ctl-btn-danger" onclick="runControlAction('stop')">Emergency Stop</button>
+        <div class="status-row">
+          <div class="status-row-icon">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M8 3H16L20 7V21H4V3H8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+              <path d="M8 11H16M8 15H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+          </div>
+          <div class="status-row-body">
+            <div class="status-row-label">Mode</div>
+            <div class="status-row-value paper" id="active-mode-row">Paper</div>
+          </div>
+          <div class="status-row-arrow">›</div>
         </div>
-        <div class="control-note" id="control-note">
-          Control surface is mobile-first. A real backend command channel still needs to be wired before these actions can change the engine remotely.
+        <div class="status-row">
+          <div class="status-row-icon" style="color:#ffffff;border-color:rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.58 2 12.22C2 16.74 4.87 20.57 8.84 21.92C9.34 22.02 9.5 21.7 9.5 21.42C9.5 21.17 9.49 20.49 9.49 19.73C6.73 20.35 6.14 18.52 6.14 18.52C5.68 17.32 5.03 17 5.03 17C4.12 16.36 5.1 16.37 5.1 16.37C6.11 16.44 6.64 17.44 6.64 17.44C7.53 19 8.97 18.55 9.54 18.28C9.63 17.61 9.89 17.15 10.18 16.89C7.97 16.63 5.65 15.75 5.65 11.8C5.65 10.67 6.04 9.74 6.69 9C6.59 8.74 6.25 7.69 6.79 6.28C6.79 6.28 7.64 6 9.48 7.28C10.29 7.05 11.16 6.94 12.03 6.94C12.9 6.94 13.77 7.05 14.58 7.28C16.42 6 17.27 6.28 17.27 6.28C17.81 7.69 17.47 8.74 17.37 9C18.02 9.74 18.41 10.67 18.41 11.8C18.41 15.76 16.08 16.62 13.86 16.88C14.23 17.21 14.56 17.86 14.56 18.85C14.56 20.28 14.55 21.08 14.55 21.42C14.55 21.7 14.71 22.03 15.22 21.92C19.19 20.57 22.06 16.74 22.06 12.22C22.06 6.58 17.58 2 12 2Z"></path>
+            </svg>
+          </div>
+          <div class="status-row-body">
+            <div class="status-row-label">Active Executor</div>
+            <div class="status-row-value paper" id="ctl-executor">GitHub Actions</div>
+          </div>
+          <div class="status-row-arrow">›</div>
+        </div>
+        <div class="status-row">
+          <div class="status-row-icon" style="color:var(--green);border-color:rgba(72,235,117,0.18);background:rgba(72,235,117,0.06);">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M5 12A7 7 0 0 1 19 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <path d="M8 12A4 4 0 0 1 16 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <circle cx="12" cy="12" r="1.7" fill="currentColor"></circle>
+            </svg>
+          </div>
+          <div class="status-row-body">
+            <div class="status-row-label">Broker Status</div>
+            <div class="status-row-value good" id="ctl-broker">Connected</div>
+          </div>
+          <div class="status-row-arrow">›</div>
+        </div>
+        <div class="status-row">
+          <div class="status-row-icon" style="color:var(--green);border-color:rgba(72,235,117,0.18);background:rgba(72,235,117,0.06);">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M4 4V10H10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="M20 20V14H14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+              <path d="M5.6 15A8 8 0 0 0 19 18.4L20 20M4 4L5 5.6A8 8 0 0 1 18.4 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            </svg>
+          </div>
+          <div class="status-row-body">
+            <div class="status-row-label">Sync Status</div>
+            <div class="status-row-value good" id="ctl-sync-status">Synced 3s ago</div>
+          </div>
+          <div class="status-row-arrow">›</div>
         </div>
       </div>
 
-      <div class="detail-card">
-        <div class="detail-head">
-          <h3>Decision & Execution</h3>
-          <span class="health-pill" id="decision-pill">MODEL LIVE</span>
-        </div>
-        <div class="detail-stack">
-          <div class="detail-row">
-            <div>
-              <div class="detail-label">Last Decision</div>
-              <div class="detail-value" id="last-decision-main">Hold</div>
-              <div class="detail-copy" id="last-decision-sub">Waiting for next confirmed signal.</div>
+      <button class="ctl-btn ctl-btn-danger" style="margin-bottom:12px;" onclick="runControlAction('stop')">Emergency Stop</button>
+
+      <div class="action-strip">
+        <button class="action-mini" id="btn-run-once" onclick="runControlAction('run_once')">
+          <strong>Run Once</strong>
+          <span>Execute now</span>
+        </button>
+        <button class="action-mini" onclick="runControlAction('pause')">
+          <strong>Pause</strong>
+          <span>Pause trading</span>
+        </button>
+        <button class="action-mini primary" onclick="runControlAction('resume')">
+          <strong>Resume</strong>
+          <span>Resume trading</span>
+        </button>
+      </div>
+
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="summary-card-pad">
+            <div class="summary-header">
+              <div class="summary-title">Portfolio Summary</div>
+              <span class="health-pill" id="decision-pill">MODEL LIVE</span>
+            </div>
+            <div class="summary-body">
+              <div>
+                <div class="metric-name">Total Equity</div>
+                <div class="hero-val" style="font-size:22px;margin:8px 0 0;" id="summary-equity">$124,830.50</div>
+              </div>
+              <div class="metric-line">
+                <span class="metric-name">Day P&amp;L</span>
+                <span class="metric-value good" id="summary-day-pnl">+$3,241.20</span>
+              </div>
+              <div class="metric-line">
+                <span class="metric-name">Unrealized P&amp;L</span>
+                <span class="metric-value good" id="summary-unrealized">+$2,104.32</span>
+              </div>
+              <div class="metric-line">
+                <span class="metric-name">Buying Power</span>
+                <span class="metric-value" id="summary-buying-power">$365,484.38</span>
+              </div>
             </div>
           </div>
-          <div class="detail-row">
-            <div>
-              <div class="detail-label">Last Order</div>
-              <div class="detail-value" id="last-order-main">No recent order</div>
-              <div class="detail-copy" id="last-order-sub">The audit trail will update after broker activity.</div>
+          <div class="summary-link" onclick="switchTab('alerts')"><span>View full positions</span><span>›</span></div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-card-pad">
+            <div class="summary-header">
+              <div class="summary-title">Risk Guard</div>
+              <span class="health-pill" id="risk-pill">ENFORCED</span>
+            </div>
+            <div class="metric-progress">
+              <div class="progress-line">
+                <div class="progress-meta"><span>Max Position Size</span><span id="risk-maxpos">10%</span></div>
+                <div class="progress-track"><div class="progress-fill" id="risk-maxpos-fill" style="width:62%;"></div></div>
+              </div>
+              <div class="progress-line">
+                <div class="progress-meta"><span>Drawdown Stop</span><span id="risk-ddstop">20%</span></div>
+                <div class="progress-track"><div class="progress-fill" id="risk-ddstop-fill" style="width:22%;"></div></div>
+              </div>
+              <div class="progress-line">
+                <div class="progress-meta"><span>Daily Order Limit</span><span id="risk-orderlimit">6/day</span></div>
+                <div class="progress-track"><div class="progress-fill" id="risk-orderlimit-fill" style="width:38%;"></div></div>
+              </div>
+              <div class="progress-line">
+                <div class="progress-meta"><span>Sync Guard</span><span id="risk-syncguard">Enabled</span></div>
+                <div class="progress-track"><div class="progress-fill" id="risk-syncguard-fill" style="width:92%;"></div></div>
+              </div>
             </div>
           </div>
+          <div class="summary-link" onclick="switchTab('settings')"><span>View risk settings</span><span>›</span></div>
         </div>
       </div>
 
-      <div class="detail-card">
-        <div class="detail-head">
-          <h3>Safety Guardrails</h3>
-          <span class="health-pill" id="risk-pill">ENFORCED</span>
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="summary-card-pad">
+            <div class="summary-header">
+              <div class="summary-title">Last Order</div>
+              <span class="health-pill" id="ctl-broker-pill">PAPER</span>
+            </div>
+            <div class="detail-stack">
+              <div>
+                <div class="detail-value" id="last-order-main">No recent order</div>
+                <div class="detail-copy" id="last-order-sub">The audit trail will update after broker activity.</div>
+              </div>
+            </div>
+          </div>
+          <div class="summary-link" onclick="switchTab('trades')"><span>View order history</span><span>›</span></div>
         </div>
-        <div class="safety-grid">
-          <div class="safety-chip">
-            <div class="status-kicker">Max Position</div>
-            <div class="v" id="risk-maxpos">20%</div>
-            <div class="s" id="risk-maxpos-sub">Single-name exposure cap.</div>
+        <div class="summary-card">
+          <div class="summary-card-pad">
+            <div class="summary-header">
+              <div class="summary-title">Last Model Decision</div>
+              <span class="health-pill" id="ctl-trading-pill">ACTIVE</span>
+            </div>
+            <div class="detail-stack">
+              <div>
+                <div class="detail-value" id="last-decision-main">Hold</div>
+                <div class="detail-copy" id="last-decision-sub">Waiting for next confirmed signal.</div>
+              </div>
+            </div>
           </div>
-          <div class="safety-chip">
-            <div class="status-kicker">Drawdown Stop</div>
-            <div class="v" id="risk-ddstop">15%</div>
-            <div class="s" id="risk-ddstop-sub">Trading halts beyond this loss.</div>
-          </div>
-          <div class="safety-chip">
-            <div class="status-kicker">Order Limit</div>
-            <div class="v" id="risk-orderlimit">6/day</div>
-            <div class="s" id="risk-orderlimit-sub">Execution capped during normal hours.</div>
-          </div>
-          <div class="safety-chip">
-            <div class="status-kicker">Sync Guard</div>
-            <div class="v" id="risk-syncguard">Enabled</div>
-            <div class="s" id="risk-syncguard-sub">Broker truth overrides local state.</div>
-          </div>
+          <div class="summary-link" onclick="switchTab('charts')"><span>View analytics</span><span>›</span></div>
         </div>
-      </div>
-
-      <div class="detail-card">
-        <div class="detail-head">
-          <h3>Portfolio Snapshot</h3>
-          <a onclick="switchTab('trades')" style="font-size:11px;color:var(--g3);cursor:pointer;">See All →</a>
-        </div>
-        <div class="kpi-grid" style="margin-bottom:14px;">
-          <div class="kpi">
-            <div class="kpi-accent" style="background:var(--green)"></div>
-            <div class="kpi-lbl">Sharpe Ratio</div>
-            <div class="kpi-val" style="color:var(--green)" id="k-sharpe">1.84</div>
-            <div class="kpi-sub">risk-adjusted return</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-accent" style="background:var(--red)"></div>
-            <div class="kpi-lbl">Max Drawdown</div>
-            <div class="kpi-val" style="color:var(--red)" id="k-dd">−8.3%</div>
-            <div class="kpi-sub">peak to trough</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-accent" style="background:var(--green)"></div>
-            <div class="kpi-lbl">Win Rate</div>
-            <div class="kpi-val" style="color:var(--green)" id="k-wr">62.4%</div>
-            <div class="kpi-sub">last 247 trades</div>
-          </div>
-          <div class="kpi">
-            <div class="kpi-accent" style="background:var(--g2)"></div>
-            <div class="kpi-lbl">Total Trades</div>
-            <div class="kpi-val" id="k-tr">247</div>
-            <div class="kpi-sub">since inception</div>
-          </div>
-        </div>
-        <div id="home-stocks"></div>
       </div>
 
       <div class="detail-card">
         <div class="detail-head">
           <h3>Audit Trail</h3>
-          <span class="health-pill" id="audit-pill">LIVE FEED</span>
+          <a onclick="switchTab('trades')" style="font-size:11px;color:#58a6ff;cursor:pointer;">View all</a>
         </div>
         <div class="audit-list" id="home-audit-list"></div>
       </div>
@@ -991,16 +1305,23 @@ select.m-input { appearance:none; cursor:pointer; }
       <p style="text-align:center;font-size:10px;color:var(--g3);padding:4px 0 20px;">ATZMA v2.1 · AI Trading Intelligence Platform</p>
     </div>
 
-    <!-- ══ ALERTS ══ -->
+    <!-- ══ POSITIONS ══ -->
     <div class="page" id="pg-alerts">
-      <div class="a-hdr">
-        <div class="a-hdr-l">
-          <h2>Alerts <span class="badge-new" id="alert-count">4 new</span></h2>
-          <p>Real-time signals & notifications</p>
+      <div class="detail-card" style="margin-top:2px;">
+        <div class="detail-head">
+          <h3>Positions</h3>
+          <span class="health-pill" id="positions-count-pill">0 OPEN</span>
         </div>
-        <button class="add-btn" onclick="openModal()">+ New</button>
+        <div id="positions-list" class="positions-stack"></div>
       </div>
-      <div id="alerts-list"></div>
+
+      <div class="detail-card">
+        <div class="detail-head">
+          <h3>Signals & Alerts</h3>
+          <button class="add-btn" onclick="openModal()">+ New</button>
+        </div>
+        <div id="alerts-list"></div>
+      </div>
     </div>
 
   </div><!-- /pages -->
@@ -1025,7 +1346,7 @@ select.m-input { appearance:none; cursor:pointer; }
           <rect x="16" y="3" width="4" height="19" rx="1" fill="#636366"/>
         </svg>
       </div>
-      <span class="tab-lbl">Charts</span>
+      <span class="tab-lbl">Analytics</span>
     </div>
     <div class="tab" id="tab-trades" onclick="switchTab('trades')">
       <div class="tab-bar-indicator"></div>
@@ -1036,7 +1357,7 @@ select.m-input { appearance:none; cursor:pointer; }
           <rect x="3" y="17" width="18" height="2.5" rx="1.2" fill="#636366"/>
         </svg>
       </div>
-      <span class="tab-lbl">Trades</span>
+      <span class="tab-lbl">Orders</span>
     </div>
     <div class="tab" id="tab-settings" onclick="switchTab('settings')">
       <div class="tab-bar-indicator"></div>
@@ -1046,7 +1367,7 @@ select.m-input { appearance:none; cursor:pointer; }
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="#636366" stroke-width="1.8"/>
         </svg>
       </div>
-      <span class="tab-lbl">Settings</span>
+      <span class="tab-lbl">More</span>
     </div>
     <div class="tab" id="tab-alerts" onclick="switchTab('alerts')">
       <div class="tab-bar-indicator"></div>
@@ -1057,7 +1378,7 @@ select.m-input { appearance:none; cursor:pointer; }
         </svg>
         <span id="alert-badge" style="position:absolute;top:-2px;right:-2px;width:8px;height:8px;background:var(--red);border-radius:50%;border:1.5px solid var(--bg);"></span>
       </div>
-      <span class="tab-lbl">Alerts</span>
+      <span class="tab-lbl">Positions</span>
     </div>
   </div>
 
@@ -1383,6 +1704,7 @@ function updateControlSurface() {
   setText('ctl-broker', controlState.broker);
   setText('ctl-broker-sub', controlState.brokerSub);
   setText('active-mode', controlState.mode);
+  setText('active-mode-row', controlState.mode);
   setText('last-decision-main', controlState.lastDecision);
   setText('last-decision-sub', controlState.lastDecisionSub);
   setText('last-order-main', controlState.lastOrder);
@@ -1590,6 +1912,7 @@ async function fetchAlpacaData() {
 
     trades = positions.length;
     renderStocks();
+    renderPositionsPage();
     updateHeroUI();
     renderHomeAudit();
 
@@ -1604,6 +1927,7 @@ async function fetchAlpacaData() {
     controlState.syncSub = 'Using cached UI state until the next successful broker sync.';
     setDataStatus('SIM');
     updateControlSurface();
+    renderPositionsPage();
     renderHomeAudit();
   }
 }
@@ -1626,10 +1950,15 @@ function updateHeroUI() {
   const chgEl = document.getElementById('h-chg');
   chgEl.textContent = sign + fmtMoney(chg);
   chgEl.style.color = col;
+  setText('summary-day-pnl', sign + fmtMoney(chg));
 
   const pctEl = document.getElementById('h-pct');
   pctEl.textContent = `(${sign}${Math.abs(pct).toFixed(2)}%) Today`;
   pctEl.style.color = col;
+  setText('summary-equity', fmtPort(portBase));
+
+  const unrealized = STOCKS.reduce((sum, s) => sum + (s.unrealized_pl || 0), 0);
+  setText('summary-unrealized', (unrealized >= 0 ? '+' : '-') + fmtMoney(unrealized));
 
   const arr = document.getElementById('h-arrow');
   arr.textContent = up ? '↑' : '↓';
@@ -1649,6 +1978,12 @@ function updateHeroUI() {
   setRiskCard('risk-ddstop', '15%', 'Trading halts beyond this loss.');
   setRiskCard('risk-orderlimit', Math.max(4, Math.min(10, STOCKS.length + 2)) + '/day', 'Execution capped during normal hours.');
   setRiskCard('risk-syncguard', controlState.sync === 'Degraded' ? 'Watch' : 'Enabled', controlState.sync === 'Degraded' ? 'Broker sync needs attention.' : 'Broker truth overrides local state.');
+  setText('summary-buying-power', alpacaAccount ? '$' + Number(alpacaAccount.buying_power || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '$0.00');
+  const maxPosPct = STOCKS.length ? Math.min(62, Math.max(18, Math.round(100 / STOCKS.length) * 3)) : 24;
+  document.getElementById('risk-maxpos-fill').style.width = maxPosPct + '%';
+  document.getElementById('risk-ddstop-fill').style.width = Math.min(100, Math.abs(pct) * 8).toFixed(0) + '%';
+  document.getElementById('risk-orderlimit-fill').style.width = Math.min(100, Math.max(12, trades * 6)).toFixed(0) + '%';
+  document.getElementById('risk-syncguard-fill').style.width = controlState.sync === 'Degraded' ? '38%' : '92%';
   updateControlSurface();
 }
 
@@ -1663,12 +1998,16 @@ function setDataStatus(mode, time) {
     lbl.style.color = controlState.emergency ? 'var(--red)' : controlState.tradingStatus === 'Paused' ? 'var(--orange)' : 'var(--green)';
     if (sub && time) sub.textContent = 'Broker sync · ' + time;
     controlState.syncSub = 'Last broker sync at ' + time + '.';
+    setText('meta-market-open', 'Markets Open');
+    setText('meta-sync-line', 'Synced ' + time);
   } else {
     dot.style.background = 'var(--orange)';
     lbl.textContent = controlState.emergency ? 'STOPPED' : 'DEGRADED';
     lbl.style.color = 'var(--orange)';
     if (sub) sub.textContent = 'Cached state · broker unavailable';
     controlState.syncSub = 'Cached UI state only. Awaiting fresh broker response.';
+    setText('meta-market-open', 'Market Watch');
+    setText('meta-sync-line', 'Sync delayed');
   }
 }
 
@@ -1748,6 +2087,42 @@ function renderStocks() {
         <div class="srow-pct" style="color:${col}">${sign}${pct.toFixed(2)}%</div>
       </div>
     </div>`;
+  }).join('');
+}
+
+function renderPositionsPage() {
+  const container = document.getElementById('positions-list');
+  const pill = document.getElementById('positions-count-pill');
+  if (!container) return;
+  if (pill) pill.textContent = STOCKS.length + ' OPEN';
+  if (!STOCKS.length) {
+    container.innerHTML = '<div class="position-card"><div class="position-symbol">No positions</div><div class="position-name">The broker returned an empty book.</div></div>';
+    return;
+  }
+  container.innerHTML = STOCKS.map((s) => {
+    const pnlPct = s.unrealized_plpc != null ? s.unrealized_plpc * 100 : 0;
+    const pnlCls = pnlPct >= 0 ? 'good' : 'bad';
+    const session = s.change_today != null ? s.change_today * 100 : 0;
+    const sessionSign = session >= 0 ? '+' : '';
+    return `
+      <div class="position-card">
+        <div class="position-top">
+          <div>
+            <div class="position-symbol">${s.t}</div>
+            <div class="position-name">${NAMES[s.t] || s.n}</div>
+          </div>
+          <div class="position-pnl ${pnlCls}">
+            ${sessionSign}${session.toFixed(2)}%
+            <div style="font-size:10px;color:var(--g3);margin-top:4px;">today</div>
+          </div>
+        </div>
+        <div class="position-meta">
+          <span>${s.shares} shares</span>
+          <span>$${s.price.toFixed(2)}</span>
+          <span class="position-pnl ${pnlCls}">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% P&amp;L</span>
+        </div>
+      </div>
+    `;
   }).join('');
 }
 
@@ -2066,11 +2441,11 @@ function addAlert() {
 // TAB SWITCHING
 // ════════════════════════════════════════════════════════
 const HDR = {
-  home:     ['Dashboard',  'AI Trading Intelligence Platform'],
-  charts:   ['Charts',     'Equity & Performance'],
-  trades:   ['Trades',     'Full History'],
-  settings: ['Settings',   'Configuration'],
-  alerts:   ['Alerts',     'Signals & Notifications'],
+  home:     ['Dashboard',  'Mobile Control Surface'],
+  charts:   ['Analytics',  'Equity, allocation and performance'],
+  trades:   ['Orders',     'Broker fills and execution history'],
+  settings: ['More',       'System configuration and utilities'],
+  alerts:   ['Positions',  'Live holdings and exposure'],
 };
 
 const ICON_FILLS  = { home:'#34c759', charts:'#636366', trades:'#636366', settings:'#636366', alerts:'#636366' };
@@ -2096,6 +2471,7 @@ function switchTab(name) {
 
   if (name === 'charts') initCharts();
   if (name === 'trades' && ALL_TRADES.length === 0) loadAlpacaTrades();
+  if (name === 'alerts') renderPositionsPage();
 }
 
 // ════════════════════════════════════════════════════════
