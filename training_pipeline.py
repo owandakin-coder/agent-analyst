@@ -26,7 +26,8 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 try:
     from config_loader import CFG as _CFG
     ENSEMBLE_SEEDS  = _CFG.ensemble_seeds
-    ENSEMBLE_STEPS  = _CFG.timesteps
+    ENSEMBLE_STEPS  = _CFG.ensemble_timesteps
+    TRIAL_TIMESTEPS = _CFG.trial_timesteps
     TRAIN_START     = _CFG.train_start
     TRAIN_END       = _CFG.train_end
     VAL_START       = _CFG.val_start
@@ -38,6 +39,7 @@ try:
 except Exception:
     ENSEMBLE_SEEDS  = [0, 42, 123]
     ENSEMBLE_STEPS  = 500_000
+    TRIAL_TIMESTEPS = 50_000
     TRAIN_START     = "2015-01-01"
     TRAIN_END       = "2019-12-31"
     VAL_START       = "2020-01-01"
@@ -141,7 +143,7 @@ class TrainingPipeline:
         model, _, vec_norm = self._train_model(
             self.train_data,
             params,
-            total_timesteps=50_000,
+            total_timesteps=TRIAL_TIMESTEPS,
             model_name=f"trial_{trial.number}",
         )
 
@@ -176,7 +178,7 @@ class TrainingPipeline:
         model, vec_env, vec_norm = self._train_model(
             combined_data,
             params,
-            total_timesteps=500_000,
+            total_timesteps=ENSEMBLE_STEPS,
             model_name="final_model",
         )
         vec_norm.save(os.path.join(MODEL_DIR, "vec_normalize.pkl"))

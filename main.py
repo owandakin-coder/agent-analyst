@@ -60,6 +60,7 @@ from trading_env         import TradingEnvironment
 from training_pipeline   import TrainingPipeline
 from execution_simulator import ExecutionSimulator
 from broker_api          import BrokerAPIStub, AlpacaBrokerAPI
+from control_plane       import can_trade, load_control_state
 from risk_manager        import RiskManager
 from live_trader         import LiveTrader
 
@@ -109,9 +110,9 @@ def step_train(aligned_data: dict[str, pd.DataFrame], n_optuna_trials: int = 15)
     meta = {
         "best_params":  pipeline.best_params,
         "tickers":      TICKERS,
-        "train_period": ("2015-01-01", "2019-12-31"),
-        "val_period":   ("2020-01-01", "2021-12-31"),
-        "test_period":  ("2022-01-01", "2024-12-31"),
+        "train_period": (CFG.train_start, CFG.train_end),
+        "val_period":   (CFG.val_start, CFG.val_end),
+        "test_period":  (CFG.test_start, CFG.test_end),
     }
     with open(os.path.join(MODEL_DIR, "training_meta.pkl"), "wb") as f:
         pickle.dump(meta, f)
@@ -213,6 +214,18 @@ def step_live_paper(model, vec_norm, auto_approve: bool = False, ensemble=False)
     print("  Mode: PAPER (virtual money, real API)\n")
 
     # ── בניית ברוקר ────────────────────────────────────────────────────────
+    try:
+        control_state = load_control_state()
+        trade_allowed, block_reason = can_trade(control_state)
+    except Exception as exc:
+        print(f"  [WARN] Control state unavailable: {exc}")
+        trade_allowed, block_reason = True, None
+
+    if not trade_allowed:
+        status = "EMERGENCY STOP" if block_reason == "emergency_stop" else "PAUSED"
+        print(f"  Trading skipped by control plane: {status}.")
+        return
+
     try:
         broker = AlpacaBrokerAPI(paper=True, auto_approve=auto_approve)
     except EnvironmentError as exc:

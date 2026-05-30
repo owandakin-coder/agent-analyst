@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from control_plane import can_trade, load_control_state
 from regime_detector import RegimeDetector
 from alternative_data import AlternativeDataFetcher, enrich_observation
 
@@ -36,11 +37,31 @@ log = logging.getLogger("LiveTrader")
 # ─── קבועים (מ-config.yaml) ─────────────────────────────────────────────────
 try:
     from config_loader import CFG as _CFG
-    WINDOW_SIZE   = _CFG.window_size
-    MIN_DATA_DAYS = max(200, WINDOW_SIZE * 7)
+    WINDOW_SIZE = _CFG.window_size
+    MIN_DATA_DAYS = max(_CFG.live_min_data_days, WINDOW_SIZE * 7)
+    BUY_THRESHOLD = _CFG.live_buy_threshold
+    SELL_THRESHOLD = _CFG.live_sell_threshold
+    MAX_CONCENTRATION = _CFG.live_max_concentration
+    CASH_BUFFER_PCT = _CFG.live_cash_buffer_pct
+    STOP_LOSS_PCT = _CFG.live_stop_loss_pct
+    PRICE_MIN = _CFG.live_price_min
+    PRICE_MAX = _CFG.live_price_max
+    DEFAULT_POLL_SECONDS = _CFG.live_poll_seconds
+    MARKET_OPEN_BUFFER_MINUTES = _CFG.live_market_open_buffer_minutes
+    MIN_TRADE_VALUE = _CFG.min_trade_value
 except Exception:
-    WINDOW_SIZE   = 30
+    WINDOW_SIZE = 30
     MIN_DATA_DAYS = 200
+    BUY_THRESHOLD = 0.05
+    SELL_THRESHOLD = -0.05
+    MAX_CONCENTRATION = 0.30
+    CASH_BUFFER_PCT = 0.05
+    STOP_LOSS_PCT = 0.08
+    PRICE_MIN = 1.0
+    PRICE_MAX = 10_000.0
+    DEFAULT_POLL_SECONDS = 60
+    MARKET_OPEN_BUFFER_MINUTES = 5
+    MIN_TRADE_VALUE = 500.0
 
 FEATURE_COLS   = [    # פיצ'רים שהמודל ראה באימון – חייב להתאים ל-DataManager
     "returns", "log_returns",
@@ -94,13 +115,13 @@ class LiveTrader:
         # Per-stock trailing stop-loss tracking
         self._entry_prices:   dict[str, float] = {}
         self._trailing_highs: dict[str, float] = {}   # max price since entry
-        self.stop_loss_pct: float = 0.08   # sell if price drops 8% from trailing high
+        self.stop_loss_pct: float = STOP_LOSS_PCT
 
     # ──────────────────────────────────────────────────────────────────────────
     # לולאה ראשית
     # ──────────────────────────────────────────────────────────────────────────
 
-    def run_loop(self, poll_seconds: int = 60):
+    def run_loop(self, poll_seconds: int = DEFAULT_POLL_SECONDS):
         """
         לולאה אינסופית: בכל פעם שהשוק פתוח – מריץ החלטה אחת ומחכה ליום הבא.
 
@@ -118,7 +139,9 @@ class LiveTrader:
                         log.info("Market is OPEN – running decision cycle.")
                         self.run_once()
                         # ישן עד לפתיחת השוק הבאה (+ 5 דקות חיץ)
-                        sleep_secs = self._seconds_until_next_open(buffer_minutes=5)
+                        sleep_secs = self._seconds_until_next_open(
+                            buffer_minutes=MARKET_OPEN_BUFFER_MINUTES
+                        )
                         log.info(
                             f"Decision executed. Sleeping {sleep_secs/3600:.1f}h "
                             f"until next market open."
@@ -150,6 +173,22 @@ class LiveTrader:
         בנה תצפית → חזה פעולה → בדוק סיכון → שלח פקודות.
         """
         # ── נתונים עדכניים ──────────────────────────────────────────────────
+        try:
+            state = load_control_state()
+            allowed, reason = can_trade(state)
+        except Exception as exc:
+            log.warning(f"Control plane unavailable: {exc}")
+            allowed, reason = True, None
+
+        if not allowed:
+            status = "emergency stop" if reason == "emergency_stop" else "paused"
+            log.warning(f"Trading skipped by control plane: {status}")
+            self._telegram(
+                f"⏸ *Agent skipped* — control plane is {status}.\n"
+                f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+            return
+
         log.info("Fetching latest market data ...")
         try:
             fresh_data = self._fetch_fresh_data()
@@ -168,8 +207,12 @@ class LiveTrader:
         log.info(f"Prices: {current_prices}")
 
         # ── שווי תיק עדכני ──────────────────────────────────────────────────
-        positions = self.broker.get_positions()
-        cash      = self.broker.get_cash()
+        snapshot = self._reconcile_snapshot()
+        if snapshot is None:
+            return
+
+        positions = snapshot["positions"]
+        cash      = snapshot["cash"]
         net_worth = cash + sum(
             positions.get(t, 0.0) * current_prices.get(t, 0.0)
             for t in self.tickers
@@ -283,8 +326,8 @@ class LiveTrader:
         self,
         prices: dict[str, float],
         fresh_data: dict[str, pd.DataFrame],
-        min_price: float = 1.0,
-        max_price: float = 10_000.0,
+        min_price: float = PRICE_MIN,
+        max_price: float = PRICE_MAX,
     ) -> dict[str, float]:
         """
         בודק מחירים חריגים ומחליף ב-fallback (סגירה אחרונה מהנתונים).
@@ -378,8 +421,8 @@ class LiveTrader:
         - ריכוזיות > 30%     → מדלג על קנייה
         - אחרת → החזק
         """
-        BUY_THRESHOLD  =  0.05
-        SELL_THRESHOLD = -0.05
+        buy_threshold = BUY_THRESHOLD
+        sell_threshold = SELL_THRESHOLD
 
         # ── Trailing Stop-Loss ────────────────────────────────────────────────
         # Updates the high-water mark per ticker and sells if price drops
@@ -412,6 +455,7 @@ class LiveTrader:
                         self.risk_manager.record_trade_outcome(ticker, pnl_pct)
                     self._entry_prices.pop(ticker, None)
                     self._trailing_highs.pop(ticker, None)
+                    positions[ticker] = 0.0
                     self._telegram(
                         f"🛑 *Trailing Stop triggered*\n"
                         f"{ticker}: -{drop_pct:.1%} from high\n"
@@ -426,7 +470,7 @@ class LiveTrader:
             held  = positions.get(ticker, 0.0)
             price = prices.get(ticker, 0.0)
 
-            if act < SELL_THRESHOLD and held > 0 and price > 0:
+            if act < sell_threshold and held > 0 and price > 0:
                 shares_to_sell = max(1, int(held * abs(act)))
                 log.info(f"Action {act:.3f} -> SELL {shares_to_sell} {ticker} @ ${price:.2f}")
                 result = self.broker.sell(ticker, shares_to_sell, price)
@@ -434,6 +478,7 @@ class LiveTrader:
                     log.warning(f"SELL {ticker} failed: {result}")
                 else:
                     sells_executed += 1
+                    positions[ticker] = max(0.0, held - shares_to_sell)
                     # Record outcome for Kelly Criterion — P&L from entry to exit
                     entry = self._entry_prices.get(ticker, 0.0)
                     if entry > 0:
@@ -444,16 +489,19 @@ class LiveTrader:
         # ── רענון מזומן אחרי מכירות ─────────────────────────────────────────
         if sells_executed > 0:
             try:
-                cash = self.broker.get_cash()
-                log.info(f"Cash after sells: ${cash:,.0f}")
+                snapshot = self._reconcile_snapshot()
+                if snapshot is not None:
+                    cash = snapshot["cash"]
+                    positions.update(snapshot["positions"])
+                    log.info(f"Cash after sells: ${cash:,.0f}")
             except Exception as exc:
                 log.warning(f"Could not refresh cash after sells: {exc}")
 
         # ── קניות אחר כך ─────────────────────────────────────────────────────
-        MAX_CONCENTRATION = 0.30   # max 30% of portfolio per stock
+        max_concentration = MAX_CONCENTRATION
 
         buy_actions = [(i, t) for i, t in enumerate(self.tickers)
-                       if float(action[i]) > BUY_THRESHOLD]
+                       if float(action[i]) > buy_threshold]
         total_buy_signal = sum(float(action[i]) for i, _ in buy_actions) or 1.0
 
         # חישוב שווי תיק כולל (מזומן + פוזיציות)
@@ -469,19 +517,24 @@ class LiveTrader:
 
             # בדיקת ריכוזיות: שווי נוכחי + קנייה מתוכננת לא יעלו על 30%
             current_value = positions.get(ticker, 0.0) * price
-            max_allowed   = MAX_CONCENTRATION * net_worth_total
+            max_allowed   = max_concentration * net_worth_total
             if current_value >= max_allowed:
                 log.warning(
                     f"CONCENTRATION LIMIT: {ticker} already at "
-                    f"{current_value/net_worth_total:.1%} (max {MAX_CONCENTRATION:.0%}). Skipping BUY."
+                    f"{current_value/net_worth_total:.1%} (max {max_concentration:.0%}). Skipping BUY."
                 )
                 continue
 
             # חלוקת מזומן פרופורציונלית לעוצמת הסיגנל
-            budget = cash * (act / total_buy_signal) * 0.95  # 5% buffer
+            budget = cash * (act / total_buy_signal) * (1 - CASH_BUFFER_PCT)
 
             # הגבל את התקציב כך שלא נחרוג מ-30%
             budget = min(budget, max_allowed - current_value)
+            if budget < MIN_TRADE_VALUE:
+                log.info(
+                    f"Skipping BUY {ticker}: budget ${budget:.2f} below minimum ${MIN_TRADE_VALUE:.2f}"
+                )
+                continue
             shares_to_buy = max(1, int(budget / price))
 
             log.info(f"Action {act:.3f} -> BUY {shares_to_buy} {ticker} @ ${price:.2f}")
@@ -501,6 +554,23 @@ class LiveTrader:
                     self._trailing_highs[ticker] = max(
                         self._trailing_highs.get(ticker, price), price
                     )
+                    positions[ticker] = total_shares
+                    cash = max(0.0, cash - shares_to_buy * price)
+
+    def _reconcile_snapshot(self) -> dict | None:
+        try:
+            snapshot = self.broker.reconcile_account_state()
+        except Exception as exc:
+            log.error(f"Account reconciliation failed: {exc}")
+            return None
+
+        if not isinstance(snapshot, dict):
+            log.error("Account reconciliation failed: invalid snapshot type")
+            return None
+        if "cash" not in snapshot or "positions" not in snapshot:
+            log.error("Account reconciliation failed: missing cash or positions")
+            return None
+        return snapshot
 
     # ──────────────────────────────────────────────────────────────────────────
     # התראות Telegram
