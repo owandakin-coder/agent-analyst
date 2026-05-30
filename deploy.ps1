@@ -24,20 +24,28 @@ $envVars = @{}
 Get-Content $ENV_FILE | ForEach-Object {
     if ($_ -match "^\s*([^#][^=\s]+)\s*=\s*(.+)\s*$") { $envVars[$matches[1]] = $matches[2].Trim() }
 }
-$ALPACA_KEY    = $envVars["ALPACA_API_KEY"]
-$ALPACA_SECRET = $envVars["ALPACA_SECRET_KEY"]
-$GITHUB_TOKEN  = $envVars["GITHUB_TOKEN"]
-$GITHUB_REPO   = if ($envVars["GITHUB_REPOSITORY"]) { $envVars["GITHUB_REPOSITORY"] } else { "owandakin-coder/agent-analyst" }
+$ALPACA_KEY       = $envVars["ALPACA_API_KEY"]
+$ALPACA_SECRET    = $envVars["ALPACA_SECRET_KEY"]
+$GITHUB_TOKEN     = $envVars["GITHUB_TOKEN"]
+$GITHUB_REPO      = if ($envVars["GITHUB_REPOSITORY"]) { $envVars["GITHUB_REPOSITORY"] } else { "owandakin-coder/agent-analyst" }
+$SUPABASE_TOKEN   = $envVars["SUPABASE_ACCESS_TOKEN"]
+
 if (-not $ALPACA_KEY -or -not $ALPACA_SECRET) {
     Write-Host "ERROR: Missing Alpaca keys in .env" -ForegroundColor Red; exit 1
 }
 Write-Host "  .env OK (key: $($ALPACA_KEY.Substring(0,8))...)" -ForegroundColor Green
 
-# ── Step 1: Login ────────────────────────────────────────────────────────────
+# ── Step 1: Auth ─────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "  [1/5] Login to Supabase (browser will open)..." -ForegroundColor Yellow
-npx --yes supabase@latest login
-if ($LASTEXITCODE -ne 0) { Write-Host "Login failed" -ForegroundColor Red; exit 1 }
+if ($SUPABASE_TOKEN -and $SUPABASE_TOKEN -notlike "sbp_xxx*") {
+    Write-Host "  [1/5] Using SUPABASE_ACCESS_TOKEN from .env (no browser needed)..." -ForegroundColor Green
+    $env:SUPABASE_ACCESS_TOKEN = $SUPABASE_TOKEN
+} else {
+    Write-Host "  [1/5] No SUPABASE_ACCESS_TOKEN in .env — opening browser login..." -ForegroundColor Yellow
+    Write-Host "        (Tip: add SUPABASE_ACCESS_TOKEN=sbp_... to .env to skip this step)" -ForegroundColor DarkGray
+    npx --yes supabase@latest login
+    if ($LASTEXITCODE -ne 0) { Write-Host "Login failed" -ForegroundColor Red; exit 1 }
+}
 
 # ── Step 2: Link project ─────────────────────────────────────────────────────
 Write-Host ""
