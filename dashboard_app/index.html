@@ -977,12 +977,88 @@ select.m-input { appearance:none; cursor:pointer; }
 .profile-key { font-size:12.5px; color:var(--g3); }
 .profile-val { font-size:13.5px; font-weight:600; }
 
+.auth-overlay {
+  position: fixed; inset: 0; z-index: 400;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  background: radial-gradient(circle at top, rgba(10,30,60,0.45), rgba(0,0,0,0.9) 55%);
+  backdrop-filter: blur(18px);
+}
+.auth-overlay.hidden { display: none; }
+.auth-card {
+  width: 100%; max-width: 390px;
+  background: linear-gradient(180deg, rgba(17,19,22,0.96), rgba(10,12,14,0.96));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 28px;
+  padding: 28px 22px 22px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.45);
+}
+.auth-brand { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+.auth-brand img { width:42px; height:42px; border-radius:14px; object-fit:cover; }
+.auth-kicker { font-size:11px; letter-spacing:0.9px; text-transform:uppercase; color:var(--g3); }
+.auth-title { font-size:28px; font-weight:800; letter-spacing:-0.8px; margin-top:3px; }
+.auth-copy { font-size:13px; line-height:1.5; color:var(--g2); margin-bottom:18px; }
+.auth-tabs { display:flex; gap:8px; margin-bottom:16px; }
+.auth-tab {
+  flex:1; border:none; border-radius:14px; padding:11px 12px;
+  background:var(--c3); color:var(--g2); font:inherit; font-size:13px; font-weight:700; cursor:pointer;
+}
+.auth-tab.active { background:rgba(52,199,89,.16); color:var(--green); border:1px solid rgba(52,199,89,.25); }
+.auth-row { display:flex; gap:10px; }
+.auth-input {
+  width:100%; background:var(--c3); border:1px solid var(--g4); color:var(--white);
+  border-radius:14px; padding:14px 15px; margin-bottom:10px; font:inherit; font-size:14px; outline:none;
+}
+.auth-input:focus { border-color:rgba(52,199,89,.45); }
+.auth-submit {
+  width:100%; margin-top:6px; border:none; border-radius:14px; padding:14px 16px;
+  background:linear-gradient(135deg, #2d8cff, #34c759); color:#021017; font:inherit; font-size:14px; font-weight:800; cursor:pointer;
+}
+.auth-meta { margin-top:14px; font-size:12px; color:var(--g3); line-height:1.45; }
+.auth-error { min-height:18px; margin-top:10px; font-size:12px; color:#ff8f88; }
+.auth-userbar {
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; margin-top:10px; padding:11px 12px;
+  border-radius:14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.05);
+}
+.auth-userinfo { min-width:0; }
+.auth-userinfo strong { display:block; font-size:13px; }
+.auth-userinfo span { display:block; margin-top:3px; font-size:11px; color:var(--g3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.auth-link {
+  border:none; background:none; color:var(--blue); font:inherit; font-size:12px; font-weight:700; cursor:pointer;
+}
+
 </style>
 </head>
 <body>
 
 <!-- Neural background -->
 <canvas id="bg-canvas"></canvas>
+
+<div id="auth-overlay" class="auth-overlay hidden">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <img src="logo.png" alt="ATZMA">
+      <div>
+        <div class="auth-kicker">Institutional Access</div>
+        <div class="auth-title">ATZMA</div>
+      </div>
+    </div>
+    <div class="auth-copy">Create your own secure workspace. Your profile and settings stay separated from every other member.</div>
+    <div class="auth-tabs">
+      <button id="auth-tab-signin" class="auth-tab active" onclick="setAuthMode('signin')">Sign In</button>
+      <button id="auth-tab-signup" class="auth-tab" onclick="setAuthMode('signup')">Create Account</button>
+    </div>
+    <div id="auth-signup-row" class="auth-row" style="display:none;">
+      <input id="auth-display-name" class="auth-input" type="text" placeholder="Display name">
+    </div>
+    <input id="auth-email" class="auth-input" type="email" placeholder="Email address" autocomplete="email">
+    <input id="auth-password" class="auth-input" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="auth-submit" class="auth-submit" onclick="submitAuth()">Sign In</button>
+    <div id="auth-error" class="auth-error"></div>
+    <div class="auth-meta">Paper trading stays centralized for now. Identity, profile, and settings are already per user.</div>
+  </div>
+</div>
 
 <div id="app">
 
@@ -1432,6 +1508,9 @@ select.m-input { appearance:none; cursor:pointer; }
       <div class="profile-row"><span class="profile-key">Cash</span><span class="profile-val" id="p-cash">—</span></div>
       <div class="profile-row"><span class="profile-key">Open Positions</span><span class="profile-val" id="p-pos">—</span></div>
       <div class="profile-row"><span class="profile-key">Status</span><span class="profile-val" style="color:var(--green)" id="p-status">—</span></div>
+      <div style="margin-top:18px;">
+        <button id="profile-signout-btn" onclick="signOutUser()" style="display:none;width:100%;padding:13px;background:rgba(255,59,48,.12);border:1px solid rgba(255,59,48,.25);border-radius:12px;color:#ff8f88;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;">Sign Out</button>
+      </div>
     </div>
 
     <!-- EDIT MODE (hidden by default) -->
@@ -1628,6 +1707,157 @@ const _h = window.location.hostname;
 const API_BASE = (_h === 'localhost' || _h === '127.0.0.1')
   ? '/api'
   : 'https://sofowpweliticltlbxrj.supabase.co/functions/v1/api';
+const SUPABASE_URL = 'https://sofowpweliticltlbxrj.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvZm93cHdlbGl0aWNsdGxieHJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNDcwNjMsImV4cCI6MjA5NTYyMzA2M30.HV0KuEi18tR9rP7bC89LqkcjcP6v9JtGcC573093md8';
+const AUTH_STORAGE_KEY = 'atzma_auth_session';
+let authMode = 'signin';
+let authSession = null;
+let currentUser = null;
+let currentPreferences = null;
+
+function getAuthHeaders(includeJson = false) {
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (authSession?.access_token) headers['Authorization'] = 'Bearer ' + authSession.access_token;
+  return headers;
+}
+
+async function apiJSON(path, options = {}) {
+  const res = await fetch(API_BASE + path, options);
+  let payload = {};
+  try { payload = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    const message = payload.error_description || payload.msg || payload.message || payload.error || ('Request failed: ' + res.status);
+    throw new Error(message);
+  }
+  return payload;
+}
+
+function setAuthMode(mode) {
+  authMode = mode === 'signup' ? 'signup' : 'signin';
+  document.getElementById('auth-tab-signin').classList.toggle('active', authMode === 'signin');
+  document.getElementById('auth-tab-signup').classList.toggle('active', authMode === 'signup');
+  document.getElementById('auth-signup-row').style.display = authMode === 'signup' ? 'flex' : 'none';
+  document.getElementById('auth-submit').textContent = authMode === 'signup' ? 'Create Account' : 'Sign In';
+  document.getElementById('auth-error').textContent = '';
+}
+
+function showAuthOverlay() {
+  document.getElementById('auth-overlay').classList.remove('hidden');
+}
+
+function hideAuthOverlay() {
+  document.getElementById('auth-overlay').classList.add('hidden');
+}
+
+function storeAuthSession(session) {
+  authSession = session;
+  if (session) {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  } else {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+async function submitAuth() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const displayName = document.getElementById('auth-display-name').value.trim();
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  if (!email || !password) {
+    errEl.textContent = 'Email and password are required.';
+    return;
+  }
+  try {
+    const path = authMode === 'signup' ? '/auth/signup' : '/auth/signin';
+    const payload = await apiJSON(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        email,
+        password,
+        display_name: displayName || email.split('@')[0],
+      }),
+    });
+    if (payload.session?.access_token) {
+      storeAuthSession(payload.session);
+      await hydrateCurrentUser();
+      hideAuthOverlay();
+      toast(authMode === 'signup' ? 'Account created' : 'Signed in');
+      return;
+    }
+    errEl.textContent = 'Account created. Check your email if confirmation is enabled.';
+  } catch (e) {
+    errEl.textContent = e.message;
+  }
+}
+
+async function hydrateCurrentUser() {
+  if (!authSession?.access_token) {
+    currentUser = null;
+    currentPreferences = null;
+    updateIdentityUI();
+    return null;
+  }
+  try {
+    const payload = await apiJSON('/me', {
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    });
+    currentUser = payload.profile || null;
+    currentPreferences = payload.preferences || null;
+    mergeRemotePreferences();
+    loadSettings();
+    updateIdentityUI();
+    return payload;
+  } catch (e) {
+    storeAuthSession(null);
+    currentUser = null;
+    currentPreferences = null;
+    updateIdentityUI();
+    showAuthOverlay();
+    throw e;
+  }
+}
+
+function mergeRemotePreferences() {
+  if (!currentPreferences) return;
+  const map = {
+    daily_email: currentPreferences.daily_email,
+    daily_email_on: currentPreferences.daily_email ? true : undefined,
+    risk_level: currentPreferences.risk_level,
+    risk_sub: currentPreferences.risk_note,
+    auto_trade: currentPreferences.auto_trade,
+    stop_loss: currentPreferences.stop_loss,
+    kelly: currentPreferences.kelly,
+    push_alerts: currentPreferences.push_alerts,
+  };
+  Object.entries(map).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) S[k] = v;
+  });
+  localStorage.setItem('atzma_s', JSON.stringify(S));
+}
+
+function updateIdentityUI() {
+  const name = currentUser?.display_name || currentUser?.email || 'Guest';
+  const email = currentUser?.email || 'Sign in required';
+  const profileSub = document.getElementById('profile-sub');
+  if (profileSub) profileSub.textContent = name + (currentUser ? ' · Member Workspace' : ' · Sign In Required');
+  const avatar = document.querySelector('.avatar');
+  if (avatar && currentUser) avatar.title = email;
+  const signoutBtn = document.getElementById('profile-signout-btn');
+  if (signoutBtn) signoutBtn.style.display = currentUser ? 'inline-flex' : 'none';
+}
+
+async function signOutUser() {
+  storeAuthSession(null);
+  currentUser = null;
+  currentPreferences = null;
+  updateIdentityUI();
+  showAuthOverlay();
+  toast('Signed out');
+}
 
 // Company name mapping
 const NAMES = {
@@ -1769,10 +1999,15 @@ async function fetchControlState() {
 
 async function runControlAction(action) {
   try {
+    if (!authSession?.access_token) {
+      showAuthOverlay();
+      toast('Sign in required');
+      return;
+    }
     if (action === 'run_once') {
       const res = await fetch(API_BASE + '/control/run_once', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify({ actor: 'mobile_dashboard' }),
       });
       const payload = await res.json();
@@ -1788,7 +2023,7 @@ async function runControlAction(action) {
 
     const res = await fetch(API_BASE + '/control', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
       body: JSON.stringify({ action, actor: 'mobile_dashboard' }),
     });
     const payload = await res.json();
@@ -2478,10 +2713,42 @@ function switchTab(name) {
 // SETTINGS — Full implementation
 // ════════════════════════════════════════════════════════
 let alpacaAccount = null;
+let syncPrefsTimer = null;
 
 // ── Persistence ──
 const S = JSON.parse(localStorage.getItem('atzma_s') || '{}');
-function saveS(k, v) { S[k] = v; localStorage.setItem('atzma_s', JSON.stringify(S)); }
+function queuePreferenceSync() {
+  if (!currentUser || !authSession?.access_token) return;
+  clearTimeout(syncPrefsTimer);
+  syncPrefsTimer = setTimeout(syncPreferencesRemote, 350);
+}
+async function syncPreferencesRemote() {
+  if (!currentUser || !authSession?.access_token) return;
+  try {
+    const payload = await apiJSON('/me/preferences', {
+      method: 'PUT',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({
+        daily_email: S.daily_email || null,
+        risk_level: S.risk_level || 'Normal',
+        risk_note: S.risk_sub || 'Max drawdown threshold: 15%',
+        auto_trade: S.auto_trade !== false,
+        stop_loss: S.stop_loss !== false,
+        kelly: S.kelly !== false,
+        push_alerts: !!S.push_alerts,
+        ui: { timezone: S.profile_tz || null },
+      }),
+    });
+    currentPreferences = payload.preferences || currentPreferences;
+  } catch (e) {
+    console.warn('syncPreferencesRemote:', e.message);
+  }
+}
+function saveS(k, v) {
+  S[k] = v;
+  localStorage.setItem('atzma_s', JSON.stringify(S));
+  queuePreferenceSync();
+}
 
 function loadSettings() {
   const map = { auto_trade:'tog-autotrade', stop_loss:'tog-stoploss', kelly:'tog-kelly', daily_email_on:'tog-email' };
@@ -2541,27 +2808,32 @@ function closeSheet(id) { document.getElementById(id).classList.remove('open'); 
 
 // ── Profile ──
 function openProfile() {
+  if (!currentUser) {
+    showAuthOverlay();
+    toast('Sign in required');
+    return;
+  }
   openSheet('profile-sheet');
-  cancelProfileEdit(); // always open in view mode
+  cancelProfileEdit();
   const acc = alpacaAccount;
-  const name = S.profile_name || 'EA Arage';
-  const email = S.profile_email || S.daily_email || '—';
-  const phone = S.profile_phone || '—';
+  const name = currentUser.display_name || S.profile_name || 'Member';
+  const email = currentUser.email || S.profile_email || S.daily_email || '-';
+  const phone = currentUser.phone || S.profile_phone || '-';
   document.getElementById('p-name').textContent       = name;
   document.getElementById('p-email-view').textContent = email;
   document.getElementById('p-phone-view').textContent = phone;
-  document.getElementById('profile-sub').textContent  = name + ' · Paper Account';
+  document.getElementById('profile-sub').textContent  = name + ' - Member Workspace';
   if (acc) {
-    document.getElementById('p-type').textContent    = (acc.account_type || 'Paper').charAt(0).toUpperCase() + (acc.account_type||'paper').slice(1) + ' Account';
-    document.getElementById('p-acct').textContent    = acc.id ? '****' + acc.id.slice(-4).toUpperCase() : '—';
+    document.getElementById('p-type').textContent    = (currentUser.account_tier || 'paper').charAt(0).toUpperCase() + (currentUser.account_tier || 'paper').slice(1) + ' Workspace';
+    document.getElementById('p-acct').textContent    = acc.id ? '****' + acc.id.slice(-4).toUpperCase() : '-';
     document.getElementById('p-equity').textContent  = '$' + parseFloat(acc.equity || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('p-bp').textContent      = '$' + parseFloat(acc.buying_power || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('p-cash').textContent    = '$' + parseFloat(acc.cash || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('p-pos').textContent     = STOCKS.length + ' positions';
-    document.getElementById('p-status').textContent  = (acc.status || 'ACTIVE').toUpperCase() + ' ✓';
+    document.getElementById('p-status').textContent  = (acc.status || 'ACTIVE').toUpperCase() + ' OK';
   } else {
     ['p-type','p-acct','p-equity','p-bp','p-cash','p-pos','p-status'].forEach(id => {
-      document.getElementById(id).textContent = 'Loading…';
+      document.getElementById(id).textContent = 'Loading...';
     });
     fetch(API_BASE + '/account', {cache:'no-store'}).then(r=>r.json()).then(a => {
       alpacaAccount = a;
@@ -2571,14 +2843,15 @@ function openProfile() {
 }
 
 function toggleProfileEdit() {
+  if (!currentUser) { showAuthOverlay(); return; }
   const isEditing = document.getElementById('profile-edit').style.display !== 'none';
   if (isEditing) { cancelProfileEdit(); return; }
-  // populate inputs with saved values
-  document.getElementById('edit-name').value  = S.profile_name  || 'EA Arage';
-  document.getElementById('edit-email').value = S.profile_email || S.daily_email || '';
-  document.getElementById('edit-phone').value = S.profile_phone || '';
+  document.getElementById('edit-name').value  = currentUser.display_name || S.profile_name || '';
+  document.getElementById('edit-email').value = currentUser.email || S.profile_email || S.daily_email || '';
+  document.getElementById('edit-phone').value = currentUser.phone || S.profile_phone || '';
   const tzSel = document.getElementById('edit-tz');
-  if (S.profile_tz) { for (let o of tzSel.options) if (o.value === S.profile_tz) o.selected = true; }
+  const activeTz = currentUser.timezone || S.profile_tz;
+  if (activeTz) { for (let o of tzSel.options) if (o.value === activeTz) o.selected = true; }
   document.getElementById('profile-view').style.display = 'none';
   document.getElementById('profile-edit').style.display = 'block';
   document.getElementById('profile-edit-btn').textContent = 'Cancel';
@@ -2592,21 +2865,40 @@ function cancelProfileEdit() {
   document.getElementById('profile-edit-btn').style.color = 'var(--blue)';
 }
 
-function saveProfile() {
+async function saveProfile() {
   const name  = document.getElementById('edit-name').value.trim();
   const email = document.getElementById('edit-email').value.trim();
   const phone = document.getElementById('edit-phone').value.trim();
   const tz    = document.getElementById('edit-tz').value;
   if (!name) { toast('Name cannot be empty'); return; }
-  saveS('profile_name',  name);
-  saveS('profile_email', email || null);
-  saveS('profile_phone', phone || null);
-  saveS('profile_tz',    tz);
-  if (email) saveS('daily_email', email);
-  // Refresh view
-  cancelProfileEdit();
-  openProfile();
-  toast('Profile saved ✓');
+  try {
+    const payload = await apiJSON('/me/profile', {
+      method: 'PUT',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({
+        display_name: name,
+        email: email || null,
+        phone: phone || null,
+        timezone: tz,
+        account_tier: currentUser?.account_tier || 'paper',
+        trading_mode: currentUser?.trading_mode || 'paper',
+        active_executor: currentUser?.active_executor || 'github_actions',
+      }),
+    });
+    currentUser = payload.profile || currentUser;
+    saveS('profile_name',  name);
+    saveS('profile_email', email || null);
+    saveS('profile_phone', phone || null);
+    saveS('profile_tz',    tz);
+    if (email) saveS('daily_email', email);
+    cancelProfileEdit();
+    openProfile();
+    updateIdentityUI();
+    toast('Profile saved');
+  } catch (e) {
+    console.warn('saveProfile:', e.message);
+    toast('Profile save failed');
+  }
 }
 
 // ── Alpaca info ──
@@ -2787,6 +3079,25 @@ updateControlSurface();
 loadAlpacaTrades();
 fetchControlState();
 setInterval(fetchControlState, 30000);
+
+async function bootstrapAuth() {
+  setAuthMode('signin');
+  const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+  if (!raw) {
+    updateIdentityUI();
+    showAuthOverlay();
+    return;
+  }
+  try {
+    storeAuthSession(JSON.parse(raw));
+    await hydrateCurrentUser();
+    hideAuthOverlay();
+  } catch (_) {
+    showAuthOverlay();
+  }
+}
+
+bootstrapAuth();
 
 // ════════════════════════════════════════════════════════
 // TOAST

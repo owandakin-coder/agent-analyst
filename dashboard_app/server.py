@@ -47,6 +47,7 @@ ENV = load_env(ENV_PATH)
 ALPACA_KEY    = ENV.get('ALPACA_API_KEY', '')
 ALPACA_SECRET = ENV.get('ALPACA_SECRET_KEY', '')
 ALPACA_BASE   = ENV.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets/v2').rstrip('/')
+REMOTE_API_BASE = ENV.get('ATZMA_REMOTE_API_BASE', 'https://sofowpweliticltlbxrj.supabase.co/functions/v1/api').rstrip('/')
 
 print(f'Alpaca: {ALPACA_BASE}', flush=True)
 print(f'Key   : {ALPACA_KEY[:8]}...', flush=True)
@@ -102,6 +103,22 @@ def fetch_yf_many(symbols_str):
     for t in threads: t.start()
     for t in threads: t.join()
     return results
+
+def proxy_remote(path, method='GET', payload=None, headers=None):
+    url = REMOTE_API_BASE + path
+    req_headers = {'Accept': 'application/json'}
+    if headers and headers.get('Authorization'):
+        req_headers['Authorization'] = headers.get('Authorization')
+    data = None
+    if payload is not None:
+        req_headers['Content-Type'] = 'application/json'
+        data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        raw = r.read()
+        if r.info().get('Content-Encoding') == 'gzip':
+            raw = gzip.decompress(raw)
+        return json.loads(raw)
 
 # ── HTTP Handler ──────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
@@ -220,6 +237,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply_json({'error': str(e)}, 500)
             return
 
+        if path in ('/api/auth/me', '/api/me', '/api/me/audit'):
+            try:
+                self.reply_json(proxy_remote(path[4:], headers=self.headers))
+            except urllib.error.HTTPError as e:
+                try:
+                    self.reply_json(json.loads(e.read().decode('utf-8')), e.code)
+                except Exception:
+                    self.reply_json({'error': str(e)}, e.code)
+            except Exception as e:
+                self.reply_json({'error': str(e)}, 500)
+            return
+
         # ── Static files ──────────────────────────────────────────────────────
         if path == '/': path = '/index.html'
         file_path = os.path.join(ROOT, path.lstrip('/'))
@@ -259,6 +288,20 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 actor = str(payload.get('actor', 'dashboard_local')).strip() or 'dashboard_local'
                 self.reply_json(dispatch_trade_workflow(actor=actor), 202)
+            except Exception as e:
+                self.reply_json({'error': str(e)}, 500)
+            return
+
+        if path in ('/api/auth/signup', '/api/auth/signin', '/api/me/profile', '/api/me/preferences'):
+            try:
+                payload = self.read_json()
+                method = 'PUT' if path.startswith('/api/me/') else 'POST'
+                self.reply_json(proxy_remote(path[4:], method=method, payload=payload, headers=self.headers))
+            except urllib.error.HTTPError as e:
+                try:
+                    self.reply_json(json.loads(e.read().decode('utf-8')), e.code)
+                except Exception:
+                    self.reply_json({'error': str(e)}, e.code)
             except Exception as e:
                 self.reply_json({'error': str(e)}, 500)
             return
