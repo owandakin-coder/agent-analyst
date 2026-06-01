@@ -50,6 +50,7 @@ Recommended:
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `DISCORD_WEBHOOK_URL`
 
 ## 6. Validation commands
 
@@ -70,6 +71,9 @@ Go only if all are true:
 - Health check passes
 - Test suite passes
 - Guest users see only `Locked` state
+- `/health` returns `200`
+- Auth rate limiting is active
+- Duplicate `Run Now` requests do not create extra queued jobs
 
 No-go if any of these fail:
 

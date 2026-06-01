@@ -9,11 +9,8 @@ live_trader.py
 
 from __future__ import annotations
 
-import os
 import time
 import logging
-import urllib.request
-import urllib.parse
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
@@ -21,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from control_plane import can_trade, load_control_state
+from notifications import send_operator_alert
 from regime_detector import RegimeDetector
 from alternative_data import AlternativeDataFetcher, enrich_observation
 
@@ -578,20 +576,7 @@ class LiveTrader:
 
     def _telegram(self, msg: str):
         """שליחת הודעה גנרית לטלגרם."""
-        token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-        if not token or not chat_id:
-            return
-        try:
-            url  = f"https://api.telegram.org/bot{token}/sendMessage"
-            data = urllib.parse.urlencode({
-                "chat_id":    chat_id,
-                "text":       msg,
-                "parse_mode": "Markdown",
-            }).encode()
-            urllib.request.urlopen(url, data, timeout=10)
-        except Exception as exc:
-            log.debug(f"Telegram send failed: {exc}")
+        send_operator_alert(msg, markdown=True)
 
     def _notify_startup(self):
         """הודעה בהפעלת הסוכן."""

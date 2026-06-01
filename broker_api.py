@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from notifications import send_operator_alert
 
 try:
     from alpaca.trading.client import TradingClient
@@ -451,19 +452,7 @@ class AlpacaBrokerAPI:
         return self.get_positions().get(ticker, 0.0)
 
     def _notify_telegram(self, message: str):
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-        if not token or not chat_id:
-            return
-        try:
-            import urllib.parse
-            import urllib.request
-
-            url = f"https://api.telegram.org/bot{token}/sendMessage"
-            data = urllib.parse.urlencode({"chat_id": chat_id, "text": message}).encode()
-            urllib.request.urlopen(url, data, timeout=5)
-        except Exception as exc:
-            log.debug("Telegram notification failed: %s", exc)
+        send_operator_alert(message, markdown=False)
 
     def _log_rejected(self, order_info: dict) -> dict:
         result = {**order_info, "status": "REJECTED_BY_USER"}

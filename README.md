@@ -39,6 +39,7 @@ Optional:
 - `SUPABASE_ACCESS_TOKEN`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `DISCORD_WEBHOOK_URL`
 
 ## Local Development
 
