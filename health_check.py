@@ -135,6 +135,12 @@ def check_env() -> bool:
             check(f"{key} (optional)", True)
         else:
             warn(f"{key} (optional)", "not set")
+    for key in ["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", "ATZMA_BROKER_CREDENTIAL_KEY"]:
+        value = os.getenv(key, "")
+        if value:
+            check(f"{key} (launch)", True)
+        else:
+            warn(f"{key} (launch)", "not set")
     return ok
 
 
@@ -233,6 +239,29 @@ def check_github_actions() -> bool:
         return True
 
 
+def check_remote_app() -> bool:
+    print("\n[8] Remote App")
+    base = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api"
+    checks = [
+        ("Control endpoint", f"{base}/control", 200),
+        ("Auth me unauthorized", f"{base}/auth/me", 401),
+        ("Portfolio locked without auth", f"{base}/account", 401),
+    ]
+    ok = True
+    for label, url, expected in checks:
+        try:
+            request = urllib.request.Request(url, headers={"Accept": "application/json"})
+            urllib.request.urlopen(request, timeout=10)
+            status = 200
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        except Exception as exc:
+            ok &= check(label, False, str(exc))
+            continue
+        ok &= check(label, status == expected, f"expected {expected}, got {status}")
+    return ok
+
+
 def main(fast: bool = False) -> int:
     print("=" * 55)
     print("  ATZMA - System Health Check")
@@ -245,7 +274,7 @@ def main(fast: bool = False) -> int:
         check_env(),
     ]
     if not fast:
-        results.extend([check_alpaca(), check_model(), check_github_actions()])
+        results.extend([check_alpaca(), check_model(), check_github_actions(), check_remote_app()])
 
     passed = sum(1 for result in results if result)
     total = len(results)

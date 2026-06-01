@@ -1080,7 +1080,7 @@ select.m-input { appearance:none; cursor:pointer; }
       <button id="auth-resend-btn" class="auth-secondary hidden" onclick="resendConfirmation()">Resend Confirmation</button>
       <button id="auth-switch-btn" class="auth-secondary" onclick="toggleAuthMode()">Need an account?</button>
     </div>
-    <div class="auth-meta" id="auth-meta">Paper trading stays centralized for now. Identity, profile, and settings are already per user.</div>
+    <div class="auth-meta" id="auth-meta">Sign in to activate your personal trading workspace. Portfolio data appears only after your own broker connection is verified.</div>
   </div>
 </div>
 
@@ -1825,8 +1825,8 @@ function setAuthMode(mode) {
   document.getElementById('auth-resend-btn').classList.add('hidden');
   document.getElementById('auth-switch-btn').textContent = authMode === 'signup' ? 'Already have an account?' : 'Need an account?';
   document.getElementById('auth-meta').textContent = authMode === 'signup'
-    ? 'Create a secure workspace first. We will verify your email before unlocking personal broker access.'
-    : 'Sign in to access your personal broker connection, execution queue, and portfolio data.';
+    ? 'Create a secure workspace first. We will verify your email before unlocking your personal broker access.'
+    : 'Sign in to access your personal broker connection, execution queue, and private portfolio data.';
 }
 
 function toggleAuthMode() {
