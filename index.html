@@ -1804,6 +1804,7 @@ let currentExecutionJobs = [];
 let authBusy = false;
 var S = JSON.parse(localStorage.getItem('atzma_s') || '{}');
 var alpacaAccount = null;
+var toastTimer = null;
 
 function getAuthHeaders(includeJson = false) {
   const headers = {};
@@ -3753,7 +3754,6 @@ bootstrapAuth();
 // ════════════════════════════════════════════════════════
 // TOAST
 // ════════════════════════════════════════════════════════
-let toastTimer;
 function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
