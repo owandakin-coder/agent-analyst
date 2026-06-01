@@ -1932,10 +1932,10 @@ async function submitAuth() {
       setAuthBusy(false);
       return;
     }
-    showAuthStatus('Account created. Check your email and confirm the account before signing in.');
     setAuthMode('signin');
     document.getElementById('auth-email').value = email;
     document.getElementById('auth-password').value = password;
+    showAuthStatus('Account created. Check your email and confirm the account before signing in.');
     document.getElementById('auth-resend-btn').classList.remove('hidden');
   } catch (e) {
     const mapped = humanizeAuthError(e.message);
