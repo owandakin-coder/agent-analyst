@@ -381,6 +381,24 @@ async function restAdmin(path: string, init: RequestInit = {}): Promise<Response
   return fetchWithRetry(`${SUPABASE_URL}/rest/v1${path}`, { ...init, headers });
 }
 
+async function readJsonSafe<T>(res: Response): Promise<T | null> {
+  try {
+    return await res.json() as T;
+  } catch {
+    return null;
+  }
+}
+
+function extractServiceError(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) return record.message.trim();
+    if (typeof record.error === "string" && record.error.trim()) return record.error.trim();
+    if (typeof record.hint === "string" && record.hint.trim()) return record.hint.trim();
+  }
+  return fallback;
+}
+
 async function requireUser(req: Request): Promise<JsonMap> {
   const token = getBearerToken(req);
   if (!token) throw new Error("Unauthorized");
@@ -533,7 +551,7 @@ function sanitizeBrokerInput(body: JsonMap, existing?: BrokerConnectionRow | nul
       } else if (host === "paper-api.alpaca.markets") {
         baseUrl = "https://paper-api.alpaca.markets";
       } else if (host === "api.alpaca.markets") {
-        baseUrl = "https://api.alpaca.markets";
+        baseUrl = tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets";
       } else {
         baseUrl = `${parsed.protocol}//${parsed.host}`;
       }
@@ -855,7 +873,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         headers: { "Prefer": "return=representation" },
         body: JSON.stringify(payload),
       });
-      const rows = await res.json() as BrokerConnectionRow[];
+      const rowsPayload = await readJsonSafe<BrokerConnectionRow[] | JsonMap>(res);
+      if (!res.ok) {
+        throw new Error(extractServiceError(rowsPayload, "Could not save broker connection"));
+      }
+      const rows = Array.isArray(rowsPayload) ? rowsPayload : [];
       await audit(userId, "broker_connection_saved", {
         trading_mode: sanitized.tradingMode,
         base_url: sanitized.baseUrl,
@@ -897,7 +919,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
           headers: { "Prefer": "return=representation" },
           body: JSON.stringify(payload),
         });
-        const saveRows = await saveRes.json() as BrokerConnectionRow[];
+        const savePayload = await readJsonSafe<BrokerConnectionRow[] | JsonMap>(saveRes);
+        if (!saveRes.ok) {
+          throw new Error(extractServiceError(savePayload, "Could not save broker connection"));
+        }
+        const saveRows = Array.isArray(savePayload) ? savePayload : [];
         row = saveRows[0] ?? row;
       }
 

@@ -2156,7 +2156,7 @@ function normalizeBrokerBaseUrl(rawValue, mode) {
     const host = (url.hostname || '').toLowerCase();
     if (host === 'app.alpaca.markets') return fallback;
     if (host === 'paper-api.alpaca.markets') return 'https://paper-api.alpaca.markets';
-    if (host === 'api.alpaca.markets') return 'https://api.alpaca.markets';
+    if (host === 'api.alpaca.markets') return mode === 'live' ? 'https://api.alpaca.markets' : 'https://paper-api.alpaca.markets';
     return `${url.protocol}//${url.host}`;
   } catch (_) {
     return fallback;
