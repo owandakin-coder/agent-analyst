@@ -1882,6 +1882,13 @@ function humanizeAuthError(message) {
       status: '',
     };
   }
+  if (/too many attempts/i.test(text) || /rate limit exceeded/i.test(text)) {
+    return {
+      error: 'Too many sign-in attempts. Wait a minute and try again.',
+      showResend: false,
+      status: 'Temporary protection is active for this connection.',
+    };
+  }
   return { error: text, showResend: false, status: '' };
 }
 
@@ -1900,6 +1907,22 @@ function storeAuthSession(session) {
   } else {
     localStorage.removeItem(AUTH_STORAGE_KEY);
   }
+}
+
+function extractSessionPayload(payload) {
+  if (payload?.session?.access_token && payload?.session?.refresh_token) {
+    return payload.session;
+  }
+  if (payload?.access_token && payload?.refresh_token) {
+    return {
+      access_token: payload.access_token,
+      refresh_token: payload.refresh_token,
+      token_type: payload.token_type || 'bearer',
+      expires_in: Number(payload.expires_in || '3600'),
+      expires_at: Math.floor(Date.now() / 1000) + Number(payload.expires_in || '3600'),
+    };
+  }
+  return null;
 }
 
 function extractAuthSessionFromUrl() {
@@ -1980,13 +2003,17 @@ async function submitAuth() {
         display_name: displayName || email.split('@')[0],
       }),
     });
-    if (payload.session?.access_token) {
-      storeAuthSession(payload.session);
+    const sessionPayload = extractSessionPayload(payload);
+    if (sessionPayload?.access_token) {
+      storeAuthSession(sessionPayload);
       await hydrateCurrentUser();
       hideAuthOverlay();
       toast(authMode === 'signup' ? 'Account created' : 'Signed in');
       setAuthBusy(false);
       return;
+    }
+    if (authMode === 'signin') {
+      throw new Error('Sign-in did not return a session. Please try again.');
     }
     setAuthMode('signin');
     document.getElementById('auth-email').value = email;
