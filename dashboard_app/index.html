@@ -2143,6 +2143,10 @@ function brokerStatusTone(status) {
   return 'var(--orange)';
 }
 
+function inferredBrokerBaseUrl(mode) {
+  return mode === 'live' ? 'https://api.alpaca.markets' : 'https://paper-api.alpaca.markets';
+}
+
 function applyBrokerConnectionUI(connection) {
   currentBrokerConnection = connection || null;
   if (!connection) {
@@ -2229,24 +2233,38 @@ async function openBrokerSheet() {
   document.getElementById('broker-api-key').value = '';
   document.getElementById('broker-secret-key').value = '';
   document.getElementById('broker-error').textContent = currentBrokerConnection?.last_error || '';
+  const modeEl = document.getElementById('broker-trading-mode');
+  const baseEl = document.getElementById('broker-base-url');
+  if (modeEl && baseEl && !baseEl.dataset.bound) {
+    modeEl.addEventListener('change', () => {
+      const current = (baseEl.value || '').trim();
+      if (!current || current === 'https://paper-api.alpaca.markets' || current === 'https://api.alpaca.markets') {
+        baseEl.value = inferredBrokerBaseUrl(modeEl.value);
+      }
+    });
+    baseEl.dataset.bound = '1';
+  }
   openSheet('broker-sheet');
 }
 
-async function saveBrokerConnection() {
+async function saveBrokerConnection(options = {}) {
   if (!authSession?.access_token) {
     showAuthOverlay();
     return;
   }
+  const { silent = false } = options;
   const errorEl = document.getElementById('broker-error');
   errorEl.textContent = '';
   try {
+    const mode = document.getElementById('broker-trading-mode').value;
+    const rawBaseUrl = document.getElementById('broker-base-url').value.trim();
     const payload = await apiJSON('/me/broker', {
       method: 'PUT',
       headers: getAuthHeaders(true),
       body: JSON.stringify({
         account_label: document.getElementById('broker-account-label').value.trim() || null,
-        trading_mode: document.getElementById('broker-trading-mode').value,
-        base_url: document.getElementById('broker-base-url').value.trim(),
+        trading_mode: mode,
+        base_url: rawBaseUrl || inferredBrokerBaseUrl(mode),
         api_key: document.getElementById('broker-api-key').value.trim(),
         secret_key: document.getElementById('broker-secret-key').value.trim(),
         enabled: document.getElementById('broker-enabled').checked,
@@ -2255,10 +2273,12 @@ async function saveBrokerConnection() {
     applyBrokerConnectionUI(payload.connection || null);
     document.getElementById('broker-api-key').value = '';
     document.getElementById('broker-secret-key').value = '';
-    toast('Broker connection saved');
+    if (!silent) toast('Broker connection saved');
+    return payload.connection || null;
   } catch (e) {
     errorEl.textContent = e.message;
-    toast('Broker save failed');
+    if (!silent) toast('Broker save failed');
+    throw e;
   }
 }
 
@@ -2270,6 +2290,11 @@ async function verifyBrokerConnection() {
   const errorEl = document.getElementById('broker-error');
   errorEl.textContent = '';
   try {
+    const apiKeyInput = document.getElementById('broker-api-key').value.trim();
+    const secretKeyInput = document.getElementById('broker-secret-key').value.trim();
+    if (!currentBrokerConnection || apiKeyInput || secretKeyInput) {
+      await saveBrokerConnection({ silent: true });
+    }
     const payload = await apiJSON('/me/broker/verify', {
       method: 'POST',
       headers: getAuthHeaders(true),
