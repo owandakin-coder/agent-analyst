@@ -5,11 +5,12 @@ Persistent decision snapshots for explainability and dashboard inspection.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-RUNTIME_DIR = Path(__file__).resolve().parent / "runtime"
+RUNTIME_DIR = Path(os.getenv("ATZMA_RUNTIME_DIR", Path(__file__).resolve().parent / "runtime"))
 LAST_DECISION_FILE = RUNTIME_DIR / "last_decision.json"
 
 

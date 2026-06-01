@@ -27,6 +27,7 @@ class IdentityVecNorm:
 def _make_broker(monkeypatch, tmp_path, trading_mock):
     monkeypatch.setenv("ALPACA_API_KEY", "FAKE_KEY")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "FAKE_SECRET")
+    monkeypatch.setenv("ATZMA_RUNTIME_DIR", str(tmp_path / "runtime"))
 
     import broker_api as ba
 
@@ -98,7 +99,7 @@ class TestLiveTradingEndToEnd:
         broker.get_latest_prices = MagicMock(return_value={"AAPL": 150.0, "MSFT": 300.0, "GOOGL": 130.0})
 
         trader = _make_trader(multi_featured, broker)
-        trader.run_once()
+        result = trader.run_once()
 
         trading_mock.submit_order.assert_called_once()
         state_path = tmp_path / "submitted_orders.json"
@@ -108,6 +109,13 @@ class TestLiveTradingEndToEnd:
         saved_entry = next(iter(saved.values()))
         assert saved_entry["ticker"] == "AAPL"
         assert saved_entry["side"] == "BUY"
+        assert result["regime"] == "RANGE_BOUND"
+        assert "AAPL" in result["summary"]
+        decision_path = tmp_path / "runtime" / "last_decision.json"
+        assert decision_path.exists()
+        decision_payload = json.loads(decision_path.read_text(encoding="utf-8"))
+        assert decision_payload["summary"] == result["summary"]
+        assert decision_payload["decisions"][0]["ticker"] == "AAPL"
 
     def test_second_run_new_process_blocks_duplicate(self, monkeypatch, tmp_path, multi_featured, trading_mock):
         broker1 = _make_broker(monkeypatch, tmp_path, trading_mock)
