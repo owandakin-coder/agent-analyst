@@ -411,6 +411,21 @@ async function resolveScopedBrokerSession(req: Request): Promise<AlpacaSession |
   }
 }
 
+async function requireScopedBrokerSession(req: Request): Promise<AlpacaSession> {
+  const user = await requireUser(req);
+  const row = await fetchBrokerConnection(String(user.id));
+  if (!row?.enabled || row.last_verified_status !== "verified" || !row.api_key_encrypted || !row.secret_key_encrypted) {
+    throw new Error("Verified broker connection required");
+  }
+  return {
+    apiKey: await decryptSecret(row.api_key_encrypted),
+    secretKey: await decryptSecret(row.secret_key_encrypted),
+    baseUrl: row.base_url,
+    scoped: true,
+    mode: row.trading_mode,
+  };
+}
+
 function serializeBrokerConnection(row: BrokerConnectionRow | null, decryptedApiKey = "", decryptedSecretKey = "") {
   if (!row) {
     return {
@@ -477,36 +492,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     if (path === "/account") {
-      const session = await resolveScopedBrokerSession(req);
-      const data = await alpacaGetWithSession(session ?? {
-        apiKey: ALPACA_KEY,
-        secretKey: ALPACA_SECRET,
-        baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
-        scoped: false,
-        mode: "paper",
-      }, "/account") as Record<string, string>;
+      const session = await requireScopedBrokerSession(req);
+      const data = await alpacaGetWithSession(session, "/account") as Record<string, string>;
       return json({
         equity: parseFloat(data.equity ?? "0"),
         last_equity: parseFloat(data.last_equity ?? "0"),
         cash: parseFloat(data.cash ?? "0"),
         buying_power: parseFloat(data.buying_power ?? "0"),
         portfolio_value: parseFloat(data.portfolio_value ?? "0"),
-        account_type: data.account_blocked ? "restricted" : (session?.mode ?? "paper"),
+        account_type: data.account_blocked ? "restricted" : session.mode,
         id: data.account_number ?? data.id ?? "",
         status: data.status ?? "active",
-        scoped_user: !!session?.scoped,
+        scoped_user: true,
       });
     }
 
     if (path === "/positions") {
-      const session = await resolveScopedBrokerSession(req);
-      const positions = await alpacaGetWithSession(session ?? {
-        apiKey: ALPACA_KEY,
-        secretKey: ALPACA_SECRET,
-        baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
-        scoped: false,
-        mode: "paper",
-      }, "/positions") as Array<Record<string, string>>;
+      const session = await requireScopedBrokerSession(req);
+      const positions = await alpacaGetWithSession(session, "/positions") as Array<Record<string, string>>;
       return json(positions.map((p) => ({
         symbol: p.symbol,
         qty: parseFloat(p.qty ?? "0"),
@@ -520,14 +523,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (path === "/orders") {
-      const session = await resolveScopedBrokerSession(req);
-      const orders = await alpacaGetWithSession(session ?? {
-        apiKey: ALPACA_KEY,
-        secretKey: ALPACA_SECRET,
-        baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
-        scoped: false,
-        mode: "paper",
-      }, "/orders", "status=closed&limit=50&direction=desc") as Array<Record<string, string>>;
+      const session = await requireScopedBrokerSession(req);
+      const orders = await alpacaGetWithSession(session, "/orders", "status=closed&limit=50&direction=desc") as Array<Record<string, string>>;
       return json(orders
         .filter((o) => o.filled_at && o.filled_avg_price)
         .map((o) => ({
@@ -544,15 +541,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (path === "/history") {
       const period = qs.get("period") ?? "1M";
       const timeframe = qs.get("timeframe") ?? "1D";
-      const session = await resolveScopedBrokerSession(req);
+      const session = await requireScopedBrokerSession(req);
       const data = await alpacaGetWithSession(
-        session ?? {
-          apiKey: ALPACA_KEY,
-          secretKey: ALPACA_SECRET,
-          baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
-          scoped: false,
-          mode: "paper",
-        },
+        session,
         "/account/portfolio/history",
         `period=${period}&timeframe=${timeframe}&intraday_reporting=market_hours`,
       ) as { timestamp: number[]; equity: number[] };
@@ -934,6 +925,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch (e) {
     const message = String(e);
     if (message === "Unauthorized" || message.endsWith("Unauthorized")) return json({ error: "Unauthorized" }, 401);
+    if (message === "Verified broker connection required") return json({ error: message }, 412);
     return json({ error: message }, 500);
   }
 });

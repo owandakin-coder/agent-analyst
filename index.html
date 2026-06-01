@@ -1921,6 +1921,7 @@ async function signOutUser() {
   currentBrokerConnection = null;
   currentExecutionJobs = [];
   updateIdentityUI();
+  applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
   showAuthOverlay();
   toast('Signed out');
 }
@@ -1984,7 +1985,10 @@ function renderExecutionJobs(jobs) {
 }
 
 async function refreshMemberWorkspace() {
-  if (!authSession?.access_token) return;
+  if (!authSession?.access_token) {
+    applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
+    return;
+  }
   try {
     const [brokerPayload, jobsPayload] = await Promise.all([
       apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' }),
@@ -1992,8 +1996,15 @@ async function refreshMemberWorkspace() {
     ]);
     applyBrokerConnectionUI(brokerPayload.connection || null);
     renderExecutionJobs(jobsPayload.jobs || []);
+    if (hasVerifiedBrokerConnection()) {
+      fetchAlpacaData();
+      loadAlpacaTrades();
+    } else {
+      applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
+    }
   } catch (e) {
     console.warn('refreshMemberWorkspace:', e.message);
+    applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
   }
 }
 
@@ -2124,6 +2135,51 @@ let controlState = {
   emergency: false,
   canDispatch: false,
 };
+
+function hasVerifiedBrokerConnection() {
+  return !!(currentUser && currentBrokerConnection && currentBrokerConnection.enabled !== false && currentBrokerConnection.last_verified_status === 'verified');
+}
+
+function resetPortfolioState() {
+  alpacaAccount = null;
+  STOCKS = [];
+  ALL_TRADES = [];
+  portBase = 0;
+  portOpen = 0;
+  lastPort = 0;
+  trades = 0;
+}
+
+function applyPortfolioOnboardingState(message = 'Connect and verify your personal Alpaca Paper account to unlock live portfolio data.') {
+  resetPortfolioState();
+  controlState.broker = currentUser ? 'Awaiting Broker Setup' : 'Sign In Required';
+  controlState.brokerSub = message;
+  controlState.sync = 'Locked';
+  controlState.syncSub = currentUser ? 'No verified broker connection yet.' : 'Sign in to unlock your own broker workspace.';
+  controlState.lastOrder = 'No personal broker connected';
+  controlState.lastOrderSub = currentUser ? 'Save and verify your broker connection to load trades.' : 'Sign in first, then attach your Alpaca Paper account.';
+  controlState.lastDecision = 'Onboarding';
+  controlState.lastDecisionSub = currentUser ? 'Waiting for broker verification.' : 'Authentication required before portfolio access.';
+  const homeStocks = document.getElementById('home-stocks');
+  if (homeStocks) {
+    homeStocks.innerHTML = '<div class="position-card"><div class="position-symbol">Broker setup required</div><div class="position-name">' + message + '</div></div>';
+  }
+  const positionsList = document.getElementById('positions-list');
+  if (positionsList) {
+    positionsList.innerHTML = '<div class="position-card"><div class="position-symbol">No live positions yet</div><div class="position-name">' + message + '</div></div>';
+  }
+  const positionsPill = document.getElementById('positions-count-pill');
+  if (positionsPill) positionsPill.textContent = '0 OPEN';
+  const tradesList = document.getElementById('trades-list');
+  if (tradesList) {
+    tradesList.innerHTML = '<p style="text-align:center;color:var(--g3);padding:20px">' + message + '</p>';
+  }
+  const bEl = document.getElementById('st-buys');  if (bEl) bEl.textContent = '0';
+  const sEl = document.getElementById('st-sells'); if (sEl) sEl.textContent = '0';
+  const kEl = document.getElementById('k-tr');     if (kEl) kEl.textContent = '0';
+  setDataStatus('LOCKED');
+  renderHomeAudit();
+}
 
 // Smooth number counter
 function animCount(el, from, to, dur=400, fmt) {
@@ -2334,6 +2390,14 @@ setInterval(() => {
 // ALPACA REAL DATA
 // ════════════════════════════════════════════════════════
 async function fetchAlpacaData() {
+  if (!authSession?.access_token) {
+    applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
+    return;
+  }
+  if (!hasVerifiedBrokerConnection()) {
+    applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
+    return;
+  }
   try {
     const [accRes, posRes] = await Promise.all([
       fetch(API_BASE + '/account',   { cache:'no-store', headers: getAuthHeaders() }),
@@ -2390,6 +2454,10 @@ async function fetchAlpacaData() {
 
   } catch(e) {
     console.warn('Alpaca fetch failed:', e.message);
+    if (String(e.message).includes('Verified broker connection required') || String(e.message).includes('Unauthorized')) {
+      applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
+      return;
+    }
     controlState.broker = 'Unavailable';
     controlState.brokerSub = 'Last broker request failed. Review connectivity and credentials.';
     controlState.sync = 'Degraded';
@@ -2469,6 +2537,13 @@ function setDataStatus(mode, time) {
     controlState.syncSub = 'Last broker sync at ' + time + '.';
     setText('meta-market-open', 'Markets Open');
     setText('meta-sync-line', 'Synced ' + time);
+  } else if (mode === 'LOCKED') {
+    dot.style.background = 'var(--g3)';
+    lbl.textContent = 'LOCKED';
+    lbl.style.color = 'var(--g2)';
+    if (sub) sub.textContent = currentUser ? 'Verify your broker connection' : 'Sign in to connect your broker';
+    setText('meta-market-open', currentUser ? 'Broker Setup' : 'Sign In');
+    setText('meta-sync-line', currentUser ? 'Waiting for verification' : 'No account linked');
   } else {
     dot.style.background = 'var(--orange)';
     lbl.textContent = controlState.emergency ? 'STOPPED' : 'DEGRADED';
@@ -2768,6 +2843,16 @@ function renderHomeAudit() {
 }
 
 async function loadAlpacaTrades() {
+  if (!authSession?.access_token || !hasVerifiedBrokerConnection()) {
+    ALL_TRADES = [];
+    document.getElementById('trades-list').innerHTML =
+      '<p style="text-align:center;color:var(--g3);padding:20px">Connect and verify your personal broker to load trade history.</p>';
+    const bEl = document.getElementById('st-buys');  if (bEl) bEl.textContent = '0';
+    const sEl = document.getElementById('st-sells'); if (sEl) sEl.textContent = '0';
+    const kEl = document.getElementById('k-tr');     if (kEl) kEl.textContent = '0';
+    renderHomeAudit();
+    return;
+  }
   try {
     const res = await fetch(API_BASE + '/orders', { cache:'no-store', headers: getAuthHeaders() });
     const orders = await res.json();
@@ -2790,6 +2875,13 @@ async function loadAlpacaTrades() {
     renderHomeAudit();
   } catch(e) {
     console.warn('loadAlpacaTrades:', e.message);
+    if (String(e.message).includes('Verified broker connection required') || String(e.message).includes('Unauthorized')) {
+      ALL_TRADES = [];
+      document.getElementById('trades-list').innerHTML =
+        '<p style="text-align:center;color:var(--g3);padding:20px">Connect and verify your personal broker to load trade history.</p>';
+      renderHomeAudit();
+      return;
+    }
     document.getElementById('trades-list').innerHTML =
       '<p style="text-align:center;color:var(--g3);padding:20px">Could not load trades</p>';
     renderHomeAudit();

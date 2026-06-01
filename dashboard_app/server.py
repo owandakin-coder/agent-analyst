@@ -156,17 +156,7 @@ class Handler(BaseHTTPRequestHandler):
         # ── /api/account — Alpaca account summary ───────────────────────────
         if path == '/api/account':
             try:
-                if self.headers.get('Authorization'):
-                    self.reply_json(proxy_remote('/account', headers=self.headers))
-                    return
-                data = alpaca_get('/account')
-                self.reply_json({
-                    'equity':         float(data.get('equity', 0)),
-                    'last_equity':    float(data.get('last_equity', 0)),
-                    'cash':           float(data.get('cash', 0)),
-                    'buying_power':   float(data.get('buying_power', 0)),
-                    'portfolio_value':float(data.get('portfolio_value', 0)),
-                })
+                self.reply_json(proxy_remote('/account', headers=self.headers))
             except Exception as e:
                 self.reply_json({'error': str(e)}, 500)
             return
@@ -174,23 +164,7 @@ class Handler(BaseHTTPRequestHandler):
         # ── /api/positions — Alpaca positions ───────────────────────────────
         if path == '/api/positions':
             try:
-                if self.headers.get('Authorization'):
-                    self.reply_json(proxy_remote('/positions', headers=self.headers))
-                    return
-                positions = alpaca_get('/positions')
-                result = []
-                for p in positions:
-                    result.append({
-                        'symbol':       p['symbol'],
-                        'qty':          float(p['qty']),
-                        'avg_entry':    float(p.get('avg_entry_price', 0)),
-                        'current_price':float(p.get('current_price', 0)),
-                        'market_value': float(p.get('market_value', 0)),
-                        'unrealized_pl':float(p.get('unrealized_pl', 0)),
-                        'unrealized_plpc': float(p.get('unrealized_plpc', 0)),
-                        'change_today': float(p.get('change_today', 0)),
-                    })
-                self.reply_json(result)
+                self.reply_json(proxy_remote('/positions', headers=self.headers))
             except Exception as e:
                 self.reply_json({'error': str(e)}, 500)
             return
@@ -198,23 +172,7 @@ class Handler(BaseHTTPRequestHandler):
         # ── /api/orders — Alpaca trade history ──────────────────────────────
         if path == '/api/orders':
             try:
-                if self.headers.get('Authorization'):
-                    self.reply_json(proxy_remote('/orders', headers=self.headers))
-                    return
-                orders = alpaca_get('/orders', 'status=closed&limit=50&direction=desc')
-                result = []
-                for o in orders:
-                    if o.get('filled_at') and o.get('filled_avg_price'):
-                        result.append({
-                            'id':     o['id'],
-                            'symbol': o['symbol'],
-                            'side':   o['side'],
-                            'qty':    float(o.get('filled_qty', o.get('qty', 0))),
-                            'price':  float(o.get('filled_avg_price', 0)),
-                            'time':   o.get('filled_at', ''),
-                            'type':   o.get('type', ''),
-                        })
-                self.reply_json(result)
+                self.reply_json(proxy_remote('/orders', headers=self.headers))
             except Exception as e:
                 self.reply_json({'error': str(e)}, 500)
             return
@@ -224,14 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             period    = qs.get('period',    ['1M'])[0]
             timeframe = qs.get('timeframe', ['1D'])[0]
             try:
-                if self.headers.get('Authorization'):
-                    self.reply_json(proxy_remote(f"/history?period={period}&timeframe={timeframe}", headers=self.headers))
-                    return
-                data = alpaca_get('/account/portfolio/history',
-                                  f'period={period}&timeframe={timeframe}&intraday_reporting=market_hours')
-                timestamps = data.get('timestamp', [])
-                equity     = data.get('equity', [])
-                self.reply_json({'timestamps': timestamps, 'equity': equity})
+                self.reply_json(proxy_remote(f"/history?period={period}&timeframe={timeframe}", headers=self.headers))
             except Exception as e:
                 self.reply_json({'error': str(e)}, 500)
             return
