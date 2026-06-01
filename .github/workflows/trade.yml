@@ -73,11 +73,22 @@ jobs:
           ATZMA_JOB_ID:        ${{ github.event.inputs.job_id }}
           ATZMA_REMOTE_API_BASE: https://sofowpweliticltlbxrj.supabase.co/functions/v1/api
         run: |
-          if [ -n "${ATZMA_JOB_ID}" ]; then
-            python user_execution_worker.py
-          else
-            python main.py --mode live_once --auto-approve
-          fi
+          ATTEMPT=1
+          until [ "$ATTEMPT" -gt 3 ]
+          do
+            echo "Trade attempt ${ATTEMPT}/3"
+            if [ -n "${ATZMA_JOB_ID}" ]; then
+              python user_execution_worker.py && break
+            else
+              python main.py --mode live_once --auto-approve && break
+            fi
+            if [ "$ATTEMPT" -eq 3 ]; then
+              echo "Trading workflow failed after 3 attempts"
+              exit 1
+            fi
+            sleep $((ATTEMPT * 15))
+            ATTEMPT=$((ATTEMPT + 1))
+          done
 
       # ── 5. Upload logs ────────────────────────────────────────
       - name: Upload logs

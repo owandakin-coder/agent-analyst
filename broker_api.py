@@ -8,6 +8,7 @@ import csv
 import json
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -63,6 +64,7 @@ class AlpacaBrokerAPI:
         self._idempotency_path = Path(SUBMITTED_ORDERS_FILE)
         self._submitted_orders = self._load_submitted_orders()
         self._submitted_keys = set(self._submitted_orders.keys())
+        self._last_snapshot: dict | None = None
 
         self._validate_credentials()
         self._init_client()
@@ -216,7 +218,7 @@ class AlpacaBrokerAPI:
         )
 
         try:
-            order = self._trading.submit_order(request)
+            order = self._call_with_retry("submit_order", self._trading.submit_order, request)
             now_iso = datetime.now(timezone.utc).isoformat()
             result = {
                 "order_id": str(order.id),
@@ -242,6 +244,20 @@ class AlpacaBrokerAPI:
         except Exception as exc:
             log.error("ORDER FAILED | %s %s %s | %s", side.upper(), shares, ticker, exc)
             return {"status": "ERROR", "error": str(exc)}
+
+    def _call_with_retry(self, label: str, fn, *args, **kwargs):
+        last_exc = None
+        for attempt in range(1, 4):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:
+                last_exc = exc
+                if attempt == 3:
+                    break
+                delay = 0.25 * (2 ** (attempt - 1))
+                log.warning("%s failed (attempt %s/3): %s", label, attempt, exc)
+                time.sleep(delay)
+        raise last_exc
 
     def _order_key(self, ticker: str, side: str, shares: int) -> str:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -271,7 +287,7 @@ class AlpacaBrokerAPI:
 
         after = datetime.now(timezone.utc) - timedelta(days=max(DUPLICATE_WINDOW_DAYS, 1))
         request = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=RECENT_ORDERS_LIMIT, after=after)
-        orders = self._trading.get_orders(filter=request)
+        orders = self._call_with_retry("get_orders", self._trading.get_orders, filter=request)
 
         for order in orders or []:
             order_side = str(getattr(order, "side", "")).split(".")[-1].upper()
@@ -341,7 +357,7 @@ class AlpacaBrokerAPI:
         return kept
 
     def get_account(self) -> dict:
-        acc = self._trading.get_account()
+        acc = self._call_with_retry("get_account", self._trading.get_account)
         return {
             "cash": float(acc.cash),
             "equity": float(acc.equity),
@@ -356,7 +372,7 @@ class AlpacaBrokerAPI:
     def get_positions(self) -> dict[str, float]:
         positions: dict[str, float] = {}
         try:
-            for pos in self._trading.get_all_positions():
+            for pos in self._call_with_retry("get_all_positions", self._trading.get_all_positions):
                 symbol = getattr(pos, "symbol", None)
                 qty = getattr(pos, "qty", None)
                 if not symbol or qty in (None, ""):
@@ -367,23 +383,31 @@ class AlpacaBrokerAPI:
         return positions
 
     def reconcile_account_state(self) -> dict:
-        account = self.get_account()
-        positions = self.get_positions()
-        return {
-            "cash": account["cash"],
-            "equity": account["equity"],
-            "buying_power": account["buying_power"],
-            "portfolio_value": account["portfolio_value"],
-            "status": account["status"],
-            "positions": positions,
-            "as_of": datetime.now(timezone.utc).isoformat(),
-        }
+        try:
+            account = self.get_account()
+            positions = self.get_positions()
+            snapshot = {
+                "cash": account["cash"],
+                "equity": account["equity"],
+                "buying_power": account["buying_power"],
+                "portfolio_value": account["portfolio_value"],
+                "status": account["status"],
+                "positions": positions,
+                "as_of": datetime.now(timezone.utc).isoformat(),
+            }
+            self._last_snapshot = snapshot
+            return snapshot
+        except Exception:
+            if self._last_snapshot is not None:
+                log.warning("Broker snapshot failed; using cached account snapshot.")
+                return dict(self._last_snapshot)
+            raise
 
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:
         prices: dict[str, float] = {}
         try:
             request = StockLatestQuoteRequest(symbol_or_symbols=tickers)
-            quotes = self._data.get_stock_latest_quote(request)
+            quotes = self._call_with_retry("get_stock_latest_quote", self._data.get_stock_latest_quote, request)
             for ticker in tickers:
                 if ticker not in quotes:
                     continue
@@ -402,19 +426,19 @@ class AlpacaBrokerAPI:
 
     def is_market_open(self) -> bool:
         try:
-            return bool(self._trading.get_clock().is_open)
+            return bool(self._call_with_retry("get_clock", self._trading.get_clock).is_open)
         except Exception:
             return False
 
     def next_market_open(self) -> datetime | None:
         try:
-            return self._trading.get_clock().next_open
+            return self._call_with_retry("get_clock", self._trading.get_clock).next_open
         except Exception:
             return None
 
     def cancel_all_orders(self):
         try:
-            self._trading.cancel_orders()
+            self._call_with_retry("cancel_orders", self._trading.cancel_orders)
             log.info("All open orders cancelled.")
         except Exception as exc:
             log.warning("Could not cancel orders: %s", exc)

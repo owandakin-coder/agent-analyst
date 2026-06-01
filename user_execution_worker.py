@@ -10,10 +10,14 @@ import sys
 import urllib.error
 import urllib.request
 
+from logging_setup import configure_logging
+
 
 API_BASE = os.getenv("ATZMA_REMOTE_API_BASE", "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api").rstrip("/")
 WORKER_TOKEN = os.getenv("ATZMA_WORKER_TOKEN", "")
 JOB_ID = os.getenv("ATZMA_JOB_ID", "").strip()
+
+configure_logging()
 
 
 def _request(path: str, payload: dict | None = None) -> dict:

@@ -35,23 +35,14 @@ import logging
 
 import numpy as np
 import pandas as pd
+from logging_setup import configure_logging
 
 warnings.filterwarnings("ignore")
 
 # ── Centralised logging ────────────────────────────────────────────────────
 # Configure once here so all module loggers (BrokerAPI, LiveTrader, etc.)
 # inherit the same format and handlers. Modules must NOT call basicConfig().
-_LOG_FILE = "agent_analyst.log"
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
-    handlers=[
-        logging.FileHandler(_LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
-logging.getLogger("urllib3").setLevel(logging.WARNING)   # suppress noisy libs
-logging.getLogger("alpaca").setLevel(logging.WARNING)
+configure_logging()
 
 # ─── ייבוא מודולים מקומיים ────────────────────────────────────────────────
 from config_loader       import CFG                          # ← config.yaml

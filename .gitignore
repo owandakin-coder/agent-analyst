@@ -20,6 +20,7 @@ results/
 
 # Secrets
 .env
+supabase/.temp/
 
 # Keep model files (needed for GitHub Actions)
 !models/final_model.zip

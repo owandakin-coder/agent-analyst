@@ -162,3 +162,12 @@ class TestIdempotency:
         snapshot = broker.reconcile_account_state()
         assert snapshot["cash"] == 50000.0
         assert snapshot["positions"]["AAPL"] == 5.0
+
+    def test_reconcile_snapshot_uses_cached_state_on_retry_exhaustion(self, broker_with_mock):
+        broker, trading = broker_with_mock
+        first = broker.reconcile_account_state()
+        trading.get_account.side_effect = ConnectionError("broker unavailable")
+        trading.get_all_positions.side_effect = ConnectionError("broker unavailable")
+        second = broker.reconcile_account_state()
+        assert second["cash"] == first["cash"]
+        assert second["status"] == first["status"]

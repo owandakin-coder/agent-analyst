@@ -6,8 +6,16 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="ATZMA is an autonomous trading agent with protected broker connectivity, execution control, and institutional-grade monitoring.">
+<meta property="og:title" content="ATZMA">
+<meta property="og:description" content="Autonomous trading intelligence with broker verification, risk control, and protected execution.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://owandakin-coder.github.io/agent-analyst/">
+<meta property="og:image" content="https://owandakin-coder.github.io/agent-analyst/logo.png">
+<meta name="twitter:card" content="summary_large_image">
 <title>ATZMA – AI Trading Intelligence</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23000'/><polyline points='4,22 10,14 16,18 22,8 28,10' fill='none' stroke='%2334c759' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/><circle cx='28' cy='10' r='2.5' fill='%2334c759'/></svg>">
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="apple-touch-icon" href="logo.png">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
@@ -2153,8 +2161,8 @@ function renderExecutionJobs(jobs) {
     const status = String(job.status || 'queued').toUpperCase();
     const color = job.status === 'succeeded' ? 'var(--green)' : job.status === 'failed' ? 'var(--red)' : job.status === 'running' ? 'var(--blue)' : 'var(--orange)';
     const when = fmtOrderTime(job.requested_at || job.created_at || new Date().toISOString());
-    const detail = job.error_text || (((job.requested_mode || 'paper') + '').toUpperCase() + ' · ' + when);
-    return `<div class="profile-row"><div><div style="font-size:13px;font-weight:700;">${job.job_type || 'trade_once'}</div><div style="font-size:11px;color:var(--g3);margin-top:3px;">${detail}</div></div><span class="profile-val" style="color:${color};text-transform:uppercase;">${status}</span></div>`;
+    const detail = esc(job.error_text || (((job.requested_mode || 'paper') + '').toUpperCase() + ' · ' + when));
+    return `<div class="profile-row"><div><div style="font-size:13px;font-weight:700;">${esc(job.job_type || 'trade_once')}</div><div style="font-size:11px;color:var(--g3);margin-top:3px;">${detail}</div></div><span class="profile-val" style="color:${color};text-transform:uppercase;">${esc(status)}</span></div>`;
   }).join('');
 }
 
@@ -2336,17 +2344,17 @@ function applyPortfolioOnboardingState(message = 'Connect and verify your person
   controlState.lastDecisionSub = currentUser ? 'Waiting for broker verification.' : 'Authentication required before portfolio access.';
   const homeStocks = document.getElementById('home-stocks');
   if (homeStocks) {
-    homeStocks.innerHTML = '<div class="position-card"><div class="position-symbol">Broker setup required</div><div class="position-name">' + message + '</div></div>';
+    homeStocks.innerHTML = '<div class="position-card"><div class="position-symbol">Broker setup required</div><div class="position-name">' + esc(message) + '</div></div>';
   }
   const positionsList = document.getElementById('positions-list');
   if (positionsList) {
-    positionsList.innerHTML = '<div class="position-card"><div class="position-symbol">No live positions yet</div><div class="position-name">' + message + '</div></div>';
+    positionsList.innerHTML = '<div class="position-card"><div class="position-symbol">No live positions yet</div><div class="position-name">' + esc(message) + '</div></div>';
   }
   const positionsPill = document.getElementById('positions-count-pill');
   if (positionsPill) positionsPill.textContent = '0 OPEN';
   const tradesList = document.getElementById('trades-list');
   if (tradesList) {
-    tradesList.innerHTML = '<p style="text-align:center;color:var(--g3);padding:20px">' + message + '</p>';
+    tradesList.innerHTML = '<p style="text-align:center;color:var(--g3);padding:20px">' + esc(message) + '</p>';
   }
   const bEl = document.getElementById('st-buys');  if (bEl) bEl.textContent = '0';
   const sEl = document.getElementById('st-sells'); if (sEl) sEl.textContent = '0';
@@ -2373,6 +2381,14 @@ function fmtMoney(v) {
 }
 function fmtPort(v) {
   return '$' + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 function setText(id, value) {
   const el = document.getElementById(id);
@@ -2793,11 +2809,11 @@ function renderStocks() {
       : s.shares + ' shares | $' + val.toFixed(0);
     const plStr = s.unrealized_pl != null ? (s.unrealized_pl >= 0 ? '+' : '') + s.unrealized_pl.toFixed(2) : '-';
     return `
-    <div class="srow" onclick="toast('${s.t}: $${s.price.toFixed(2)} | ${sign}${pct.toFixed(2)}% today | P&L ${plStr}')">
-      <div class="badge ${cls}">${s.t}</div>
+    <div class="srow" onclick="toast('${esc(s.t)}: $${s.price.toFixed(2)} | ${sign}${pct.toFixed(2)}% today | P&L ${esc(plStr)}')">
+      <div class="badge ${cls}">${esc(s.t)}</div>
       <div class="srow-info">
-        <div class="srow-name">${NAMES[s.t] || s.n}</div>
-        <div class="srow-meta">${sub}</div>
+        <div class="srow-name">${esc(NAMES[s.t] || s.n)}</div>
+        <div class="srow-meta">${esc(sub)}</div>
       </div>
       ${miniSVG(up)}
       <div class="srow-r">
@@ -2826,8 +2842,8 @@ function renderPositionsPage() {
       <div class="position-card">
         <div class="position-top">
           <div>
-            <div class="position-symbol">${s.t}</div>
-            <div class="position-name">${NAMES[s.t] || s.n}</div>
+            <div class="position-symbol">${esc(s.t)}</div>
+            <div class="position-name">${esc(NAMES[s.t] || s.n)}</div>
           </div>
           <div class="position-pnl ${pnlCls}">
             ${sessionSign}${session.toFixed(2)}%
@@ -2835,7 +2851,7 @@ function renderPositionsPage() {
           </div>
         </div>
         <div class="position-meta">
-          <span>${s.shares} shares</span>
+          <span>${esc(s.shares)} shares</span>
           <span>$${s.price.toFixed(2)}</span>
           <span class="position-pnl ${pnlCls}">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% P&amp;L</span>
         </div>
@@ -3005,12 +3021,12 @@ function renderHomeAudit() {
 
   listEl.innerHTML = rows.map(row => `
     <div class="audit-row">
-      <div class="audit-time">${row.time}</div>
+      <div class="audit-time">${esc(row.time)}</div>
       <div class="audit-body">
-        <div class="audit-title">${row.title}</div>
-        <div class="audit-meta">${row.meta}</div>
+        <div class="audit-title">${esc(row.title)}</div>
+        <div class="audit-meta">${esc(row.meta)}</div>
       </div>
-      <div class="audit-tag">${row.tag}</div>
+      <div class="audit-tag">${esc(row.tag)}</div>
     </div>
   `).join('');
   updateControlSurface();
@@ -3086,14 +3102,14 @@ function renderTrades(filter='ALL') {
     const isBuy = tr.side === 'BUY';
     const col   = isBuy ? 'var(--green)' : 'var(--red)';
     return '<div class="trow">' +
-      '<div class="t-icon ' + tr.side.toLowerCase() + '">' + tr.side + '</div>' +
+      '<div class="t-icon ' + esc(tr.side.toLowerCase()) + '">' + esc(tr.side) + '</div>' +
       '<div class="t-info">' +
-        '<div class="t-name">' + tr.t + ' x' + tr.shares + ' @ $' + tr.price.toFixed(2) + '</div>' +
-        '<div class="t-time">' + tr.time + '</div>' +
+        '<div class="t-name">' + esc(tr.t) + ' x' + esc(tr.shares) + ' @ $' + tr.price.toFixed(2) + '</div>' +
+        '<div class="t-time">' + esc(tr.time) + '</div>' +
       '</div>' +
       '<div class="t-r">' +
         '<div class="t-amt">$' + tr.amt.toFixed(0) + '</div>' +
-        '<div class="t-pnl" style="color:' + col + ';font-size:10px">' + tr.side + '</div>' +
+        '<div class="t-pnl" style="color:' + col + ';font-size:10px">' + esc(tr.side) + '</div>' +
       '</div>' +
     '</div>';
   }).join('');

@@ -25,6 +25,19 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
 };
 
+const SECURITY_HEADERS = {
+  "Cache-Control": "no-store",
+  "Pragma": "no-cache",
+  "Referrer-Policy": "same-origin",
+  "X-Content-Type-Options": "nosniff",
+};
+
+const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
+const AUTH_RATE_LIMIT_MAX = 5;
+const NETWORK_RETRY_ATTEMPTS = 3;
+const JOB_DEDUPE_WINDOW_MINUTES = 10;
+const authRateLimit = new Map<string, { count: number; resetAt: number }>();
+
 type JsonMap = Record<string, unknown>;
 
 type BrokerConnectionRow = {
@@ -54,8 +67,30 @@ type AlpacaSession = {
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS, ...SECURITY_HEADERS },
   });
+}
+
+function getClientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for") ?? "";
+  const realIp = req.headers.get("x-real-ip") ?? "";
+  return (forwarded.split(",")[0] || realIp || "unknown").trim();
+}
+
+function enforceAuthRateLimit(req: Request, action: "signup" | "signin" | "resend"): void {
+  const now = Date.now();
+  const ip = getClientIp(req);
+  const key = `${action}:${ip}`;
+  const current = authRateLimit.get(key);
+  if (!current || current.resetAt <= now) {
+    authRateLimit.set(key, { count: 1, resetAt: now + AUTH_RATE_LIMIT_WINDOW_MS });
+    return;
+  }
+  current.count += 1;
+  authRateLimit.set(key, current);
+  if (current.count > AUTH_RATE_LIMIT_MAX) {
+    throw new Error("Rate limit exceeded");
+  }
 }
 
 function getBearerToken(req: Request): string | null {
@@ -128,7 +163,7 @@ function buildAlpacaUrl(baseUrl: string, path: string, params = ""): string {
 
 async function alpacaGetWithSession(session: AlpacaSession, path: string, params = ""): Promise<unknown> {
   const url = buildAlpacaUrl(session.baseUrl, path, params);
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     headers: {
       "APCA-API-KEY-ID": session.apiKey,
       "APCA-API-SECRET-KEY": session.secretKey,
@@ -152,7 +187,7 @@ async function alpacaGet(path: string, params = ""): Promise<unknown> {
 async function fetchYF(symbol: string): Promise<JsonMap> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1d`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       headers: {
         "User-Agent": "Mozilla/5.0",
         "Accept": "application/json",
@@ -173,7 +208,33 @@ async function githubRequest(path: string, init: RequestInit = {}): Promise<Resp
   headers.set("Accept", "application/vnd.github+json");
   headers.set("User-Agent", "ATZMA-ControlPlane/1.0");
   if (GITHUB_TOKEN) headers.set("Authorization", `Bearer ${GITHUB_TOKEN}`);
-  return fetch(`https://api.github.com${path}`, { ...init, headers });
+  return fetchWithRetry(`https://api.github.com${path}`, { ...init, headers });
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
+async function fetchWithRetry(url: string, init: RequestInit = {}, attempts = NETWORK_RETRY_ATTEMPTS): Promise<Response> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const res = await fetch(url, init);
+      if (res.ok || !shouldRetryStatus(res.status) || attempt === attempts) {
+        return res;
+      }
+      await wait(250 * (2 ** (attempt - 1)));
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+      await wait(250 * (2 ** (attempt - 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Network request failed");
 }
 
 function defaultControlState() {
@@ -308,7 +369,7 @@ async function authRequest(path: string, init: RequestInit = {}, useServiceRole 
   if (!apiKey) throw new Error("Supabase auth secret is missing");
   headers.set("apikey", apiKey);
   if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
-  return fetch(`${SUPABASE_URL}${path}`, { ...init, headers });
+  return fetchWithRetry(`${SUPABASE_URL}${path}`, { ...init, headers });
 }
 
 async function restAdmin(path: string, init: RequestInit = {}): Promise<Response> {
@@ -317,7 +378,7 @@ async function restAdmin(path: string, init: RequestInit = {}): Promise<Response
   headers.set("apikey", SUPABASE_SERVICE_ROLE_KEY);
   headers.set("Authorization", `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`);
   if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
-  return fetch(`${SUPABASE_URL}/rest/v1${path}`, { ...init, headers });
+  return fetchWithRetry(`${SUPABASE_URL}/rest/v1${path}`, { ...init, headers });
 }
 
 async function requireUser(req: Request): Promise<JsonMap> {
@@ -459,9 +520,36 @@ function serializeBrokerConnection(row: BrokerConnectionRow | null, decryptedApi
   };
 }
 
+function sanitizeBrokerInput(body: JsonMap, existing?: BrokerConnectionRow | null) {
+  const tradingMode = typeof body.trading_mode === "string" && body.trading_mode.toLowerCase() === "live" ? "live" : "paper";
+  const baseUrl = typeof body.base_url === "string" && /^https:\/\/[A-Za-z0-9.-]+$/.test(body.base_url.trim())
+    ? body.base_url.trim()
+    : existing?.base_url ?? (tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets");
+  const accountLabel = typeof body.account_label === "string"
+    ? body.account_label.replace(/[<>{}]/g, "").trim().slice(0, 80)
+    : existing?.account_label ?? null;
+  return { tradingMode, baseUrl, accountLabel };
+}
+
+function sanitizeBrokerError(error: unknown): string {
+  const text = String(error || "").toLowerCase();
+  if (text.includes("unauthorized") || text.includes("forbidden") || text.includes("revoked")) {
+    return "Broker disconnected";
+  }
+  return "Broker disconnected";
+}
+
+async function findOpenTradeJob(userId: string): Promise<JsonMap | null> {
+  const since = new Date(Date.now() - (JOB_DEDUPE_WINDOW_MINUTES * 60_000)).toISOString();
+  const path = `/execution_jobs?user_id=eq.${encodeURIComponent(userId)}&job_type=eq.trade_once&status=in.(queued,running)&requested_at=gte.${encodeURIComponent(since)}&order=requested_at.desc&limit=1`;
+  const res = await restAdmin(path);
+  const rows = await res.json() as JsonMap[];
+  return rows[0] ?? null;
+}
+
 async function verifyAlpacaCredentials(apiKey: string, secretKey: string, baseUrl: string): Promise<JsonMap> {
   const endpoint = `${baseUrl.replace(/\/$/, "")}/v2/account`;
-  const res = await fetch(endpoint, {
+  const res = await fetchWithRetry(endpoint, {
     headers: {
       "APCA-API-KEY-ID": apiKey,
       "APCA-API-SECRET-KEY": secretKey,
@@ -491,6 +579,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const qs = url.searchParams;
 
   try {
+    if (path === "/health") {
+      return json({
+        ok: true,
+        system: "ATZMA",
+        timestamp: new Date().toISOString(),
+        github_repo: GITHUB_REPO,
+        control_plane: !!GITHUB_TOKEN,
+        broker_credentials_encryption: !!BROKER_CREDENTIAL_KEY,
+      });
+    }
+
     if (path === "/account") {
       const session = await requireScopedBrokerSession(req);
       const data = await alpacaGetWithSession(session, "/account") as Record<string, string>;
@@ -558,6 +657,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (path === "/auth/signup" && req.method === "POST") {
+      enforceAuthRateLimit(req, "signup");
       const body = await req.json().catch(() => ({})) as { email?: string; password?: string; display_name?: string };
       if (!body.email || !body.password) return json({ error: "email and password are required" }, 400);
       const res = await authRequest("/auth/v1/signup", {
@@ -579,6 +679,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (path === "/auth/signin" && req.method === "POST") {
+      enforceAuthRateLimit(req, "signin");
       const body = await req.json().catch(() => ({})) as { email?: string; password?: string };
       if (!body.email || !body.password) return json({ error: "email and password are required" }, 400);
       const res = await authRequest("/auth/v1/token?grant_type=password", {
@@ -596,6 +697,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (path === "/auth/resend" && req.method === "POST") {
+      enforceAuthRateLimit(req, "resend");
       const body = await req.json().catch(() => ({})) as { email?: string };
       if (!body.email) return json({ error: "email is required" }, 400);
       const res = await authRequest("/auth/v1/resend", {
@@ -711,22 +813,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const body = await req.json().catch(() => ({})) as JsonMap;
       const userId = String(user.id);
       const existing = await fetchBrokerConnection(userId);
+      const sanitized = sanitizeBrokerInput(body, existing);
       const apiKeyPlain = typeof body.api_key === "string" && body.api_key.trim()
         ? body.api_key.trim()
         : existing ? await decryptSecret(existing.api_key_encrypted) : "";
       const secretKeyPlain = typeof body.secret_key === "string" && body.secret_key.trim()
         ? body.secret_key.trim()
         : existing ? await decryptSecret(existing.secret_key_encrypted) : "";
-      const tradingMode = typeof body.trading_mode === "string" ? body.trading_mode : (existing?.trading_mode ?? "paper");
-      const baseUrl = typeof body.base_url === "string" && body.base_url.trim()
-        ? body.base_url.trim()
-        : (tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets");
       const payload = {
         user_id: userId,
         broker_name: "alpaca",
-        account_label: typeof body.account_label === "string" ? body.account_label : existing?.account_label ?? null,
-        trading_mode: tradingMode,
-        base_url: baseUrl,
+        account_label: sanitized.accountLabel,
+        trading_mode: sanitized.tradingMode,
+        base_url: sanitized.baseUrl,
         enabled: body.enabled === undefined ? (existing?.enabled ?? true) : !!body.enabled,
         api_key_encrypted: apiKeyPlain ? await encryptSecret(apiKeyPlain) : null,
         secret_key_encrypted: secretKeyPlain ? await encryptSecret(secretKeyPlain) : null,
@@ -742,8 +841,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
       const rows = await res.json() as BrokerConnectionRow[];
       await audit(userId, "broker_connection_saved", {
-        trading_mode: tradingMode,
-        base_url: baseUrl,
+        trading_mode: sanitized.tradingMode,
+        base_url: sanitized.baseUrl,
         enabled: payload.enabled,
       });
       return json({ connection: serializeBrokerConnection(rows[0] ?? existing ?? null, apiKeyPlain, secretKeyPlain) });
@@ -780,16 +879,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
           },
         });
       } catch (e) {
+        const safeError = sanitizeBrokerError(e);
         await restAdmin(`/broker_connections?id=eq.${encodeURIComponent(row.id)}`, {
           method: "PATCH",
           headers: { "Prefer": "return=minimal" },
           body: JSON.stringify({
             last_verified_status: "failed",
             last_verified_at: new Date().toISOString(),
-            last_error: String(e),
+            last_error: safeError,
           }),
         });
-        return json({ error: String(e) }, 400);
+        return json({ error: safeError }, 400);
       }
     }
 
@@ -805,6 +905,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const broker = await fetchBrokerConnection(String(user.id));
       if (!broker?.enabled || !broker.api_key_encrypted || !broker.secret_key_encrypted) {
         return json({ error: "Verified broker connection is required" }, 400);
+      }
+      const existingJob = await findOpenTradeJob(String(user.id));
+      if (existingJob) {
+        return json({ job: sanitizeJob(existingJob), duplicate: true }, 202);
       }
       const body = await req.json().catch(() => ({})) as JsonMap;
       const actor = String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id);
@@ -857,6 +961,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const user = await requireUser(req);
       const broker = await fetchBrokerConnection(String(user.id));
       if (broker?.enabled && broker.api_key_encrypted && broker.secret_key_encrypted) {
+        const existingJob = await findOpenTradeJob(String(user.id));
+        if (existingJob) {
+          return json({ job: sanitizeJob(existingJob), duplicate: true }, 202);
+        }
         const actor = String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id);
         const claimToken = createJobClaimToken();
         const res = await restAdmin("/execution_jobs", {
@@ -958,6 +1066,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } catch (e) {
     const message = String(e);
     if (message === "Unauthorized" || message.endsWith("Unauthorized")) return json({ error: "Unauthorized" }, 401);
+    if (message.includes("Rate limit exceeded")) return json({ error: "Too many attempts. Please wait a minute and try again." }, 429);
     if (message === "Verified broker connection required") return json({ error: message }, 412);
     return json({ error: message }, 500);
   }

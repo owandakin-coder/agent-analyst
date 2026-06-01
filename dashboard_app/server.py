@@ -14,6 +14,7 @@ if ROOT_PARENT not in sys.path:
     sys.path.insert(0, ROOT_PARENT)
 
 from control_plane import apply_control_action, control_status_summary, dispatch_trade_workflow
+from logging_setup import configure_logging
 
 PORT = 7788
 ROOT = os.path.dirname(os.path.abspath(__file__))   # dashboard_app/
@@ -48,6 +49,8 @@ ALPACA_KEY    = ENV.get('ALPACA_API_KEY', '')
 ALPACA_SECRET = ENV.get('ALPACA_SECRET_KEY', '')
 ALPACA_BASE   = ENV.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets/v2').rstrip('/')
 REMOTE_API_BASE = ENV.get('ATZMA_REMOTE_API_BASE', 'https://sofowpweliticltlbxrj.supabase.co/functions/v1/api').rstrip('/')
+
+configure_logging()
 
 print(f'Alpaca: {ALPACA_BASE}', flush=True)
 print(f'Key   : {ALPACA_KEY[:8]}...', flush=True)
@@ -200,6 +203,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply_json({'error': str(e)}, 500)
             return
 
+        if path == '/api/health':
+            try:
+                self.reply_json(proxy_remote('/health', headers=self.headers))
+            except urllib.error.HTTPError as e:
+                try:
+                    self.reply_json(json.loads(e.read().decode('utf-8')), e.code)
+                except Exception:
+                    self.reply_json({'error': str(e)}, e.code)
+            except Exception as e:
+                self.reply_json({'error': str(e)}, 500)
+            return
+
         if path in ('/api/auth/me', '/api/me', '/api/me/audit', '/api/me/broker', '/api/me/execution/jobs'):
             try:
                 self.reply_json(proxy_remote(path[4:], headers=self.headers))
@@ -258,6 +273,8 @@ class Handler(BaseHTTPRequestHandler):
         if path in (
             '/api/auth/signup',
             '/api/auth/signin',
+            '/api/auth/resend',
+            '/api/auth/verify',
             '/api/me/profile',
             '/api/me/preferences',
             '/api/me/broker',

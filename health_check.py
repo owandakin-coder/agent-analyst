@@ -95,6 +95,7 @@ def check_files() -> bool:
     from config_loader import CFG
 
     required = [
+        "README.md",
         "main.py",
         "broker_api.py",
         "live_trader.py",
@@ -243,6 +244,7 @@ def check_remote_app() -> bool:
     print("\n[8] Remote App")
     base = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api"
     checks = [
+        ("Health endpoint", f"{base}/health", 200),
         ("Control endpoint", f"{base}/control", 200),
         ("Auth me unauthorized", f"{base}/auth/me", 401),
         ("Portfolio locked without auth", f"{base}/account", 401),
