@@ -14,6 +14,7 @@ if ROOT_PARENT not in sys.path:
     sys.path.insert(0, ROOT_PARENT)
 
 from control_plane import apply_control_action, control_status_summary, dispatch_trade_workflow
+from decision_journal import read_last_decision
 from logging_setup import configure_logging
 
 PORT = 7788
@@ -211,6 +212,13 @@ class Handler(BaseHTTPRequestHandler):
                     self.reply_json(json.loads(e.read().decode('utf-8')), e.code)
                 except Exception:
                     self.reply_json({'error': str(e)}, e.code)
+            except Exception as e:
+                self.reply_json({'error': str(e)}, 500)
+            return
+
+        if path == '/api/decision':
+            try:
+                self.reply_json({'decision': read_last_decision()})
             except Exception as e:
                 self.reply_json({'error': str(e)}, 500)
             return

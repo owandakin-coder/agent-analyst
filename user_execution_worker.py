@@ -65,8 +65,19 @@ def main() -> int:
         from main import load_trained_model_and_norm, step_live_once
 
         model, vec_norm = load_trained_model_and_norm()
-        step_live_once(model, vec_norm, auto_approve=True)
-        complete(JOB_ID, "succeeded", result={"job_id": JOB_ID, "mode": broker.get("trading_mode", "paper")})
+        decision_result = step_live_once(model, vec_norm, auto_approve=True) or {}
+        complete(
+            JOB_ID,
+            "succeeded",
+            result={
+                "job_id": JOB_ID,
+                "mode": broker.get("trading_mode", "paper"),
+                "decision_summary": decision_result.get("summary"),
+                "regime": decision_result.get("regime"),
+                "strategy_mode": decision_result.get("strategy_mode"),
+                "decisions": decision_result.get("decisions", []),
+            },
+        )
         return 0
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else 0

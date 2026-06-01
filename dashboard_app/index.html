@@ -2199,6 +2199,10 @@ function renderExecutionJobs(jobs) {
   currentExecutionJobs = Array.isArray(jobs) ? jobs : [];
   setText('execution-status', currentExecutionJobs.length + ' jobs');
   const latest = currentExecutionJobs[0];
+  if (latest && latest.result && latest.result.decision_summary) {
+    setText('last-decision-main', latest.result.regime || 'Decision');
+    setText('last-decision-sub', latest.result.decision_summary);
+  }
   setText('execution-sub', latest ? ((latest.status || 'queued').toUpperCase() + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at || new Date().toISOString())) : 'No personal runs yet');
   const root = document.getElementById('execution-jobs-list');
   if (!root) return;

@@ -298,8 +298,9 @@ def step_live_once(model, vec_norm, auto_approve: bool = True):
         sys.exit(0)
 
     print("  Market is OPEN. Running decision cycle...")
-    trader.run_once()
+    result = trader.run_once()
     print("  Decision cycle complete. Exiting.")
+    return result
 
 
 def step_live_real(model, vec_norm, auto_approve: bool):

@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 
 from control_plane import can_trade, load_control_state
+from decision_journal import write_last_decision
+from multi_agent import MultiAgentDecisionEngine
 from notifications import send_operator_alert
 from regime_detector import RegimeDetector
 from alternative_data import AlternativeDataFetcher, enrich_observation
@@ -105,7 +107,13 @@ class LiveTrader:
 
         # Regime detection + alternative data
         self._regime_detector = RegimeDetector()
+        self._multi_agent = MultiAgentDecisionEngine(
+            buy_threshold=BUY_THRESHOLD,
+            sell_threshold=SELL_THRESHOLD,
+            stop_loss_pct=STOP_LOSS_PCT,
+        )
         self._alt_fetcher     = AlternativeDataFetcher()
+        self.last_cycle_result: dict | None = None
 
         # מעקב שווי תיק
         self._peak_net_worth = initial_capital
@@ -261,12 +269,25 @@ class LiveTrader:
         # Alt data still influences decisions via the regime multiplier above.
         if self._is_ensemble:
             # EnsembleAgent handles normalisation internally per member
-            action = self.model.predict(obs[np.newaxis], deterministic=True)
+            raw_action = self.model.predict(obs[np.newaxis], deterministic=True)
             log.info(f"Ensemble vote summary: {self.model.vote_summary(obs[np.newaxis])}")
         else:
             obs_norm = self.vec_norm.normalize_obs(obs[np.newaxis])  # (1, W, F)
-            action, _ = self.model.predict(obs_norm, deterministic=True)
-            action = np.array(action).flatten()
+            raw_action, _ = self.model.predict(obs_norm, deterministic=True)
+        raw_action = np.array(raw_action).flatten()
+
+        decision_bundle = self._multi_agent.evaluate(
+            tickers=self.tickers,
+            fresh_data=fresh_data,
+            raw_action=raw_action,
+            regime_signal=regime_signal,
+            positions=positions,
+            entry_prices=self._entry_prices,
+            trailing_highs=self._trailing_highs,
+            current_drawdown=drawdown,
+        )
+        action = decision_bundle.final_action_vector(self.tickers)
+        log.info("Multi-agent summary: %s", decision_bundle.top_summary())
 
         # התאמת גודל פוזיציה לפי סיכון (with regime multiplier + kelly + correlation)
         price_history = {t: fresh_data[t]["close"] for t in self.tickers if t in fresh_data}
@@ -279,9 +300,23 @@ class LiveTrader:
 
         # ── המרה לפקודות ────────────────────────────────────────────────────
         self._execute_actions(action, current_prices, cash, positions)
+        self.last_cycle_result = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "regime": decision_bundle.regime,
+            "strategy_mode": decision_bundle.strategy_mode,
+            "net_worth": float(net_worth),
+            "cash": float(cash),
+            "drawdown": float(drawdown),
+            "raw_action": [float(x) for x in raw_action.tolist()],
+            "scaled_action": [float(x) for x in action.tolist()],
+            "summary": decision_bundle.top_summary(),
+            "decisions": [decision.as_dict() for decision in decision_bundle.decisions],
+        }
+        write_last_decision(self.last_cycle_result)
 
         # ── דוח יומי לטלגרם ─────────────────────────────────────────────────
-        self._send_daily_summary(net_worth, cash, drawdown, action, current_prices)
+        self._send_daily_summary(net_worth, cash, drawdown, action, current_prices, decision_bundle)
+        return self.last_cycle_result
 
     def _seconds_until_next_open(self, buffer_minutes: int = 5) -> float:
         """מחשב שניות עד לפתיחת השוק הבאה (+ חיץ בדקות)."""
@@ -667,11 +702,12 @@ class LiveTrader:
         drawdown: float,
         action: np.ndarray,
         prices: dict[str, float],
+        decision_bundle=None,
     ):
         """שולח סיכום יומי לטלגרם."""
         pnl_pct = (net_worth - self.initial_capital) / self.initial_capital * 100
         pnl_abs = net_worth - self.initial_capital
-        sign    = "+" if pnl_abs >= 0 else ""
+        sign = "+" if pnl_abs >= 0 else ""
 
         rs = self.risk_manager.get_status()
         lines = [

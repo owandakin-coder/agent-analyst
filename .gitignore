@@ -32,3 +32,4 @@ trades_history.csv
 paper_orders.log
 agent_analyst.log
 watchdog.log
+runtime/

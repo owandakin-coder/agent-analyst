@@ -47,10 +47,13 @@ def test_main_success_sets_broker_env_and_completes(monkeypatch):
     assert os.environ["ALPACA_API_KEY"] == "user-key"
     assert os.environ["ALPACA_SECRET_KEY"] == "user-secret"
     assert os.environ["ALPACA_BASE_URL"] == "https://paper-api.alpaca.markets"
-    assert calls[-1] == (
-        "/worker/jobs/complete",
-        {"job_id": "job-123", "status": "succeeded", "result": {"job_id": "job-123", "mode": "paper"}, "error": None},
-    )
+    assert calls[-1][0] == "/worker/jobs/complete"
+    payload = calls[-1][1]
+    assert payload["job_id"] == "job-123"
+    assert payload["status"] == "succeeded"
+    assert payload["result"]["job_id"] == "job-123"
+    assert payload["result"]["mode"] == "paper"
+    assert "decision_summary" in payload["result"]
 
 
 def test_main_marks_skipped_on_zero_system_exit(monkeypatch):

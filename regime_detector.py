@@ -1,33 +1,19 @@
 """
-regime_detector.py
-==================
-Detects the current market regime (Bull / Bear / Sideways) from price data.
+Market regime detection for ATZMA.
 
-Why it matters
---------------
-An RL model trained on mixed data doesn't automatically know whether we're
-in a 2020-style crash or a 2023 bull run.  By detecting the regime first,
-we can:
-  - Scale down position sizes in Bear markets
-  - Allow full exposure in confirmed Bull markets
-  - Stay defensive (reduce buys, hold cash) in Sideways markets
-
-Detection method
-----------------
-Rule-based using SPY as the benchmark (simple, interpretable, no refit):
-  - 50-day MA vs 200-day MA (Golden / Death Cross)
-  - Current price distance from 52-week high
-  - 20-day realised volatility
-
-For production a Hidden Markov Model (HMM) with 3 states would be more
-robust — the framework is laid out in `fit_hmm()` below as a drop-in upgrade.
+Classifies the market into execution-aware regimes:
+- TRENDING_UP
+- TRENDING_DOWN
+- RANGE_BOUND
+- HIGH_VOLATILITY
+- CRASH_CORRECTION
 """
 
 from __future__ import annotations
 
 import logging
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
 import pandas as pd
@@ -36,178 +22,144 @@ log = logging.getLogger("RegimeDetector")
 
 
 class Regime(Enum):
-    BULL     = "BULL"      # trend up, low vol → full exposure
-    BEAR     = "BEAR"      # trend down, high vol → defensive
-    SIDEWAYS = "SIDEWAYS"  # no clear trend → reduced exposure
+    TRENDING_UP = "TRENDING_UP"
+    TRENDING_DOWN = "TRENDING_DOWN"
+    RANGE_BOUND = "RANGE_BOUND"
+    HIGH_VOLATILITY = "HIGH_VOLATILITY"
+    CRASH_CORRECTION = "CRASH_CORRECTION"
 
     def position_multiplier(self) -> float:
-        """How much of the model's suggested position to actually use."""
         return {
-            Regime.BULL:     1.0,
-            Regime.SIDEWAYS: 0.6,
-            Regime.BEAR:     0.3,
+            Regime.TRENDING_UP: 1.0,
+            Regime.RANGE_BOUND: 0.65,
+            Regime.TRENDING_DOWN: 0.45,
+            Regime.HIGH_VOLATILITY: 0.35,
+            Regime.CRASH_CORRECTION: 0.0,
+        }[self]
+
+    def strategy_mode(self) -> str:
+        return {
+            Regime.TRENDING_UP: "trend_following",
+            Regime.TRENDING_DOWN: "defensive_trend",
+            Regime.RANGE_BOUND: "mean_reversion",
+            Regime.HIGH_VOLATILITY: "capital_preservation",
+            Regime.CRASH_CORRECTION: "move_to_cash",
+        }[self]
+
+    def legacy_label(self) -> str:
+        return {
+            Regime.TRENDING_UP: "BULL",
+            Regime.RANGE_BOUND: "SIDEWAYS",
+            Regime.TRENDING_DOWN: "BEAR",
+            Regime.HIGH_VOLATILITY: "BEAR",
+            Regime.CRASH_CORRECTION: "BEAR",
         }[self]
 
 
 @dataclass
 class RegimeSignal:
-    regime:     Regime
-    confidence: float          # 0..1
-    ma50:       float
-    ma200:      float
-    vol_20:     float          # annualised realised vol
-    pct_from_high: float       # distance from 52-week high (negative = below)
+    regime: Regime
+    confidence: float
+    ma50: float
+    ma200: float
+    vol_20: float
+    pct_from_high: float
+    trailing_return_20: float
     description: str
 
 
 class RegimeDetector:
-    """
-    Classifies the current market regime using SPY (or any benchmark ticker).
-
-    Parameters
-    ----------
-    vol_bear_threshold : float
-        Annualised volatility above this → Bear signal contribution.
-    high_bear_threshold : float
-        If price is this far below the 52-week high → Bear signal.
-    """
-
     def __init__(
         self,
-        vol_bear_threshold: float  = 0.25,   # 25% annualised vol
-        high_bear_threshold: float = -0.15,  # 15% below 52-week high
+        vol_high_threshold: float = 0.28,
+        crash_drawdown_threshold: float = -0.12,
+        crash_return_threshold: float = -0.08,
     ):
-        self.vol_bear_threshold  = vol_bear_threshold
-        self.high_bear_threshold = high_bear_threshold
+        self.vol_high_threshold = vol_high_threshold
+        self.crash_drawdown_threshold = crash_drawdown_threshold
+        self.crash_return_threshold = crash_return_threshold
 
-    # ──────────────────────────────────────────────────────────────────────────
-    def detect(self, spy_df: pd.DataFrame) -> RegimeSignal:
-        """
-        Detects regime from a DataFrame with a 'close' column.
-
-        Parameters
-        ----------
-        spy_df : pd.DataFrame
-            Daily OHLCV for SPY (or benchmark), sorted ascending.
-
-        Returns
-        -------
-        RegimeSignal
-        """
-        close = spy_df["close"].dropna()
+    def detect(self, benchmark_df: pd.DataFrame) -> RegimeSignal:
+        close = benchmark_df["close"].dropna()
         if len(close) < 200:
-            log.warning(
-                f"Only {len(close)} bars available (need 200). "
-                "Defaulting to SIDEWAYS."
-            )
+            price = float(close.iloc[-1]) if len(close) else 0.0
             return RegimeSignal(
-                regime=Regime.SIDEWAYS, confidence=0.0,
-                ma50=float(close.iloc[-1]), ma200=float(close.iloc[-1]),
-                vol_20=0.0, pct_from_high=0.0,
-                description="Insufficient data — defaulting to SIDEWAYS",
+                regime=Regime.RANGE_BOUND,
+                confidence=0.0,
+                ma50=price,
+                ma200=price,
+                vol_20=0.0,
+                pct_from_high=0.0,
+                trailing_return_20=0.0,
+                description="Insufficient data; defaulting to range-bound regime.",
             )
 
-        price  = float(close.iloc[-1])
-        ma50   = float(close.rolling(50).mean().iloc[-1])
-        ma200  = float(close.rolling(200).mean().iloc[-1])
+        price = float(close.iloc[-1])
+        ma50 = float(close.rolling(50).mean().iloc[-1])
+        ma200 = float(close.rolling(200).mean().iloc[-1])
+        returns = close.pct_change().dropna()
+        vol_20 = float(returns.iloc[-20:].std() * np.sqrt(252))
+        high_252 = float(close.iloc[-252:].max())
+        pct_from_high = (price - high_252) / high_252 if high_252 else 0.0
+        trailing_return_20 = float(close.iloc[-1] / close.iloc[-21] - 1.0) if len(close) > 21 else 0.0
+        ma_gap = (ma50 - ma200) / ma200 if ma200 else 0.0
 
-        # 20-day realised volatility (annualised)
-        rets   = close.pct_change().dropna()
-        vol_20 = float(rets.iloc[-20:].std() * np.sqrt(252))
-
-        # Distance from 52-week high
-        high_52w      = float(close.iloc[-252:].max())
-        pct_from_high = (price - high_52w) / high_52w
-
-        # ── Score: +1 = Bull signal, -1 = Bear signal ────────────────────
-        score = 0.0
-
-        # Golden cross (MA50 > MA200) → +2
-        if ma50 > ma200:
-            score += 2.0
+        if pct_from_high <= self.crash_drawdown_threshold and trailing_return_20 <= self.crash_return_threshold:
+            regime = Regime.CRASH_CORRECTION
+            score = 1.0
+        elif vol_20 >= self.vol_high_threshold:
+            regime = Regime.HIGH_VOLATILITY
+            score = min(vol_20 / max(self.vol_high_threshold, 1e-6), 2.0) / 2.0
+        elif ma50 > ma200 and price > ma50 and trailing_return_20 > 0:
+            regime = Regime.TRENDING_UP
+            score = min((ma_gap * 8.0) + max(trailing_return_20, 0.0) * 3.0, 1.0)
+        elif ma50 < ma200 and price < ma50 and trailing_return_20 < 0:
+            regime = Regime.TRENDING_DOWN
+            score = min((abs(ma_gap) * 8.0) + abs(min(trailing_return_20, 0.0)) * 3.0, 1.0)
         else:
-            score -= 2.0
+            regime = Regime.RANGE_BOUND
+            score = max(0.35, 1.0 - min(abs(ma_gap) * 10.0 + abs(trailing_return_20) * 4.0, 0.65))
 
-        # Price above MA50 → +1
-        if price > ma50:
-            score += 1.0
-        else:
-            score -= 1.0
-
-        # Low volatility → +1
-        if vol_20 < self.vol_bear_threshold:
-            score += 1.0
-        else:
-            score -= 1.0
-
-        # Near 52-week high → +1
-        if pct_from_high > -0.05:
-            score += 1.0
-        elif pct_from_high < self.high_bear_threshold:
-            score -= 1.0
-
-        # ── Map score to regime ───────────────────────────────────────────
-        # score range roughly -5 .. +5
-        if score >= 2.0:
-            regime = Regime.BULL
-        elif score <= -1.0:
-            regime = Regime.BEAR
-        else:
-            regime = Regime.SIDEWAYS
-
-        confidence = min(abs(score) / 5.0, 1.0)
-
+        confidence = float(np.clip(score, 0.0, 1.0))
         description = (
-            f"MA50={'↑' if ma50>ma200 else '↓'} vs MA200 | "
-            f"Vol={vol_20:.0%} | "
-            f"From52wHigh={pct_from_high:+.1%} | "
-            f"Score={score:+.1f}"
+            f"{regime.value} | mode={regime.strategy_mode()} | "
+            f"MA50={ma50:.2f} vs MA200={ma200:.2f} | "
+            f"20dRet={trailing_return_20:+.1%} | Vol20={vol_20:.1%} | "
+            f"FromHigh={pct_from_high:+.1%}"
         )
-
         signal = RegimeSignal(
-            regime=regime, confidence=confidence,
-            ma50=ma50, ma200=ma200,
-            vol_20=vol_20, pct_from_high=pct_from_high,
+            regime=regime,
+            confidence=confidence,
+            ma50=ma50,
+            ma200=ma200,
+            vol_20=vol_20,
+            pct_from_high=pct_from_high,
+            trailing_return_20=trailing_return_20,
             description=description,
         )
-
-        log.info(
-            f"Regime detected: {regime.value} (confidence={confidence:.0%}) | "
-            f"{description}"
-        )
+        log.info("Regime detected: %s", description)
         return signal
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # Optional: HMM-based regime detection (requires hmmlearn)
-    # ──────────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def fit_hmm(returns: pd.Series, n_states: int = 3):
-        """
-        Fits a Gaussian HMM with n_states on historical returns.
-        Returns (model, state_labels) where state_labels maps
-        state index → Regime enum.
-
-        Install: pip install hmmlearn
-        """
         try:
             from hmmlearn.hmm import GaussianHMM
-        except ImportError:
-            raise ImportError("pip install hmmlearn to use HMM-based detection.")
+        except ImportError as exc:
+            raise ImportError("pip install hmmlearn to use HMM-based detection.") from exc
 
-        X = returns.values.reshape(-1, 1)
+        x = returns.values.reshape(-1, 1)
         model = GaussianHMM(
-            n_components=n_states, covariance_type="full",
-            n_iter=100, random_state=42,
+            n_components=n_states,
+            covariance_type="full",
+            n_iter=100,
+            random_state=42,
         )
-        model.fit(X)
-
-        # Sort states by mean return: low=Bear, mid=Sideways, high=Bull
+        model.fit(x)
         means = model.means_.flatten()
         order = np.argsort(means)
         labels = {
-            order[0]: Regime.BEAR,
-            order[1]: Regime.SIDEWAYS,
-            order[2]: Regime.BULL,
+            order[0]: Regime.TRENDING_DOWN,
+            order[1]: Regime.RANGE_BOUND,
+            order[2]: Regime.TRENDING_UP,
         }
         return model, labels
