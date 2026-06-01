@@ -21,7 +21,20 @@ on:
     - cron: '40 19 * * 1-5'
     # Winter (EST, UTC-5) — extra hour shift
     - cron: '40 20 * * 1-5'
-  workflow_dispatch:   # Manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Per-user execution job id"
+        required: false
+        type: string
+      user_id:
+        description: "Owning user id"
+        required: false
+        type: string
+      claim_token:
+        description: "Per-job claim token"
+        required: false
+        type: string
 
 jobs:
   trade:
@@ -56,7 +69,15 @@ jobs:
           TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN:        ${{ github.token }}
           GITHUB_REPOSITORY:   ${{ github.repository }}
-        run: python main.py --mode live_once --auto-approve
+          ATZMA_WORKER_TOKEN:  ${{ github.event.inputs.claim_token }}
+          ATZMA_JOB_ID:        ${{ github.event.inputs.job_id }}
+          ATZMA_REMOTE_API_BASE: https://sofowpweliticltlbxrj.supabase.co/functions/v1/api
+        run: |
+          if [ -n "${ATZMA_JOB_ID}" ]; then
+            python user_execution_worker.py
+          else
+            python main.py --mode live_once --auto-approve
+          fi
 
       # ── 5. Upload logs ────────────────────────────────────────
       - name: Upload logs

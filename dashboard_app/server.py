@@ -156,6 +156,9 @@ class Handler(BaseHTTPRequestHandler):
         # ── /api/account — Alpaca account summary ───────────────────────────
         if path == '/api/account':
             try:
+                if self.headers.get('Authorization'):
+                    self.reply_json(proxy_remote('/account', headers=self.headers))
+                    return
                 data = alpaca_get('/account')
                 self.reply_json({
                     'equity':         float(data.get('equity', 0)),
@@ -171,6 +174,9 @@ class Handler(BaseHTTPRequestHandler):
         # ── /api/positions — Alpaca positions ───────────────────────────────
         if path == '/api/positions':
             try:
+                if self.headers.get('Authorization'):
+                    self.reply_json(proxy_remote('/positions', headers=self.headers))
+                    return
                 positions = alpaca_get('/positions')
                 result = []
                 for p in positions:
@@ -192,6 +198,9 @@ class Handler(BaseHTTPRequestHandler):
         # ── /api/orders — Alpaca trade history ──────────────────────────────
         if path == '/api/orders':
             try:
+                if self.headers.get('Authorization'):
+                    self.reply_json(proxy_remote('/orders', headers=self.headers))
+                    return
                 orders = alpaca_get('/orders', 'status=closed&limit=50&direction=desc')
                 result = []
                 for o in orders:
@@ -215,6 +224,9 @@ class Handler(BaseHTTPRequestHandler):
             period    = qs.get('period',    ['1M'])[0]
             timeframe = qs.get('timeframe', ['1D'])[0]
             try:
+                if self.headers.get('Authorization'):
+                    self.reply_json(proxy_remote(f"/history?period={period}&timeframe={timeframe}", headers=self.headers))
+                    return
                 data = alpaca_get('/account/portfolio/history',
                                   f'period={period}&timeframe={timeframe}&intraday_reporting=market_hours')
                 timestamps = data.get('timestamp', [])
@@ -237,7 +249,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply_json({'error': str(e)}, 500)
             return
 
-        if path in ('/api/auth/me', '/api/me', '/api/me/audit'):
+        if path in ('/api/auth/me', '/api/me', '/api/me/audit', '/api/me/broker', '/api/me/execution/jobs'):
             try:
                 self.reply_json(proxy_remote(path[4:], headers=self.headers))
             except urllib.error.HTTPError as e:
@@ -292,7 +304,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply_json({'error': str(e)}, 500)
             return
 
-        if path in ('/api/auth/signup', '/api/auth/signin', '/api/me/profile', '/api/me/preferences'):
+        if path in (
+            '/api/auth/signup',
+            '/api/auth/signin',
+            '/api/me/profile',
+            '/api/me/preferences',
+            '/api/me/broker',
+            '/api/me/broker/verify',
+            '/api/me/execution/run',
+        ):
             try:
                 payload = self.read_json()
                 method = 'PUT' if path.startswith('/api/me/') else 'POST'

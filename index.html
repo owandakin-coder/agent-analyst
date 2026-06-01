@@ -1349,6 +1349,7 @@ select.m-input { appearance:none; cursor:pointer; }
         <div class="s-sec-lbl">Account</div>
         <div class="s-item" onclick="openProfile()"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">👤</div><div><div class="s-txt-main">Profile</div><div class="s-txt-sub" id="profile-sub">EA Arage · Paper Account</div></div></div><span class="chev">›</span></div>
         <div class="s-item" onclick="openAlpacaInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">🔗</div><div><div class="s-txt-main">Alpaca API</div><div class="s-txt-sub" id="alpaca-sub">Paper trading connected</div></div></div><span style="color:var(--green);font-size:13px" id="alpaca-status">● Live</span></div>
+        <div class="s-item" onclick="openBrokerSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">🛡️</div><div><div class="s-txt-main">Broker Connection</div><div class="s-txt-sub" id="broker-sub">Connect your personal Alpaca workspace</div></div></div><span class="s-r" id="broker-status" style="color:var(--orange)">Setup ›</span></div>
       </div>
 
       <div class="s-sec">
@@ -1358,6 +1359,7 @@ select.m-input { appearance:none; cursor:pointer; }
         <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(255,59,48,.12)">🛑</div><div><div class="s-txt-main">Trailing Stop-Loss</div><div class="s-txt-sub">8% from peak · per ticker</div></div></div><label class="tog"><input type="checkbox" id="tog-stoploss" checked onchange="togSetting(this,'stop_loss')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
         <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(191,90,242,.12)">🎲</div><div><div class="s-txt-main">Kelly Criterion</div><div class="s-txt-sub">Fractional 0.25× sizing</div></div></div><label class="tog"><input type="checkbox" id="tog-kelly" checked onchange="togSetting(this,'kelly')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
         <div class="s-item" onclick="openRegimeInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">📡</div><div><div class="s-txt-main">Regime Detector</div><div class="s-txt-sub">Bull · Sideways · Bear mode</div></div></div><span class="s-r" id="regime-badge" style="color:var(--green);font-size:12px">BULL ›</span></div>
+        <div class="s-item" onclick="openExecutionSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🚀</div><div><div class="s-txt-main">Execution Queue</div><div class="s-txt-sub" id="execution-sub">Personal isolated jobs are not active yet</div></div></div><span class="s-r" id="execution-status" style="color:var(--g2)">0 jobs</span></div>
       </div>
 
       <div class="s-sec">
@@ -1533,6 +1535,57 @@ select.m-input { appearance:none; cursor:pointer; }
         <button onclick="cancelProfileEdit()" style="flex:1;padding:13px;background:var(--c3);border:none;border-radius:12px;color:var(--g2);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">Cancel</button>
         <button onclick="saveProfile()" style="flex:2;padding:13px;background:var(--green);border:none;border-radius:12px;color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;">Save Changes</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- BROKER SHEET -->
+<div class="sheet-overlay" id="broker-sheet" onclick="closeSheet('broker-sheet')">
+  <div class="sheet-box" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Personal Broker Connection</div>
+    <p style="font-size:12px;color:var(--g2);margin-bottom:14px;line-height:1.45;">Each member can attach a separate Alpaca account. Credentials stay server-side and are only used for isolated runs.</p>
+    <div class="profile-row"><span class="profile-key">Status</span><span class="profile-val" id="broker-sheet-status" style="color:var(--orange)">Not connected</span></div>
+    <div class="profile-row"><span class="profile-key">Last Check</span><span class="profile-val" id="broker-sheet-verified">Never</span></div>
+    <div class="profile-row"><span class="profile-key">Masked API Key</span><span class="profile-val" id="broker-sheet-api-mask">-</span></div>
+    <div class="profile-row"><span class="profile-key">Masked Secret</span><span class="profile-val" id="broker-sheet-secret-mask">-</span></div>
+    <label style="font-size:11px;color:var(--g3);margin:14px 0 4px;display:block;">Workspace Label</label>
+    <input class="m-input" type="text" id="broker-account-label" placeholder="My Paper Workspace">
+    <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Trading Mode</label>
+    <select class="m-input" id="broker-trading-mode">
+      <option value="paper">Paper</option>
+      <option value="live">Live</option>
+    </select>
+    <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Base URL</label>
+    <input class="m-input" type="text" id="broker-base-url" placeholder="https://paper-api.alpaca.markets">
+    <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">API Key</label>
+    <input class="m-input" type="password" id="broker-api-key" placeholder="Leave blank to keep current key">
+    <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Secret Key</label>
+    <input class="m-input" type="password" id="broker-secret-key" placeholder="Leave blank to keep current secret">
+    <label style="display:flex;align-items:center;gap:10px;margin:12px 0 0;font-size:12px;color:var(--g2);">
+      <input type="checkbox" id="broker-enabled" checked>
+      Allow isolated trading jobs for this workspace
+    </label>
+    <div id="broker-error" style="min-height:16px;margin-top:12px;font-size:11px;color:#ff8f88;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;">
+      <button onclick="saveBrokerConnection()" style="padding:13px;background:var(--blue);border:none;border-radius:12px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;">Save</button>
+      <button onclick="verifyBrokerConnection()" style="padding:13px;background:rgba(52,199,89,.14);border:1px solid rgba(52,199,89,.25);border-radius:12px;color:var(--green);font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;">Verify</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXECUTION SHEET -->
+<div class="sheet-overlay" id="execution-sheet" onclick="closeSheet('execution-sheet')">
+  <div class="sheet-box" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
+      <div class="sheet-title" style="margin-bottom:0">Personal Execution Queue</div>
+      <button onclick="requestPersonalRun()" style="padding:10px 14px;background:var(--green);border:none;border-radius:12px;color:#04120a;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;">Run Now</button>
+    </div>
+    <p style="font-size:12px;color:var(--g2);line-height:1.45;margin-bottom:12px;">Each request creates a separate job and runs with that member's own broker credentials.</p>
+    <div id="execution-error" style="min-height:16px;margin-bottom:10px;font-size:11px;color:#ff8f88;"></div>
+    <div id="execution-jobs-list" style="display:grid;gap:10px;">
+      <div class="profile-row"><span class="profile-key">Queue</span><span class="profile-val">No jobs yet</span></div>
     </div>
   </div>
 </div>
@@ -1714,6 +1767,8 @@ let authMode = 'signin';
 let authSession = null;
 let currentUser = null;
 let currentPreferences = null;
+let currentBrokerConnection = null;
+let currentExecutionJobs = [];
 
 function getAuthHeaders(includeJson = false) {
   const headers = {};
@@ -1809,12 +1864,15 @@ async function hydrateCurrentUser() {
     currentPreferences = payload.preferences || null;
     mergeRemotePreferences();
     loadSettings();
+    await refreshMemberWorkspace();
     updateIdentityUI();
     return payload;
   } catch (e) {
     storeAuthSession(null);
     currentUser = null;
     currentPreferences = null;
+    currentBrokerConnection = null;
+    currentExecutionJobs = [];
     updateIdentityUI();
     showAuthOverlay();
     throw e;
@@ -1848,15 +1906,191 @@ function updateIdentityUI() {
   if (avatar && currentUser) avatar.title = email;
   const signoutBtn = document.getElementById('profile-signout-btn');
   if (signoutBtn) signoutBtn.style.display = currentUser ? 'inline-flex' : 'none';
+  if (!currentUser) {
+    setText('broker-sub', 'Connect your personal Alpaca workspace');
+    setText('broker-status', 'Setup ›');
+    setText('execution-sub', 'Personal isolated jobs are not active yet');
+    setText('execution-status', '0 jobs');
+  }
 }
 
 async function signOutUser() {
   storeAuthSession(null);
   currentUser = null;
   currentPreferences = null;
+  currentBrokerConnection = null;
+  currentExecutionJobs = [];
   updateIdentityUI();
   showAuthOverlay();
   toast('Signed out');
+}
+
+function brokerStatusTone(status) {
+  if (status === 'verified') return 'var(--green)';
+  if (status === 'failed') return 'var(--red)';
+  return 'var(--orange)';
+}
+
+function applyBrokerConnectionUI(connection) {
+  currentBrokerConnection = connection || null;
+  if (!connection) {
+    setText('broker-sub', 'Connect your personal Alpaca workspace');
+    setText('broker-status', 'Setup ›');
+    setText('broker-sheet-status', 'Not connected');
+    setText('broker-sheet-verified', 'Never');
+    setText('broker-sheet-api-mask', '-');
+    setText('broker-sheet-secret-mask', '-');
+    document.getElementById('broker-account-label').value = '';
+    document.getElementById('broker-trading-mode').value = 'paper';
+    document.getElementById('broker-base-url').value = 'https://paper-api.alpaca.markets';
+    document.getElementById('broker-enabled').checked = true;
+    return;
+  }
+  const verified = connection.last_verified_status === 'verified';
+  setText('broker-sub', connection.account_label || (verified ? 'Workspace verified and ready' : 'Saved but not verified yet'));
+  setText('broker-status', verified ? ((connection.trading_mode || 'paper').toUpperCase() + ' OK') : (connection.last_verified_status || 'Pending'));
+  const brokerStatusEl = document.getElementById('broker-status');
+  if (brokerStatusEl) brokerStatusEl.style.color = brokerStatusTone(connection.last_verified_status);
+  setText('broker-sheet-status', verified ? 'Verified' : (connection.connected ? 'Saved but not verified' : 'Not connected'));
+  const brokerSheetStatus = document.getElementById('broker-sheet-status');
+  if (brokerSheetStatus) brokerSheetStatus.style.color = brokerStatusTone(connection.last_verified_status);
+  setText('broker-sheet-verified', connection.last_verified_at ? fmtOrderTime(connection.last_verified_at) : 'Never');
+  setText('broker-sheet-api-mask', connection.masked_api_key || '-');
+  setText('broker-sheet-secret-mask', connection.masked_secret_key || '-');
+  document.getElementById('broker-account-label').value = connection.account_label || '';
+  document.getElementById('broker-trading-mode').value = connection.trading_mode || 'paper';
+  document.getElementById('broker-base-url').value = connection.base_url || 'https://paper-api.alpaca.markets';
+  document.getElementById('broker-enabled').checked = connection.enabled !== false;
+}
+
+function renderExecutionJobs(jobs) {
+  currentExecutionJobs = Array.isArray(jobs) ? jobs : [];
+  setText('execution-status', currentExecutionJobs.length + ' jobs');
+  const latest = currentExecutionJobs[0];
+  setText('execution-sub', latest ? ((latest.status || 'queued').toUpperCase() + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at || new Date().toISOString())) : 'No personal runs yet');
+  const root = document.getElementById('execution-jobs-list');
+  if (!root) return;
+  if (!currentExecutionJobs.length) {
+    root.innerHTML = '<div class="profile-row"><span class="profile-key">Queue</span><span class="profile-val">No jobs yet</span></div>';
+    return;
+  }
+  root.innerHTML = currentExecutionJobs.map(job => {
+    const status = String(job.status || 'queued').toUpperCase();
+    const color = job.status === 'succeeded' ? 'var(--green)' : job.status === 'failed' ? 'var(--red)' : job.status === 'running' ? 'var(--blue)' : 'var(--orange)';
+    const when = fmtOrderTime(job.requested_at || job.created_at || new Date().toISOString());
+    const detail = job.error_text || (((job.requested_mode || 'paper') + '').toUpperCase() + ' · ' + when);
+    return `<div class="profile-row"><div><div style="font-size:13px;font-weight:700;">${job.job_type || 'trade_once'}</div><div style="font-size:11px;color:var(--g3);margin-top:3px;">${detail}</div></div><span class="profile-val" style="color:${color};text-transform:uppercase;">${status}</span></div>`;
+  }).join('');
+}
+
+async function refreshMemberWorkspace() {
+  if (!authSession?.access_token) return;
+  try {
+    const [brokerPayload, jobsPayload] = await Promise.all([
+      apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' }),
+      apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' }),
+    ]);
+    applyBrokerConnectionUI(brokerPayload.connection || null);
+    renderExecutionJobs(jobsPayload.jobs || []);
+  } catch (e) {
+    console.warn('refreshMemberWorkspace:', e.message);
+  }
+}
+
+async function openBrokerSheet() {
+  if (!currentUser) {
+    showAuthOverlay();
+    toast('Sign in required');
+    return;
+  }
+  await refreshMemberWorkspace();
+  document.getElementById('broker-api-key').value = '';
+  document.getElementById('broker-secret-key').value = '';
+  document.getElementById('broker-error').textContent = currentBrokerConnection?.last_error || '';
+  openSheet('broker-sheet');
+}
+
+async function saveBrokerConnection() {
+  if (!authSession?.access_token) {
+    showAuthOverlay();
+    return;
+  }
+  const errorEl = document.getElementById('broker-error');
+  errorEl.textContent = '';
+  try {
+    const payload = await apiJSON('/me/broker', {
+      method: 'PUT',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({
+        account_label: document.getElementById('broker-account-label').value.trim() || null,
+        trading_mode: document.getElementById('broker-trading-mode').value,
+        base_url: document.getElementById('broker-base-url').value.trim(),
+        api_key: document.getElementById('broker-api-key').value.trim(),
+        secret_key: document.getElementById('broker-secret-key').value.trim(),
+        enabled: document.getElementById('broker-enabled').checked,
+      }),
+    });
+    applyBrokerConnectionUI(payload.connection || null);
+    document.getElementById('broker-api-key').value = '';
+    document.getElementById('broker-secret-key').value = '';
+    toast('Broker connection saved');
+  } catch (e) {
+    errorEl.textContent = e.message;
+    toast('Broker save failed');
+  }
+}
+
+async function verifyBrokerConnection() {
+  if (!authSession?.access_token) {
+    showAuthOverlay();
+    return;
+  }
+  const errorEl = document.getElementById('broker-error');
+  errorEl.textContent = '';
+  try {
+    const payload = await apiJSON('/me/broker/verify', {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({}),
+    });
+    applyBrokerConnectionUI(payload.connection || null);
+    toast('Broker verified');
+  } catch (e) {
+    errorEl.textContent = e.message;
+    toast('Broker verify failed');
+  }
+}
+
+async function openExecutionSheet() {
+  if (!currentUser) {
+    showAuthOverlay();
+    toast('Sign in required');
+    return;
+  }
+  document.getElementById('execution-error').textContent = '';
+  await refreshMemberWorkspace();
+  openSheet('execution-sheet');
+}
+
+async function requestPersonalRun() {
+  if (!authSession?.access_token) {
+    showAuthOverlay();
+    return;
+  }
+  const errorEl = document.getElementById('execution-error');
+  errorEl.textContent = '';
+  try {
+    await apiJSON('/me/execution/run', {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ payload: { source: 'mobile_dashboard' } }),
+    });
+    await refreshMemberWorkspace();
+    toast('Personal run queued');
+  } catch (e) {
+    errorEl.textContent = e.message;
+    toast('Run request failed');
+  }
 }
 
 // Company name mapping
@@ -2102,8 +2336,8 @@ setInterval(() => {
 async function fetchAlpacaData() {
   try {
     const [accRes, posRes] = await Promise.all([
-      fetch(API_BASE + '/account',   { cache:'no-store' }),
-      fetch(API_BASE + '/positions', { cache:'no-store' }),
+      fetch(API_BASE + '/account',   { cache:'no-store', headers: getAuthHeaders() }),
+      fetch(API_BASE + '/positions', { cache:'no-store', headers: getAuthHeaders() }),
     ]);
     const acc = await accRes.json();
     const positions = await posRes.json();
@@ -2535,7 +2769,7 @@ function renderHomeAudit() {
 
 async function loadAlpacaTrades() {
   try {
-    const res = await fetch(API_BASE + '/orders', { cache:'no-store' });
+    const res = await fetch(API_BASE + '/orders', { cache:'no-store', headers: getAuthHeaders() });
     const orders = await res.json();
     if (orders.error) throw new Error(orders.error);
     ALL_TRADES = orders.map(o => ({
@@ -2835,7 +3069,7 @@ function openProfile() {
     ['p-type','p-acct','p-equity','p-bp','p-cash','p-pos','p-status'].forEach(id => {
       document.getElementById(id).textContent = 'Loading...';
     });
-    fetch(API_BASE + '/account', {cache:'no-store'}).then(r=>r.json()).then(a => {
+    fetch(API_BASE + '/account', {cache:'no-store', headers: getAuthHeaders() }).then(r=>r.json()).then(a => {
       alpacaAccount = a;
       openProfile();
     }).catch(() => toast('Could not load account data'));

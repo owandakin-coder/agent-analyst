@@ -11,6 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? D
 const ALPACA_KEY = Deno.env.get("ALPACA_API_KEY") ?? "";
 const ALPACA_SECRET = Deno.env.get("ALPACA_SECRET_KEY") ?? "";
 const ALPACA_BASE = "https://paper-api.alpaca.markets/v2";
+const BROKER_CREDENTIAL_KEY = Deno.env.get("ATZMA_BROKER_CREDENTIAL_KEY") ?? "";
 
 const GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
 const GITHUB_REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "owandakin-coder/agent-analyst";
@@ -26,6 +27,30 @@ const CORS_HEADERS = {
 
 type JsonMap = Record<string, unknown>;
 
+type BrokerConnectionRow = {
+  id: string;
+  user_id: string;
+  broker_name: string;
+  account_label: string | null;
+  trading_mode: string;
+  base_url: string;
+  api_key_encrypted: string | null;
+  secret_key_encrypted: string | null;
+  enabled: boolean;
+  last_verified_at: string | null;
+  last_verified_status: string;
+  last_error: string | null;
+  metadata: JsonMap | null;
+};
+
+type AlpacaSession = {
+  apiKey: string;
+  secretKey: string;
+  baseUrl: string;
+  scoped: boolean;
+  mode: string;
+};
+
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -38,18 +63,90 @@ function getBearerToken(req: Request): string | null {
   return auth.startsWith("Bearer ") ? auth.slice(7).trim() : null;
 }
 
-async function alpacaGet(path: string, params = ""): Promise<unknown> {
-  let url = `${ALPACA_BASE}${path}`;
+function base64Encode(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function base64Decode(value: string): Uint8Array {
+  return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+}
+
+async function getBrokerCryptoKey() {
+  if (!BROKER_CREDENTIAL_KEY) throw new Error("ATZMA_BROKER_CREDENTIAL_KEY secret is missing");
+  const source = new TextEncoder().encode(BROKER_CREDENTIAL_KEY);
+  const digest = await crypto.subtle.digest("SHA-256", source);
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function encryptSecret(value: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await getBrokerCryptoKey();
+  const cipher = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(value),
+  );
+  return `${base64Encode(iv)}.${base64Encode(new Uint8Array(cipher))}`;
+}
+
+async function decryptSecret(payload: string | null | undefined): Promise<string> {
+  if (!payload) return "";
+  const [ivPart, cipherPart] = payload.split(".", 2);
+  if (!ivPart || !cipherPart) throw new Error("Invalid encrypted secret format");
+  const key = await getBrokerCryptoKey();
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64Decode(ivPart) },
+    key,
+    base64Decode(cipherPart),
+  );
+  return new TextDecoder().decode(plain);
+}
+
+function maskCredential(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.length <= 8) return value;
+  return `${value.slice(0, 4)}••••${value.slice(-4)}`;
+}
+
+function createJobClaimToken(): string {
+  return crypto.randomUUID().replace(/-/g, "");
+}
+
+function sanitizeJob(job: JsonMap | null | undefined): JsonMap | null {
+  if (!job) return null;
+  const payload = typeof job.payload === "object" && job.payload ? { ...(job.payload as JsonMap) } : {};
+  delete payload.claim_token;
+  return { ...job, payload };
+}
+
+function buildAlpacaUrl(baseUrl: string, path: string, params = ""): string {
+  const root = baseUrl.endsWith("/v2") ? baseUrl : `${baseUrl.replace(/\/$/, "")}/v2`;
+  let url = `${root}${path}`;
   if (params) url += `?${params}`;
+  return url;
+}
+
+async function alpacaGetWithSession(session: AlpacaSession, path: string, params = ""): Promise<unknown> {
+  const url = buildAlpacaUrl(session.baseUrl, path, params);
   const res = await fetch(url, {
     headers: {
-      "APCA-API-KEY-ID": ALPACA_KEY,
-      "APCA-API-SECRET-KEY": ALPACA_SECRET,
+      "APCA-API-KEY-ID": session.apiKey,
+      "APCA-API-SECRET-KEY": session.secretKey,
       "Accept": "application/json",
     },
   });
   if (!res.ok) throw new Error(`Alpaca ${path} returned ${res.status}`);
   return res.json();
+}
+
+async function alpacaGet(path: string, params = ""): Promise<unknown> {
+  return alpacaGetWithSession({
+    apiKey: ALPACA_KEY,
+    secretKey: ALPACA_SECRET,
+    baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
+    scoped: false,
+    mode: "paper",
+  }, path, params);
 }
 
 async function fetchYF(symbol: string): Promise<JsonMap> {
@@ -186,12 +283,12 @@ async function applyControlAction(action: string, actor: string): Promise<JsonMa
   return saveControlState(next, actor);
 }
 
-async function dispatchTradeWorkflow(actor: string) {
+async function dispatchTradeWorkflow(actor: string, inputs: JsonMap = {}) {
   if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN secret is missing");
   const res = await githubRequest(`/repos/${GITHUB_REPO}/actions/workflows/${TRADE_WORKFLOW}/dispatches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ref: GITHUB_BRANCH }),
+    body: JSON.stringify({ ref: GITHUB_BRANCH, inputs }),
   });
   if (!res.ok) throw new Error(`GitHub workflow dispatch returned ${res.status}`);
   return {
@@ -200,6 +297,7 @@ async function dispatchTradeWorkflow(actor: string) {
     branch: GITHUB_BRANCH,
     repo: GITHUB_REPO,
     actor,
+    inputs,
     dispatched_at: new Date().toISOString(),
   };
 }
@@ -287,6 +385,87 @@ async function audit(userId: string, eventType: string, payload: JsonMap = {}) {
   }
 }
 
+async function fetchBrokerConnection(userId: string): Promise<BrokerConnectionRow | null> {
+  const res = await restAdmin(`/broker_connections?user_id=eq.${encodeURIComponent(userId)}&select=*`);
+  const rows = await res.json() as BrokerConnectionRow[];
+  return rows[0] ?? null;
+}
+
+async function resolveScopedBrokerSession(req: Request): Promise<AlpacaSession | null> {
+  if (!getBearerToken(req)) return null;
+  try {
+    const user = await requireUser(req);
+    const row = await fetchBrokerConnection(String(user.id));
+    if (!row?.enabled || row.last_verified_status !== "verified" || !row.api_key_encrypted || !row.secret_key_encrypted) {
+      return null;
+    }
+    return {
+      apiKey: await decryptSecret(row.api_key_encrypted),
+      secretKey: await decryptSecret(row.secret_key_encrypted),
+      baseUrl: row.base_url,
+      scoped: true,
+      mode: row.trading_mode,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function serializeBrokerConnection(row: BrokerConnectionRow | null, decryptedApiKey = "", decryptedSecretKey = "") {
+  if (!row) {
+    return {
+      connected: false,
+      broker_name: "alpaca",
+      trading_mode: "paper",
+      base_url: "https://paper-api.alpaca.markets",
+      enabled: false,
+      last_verified_status: "pending",
+      last_verified_at: null,
+      last_error: null,
+      account_label: null,
+      masked_api_key: null,
+      masked_secret_key: null,
+    };
+  }
+  return {
+    id: row.id,
+    connected: !!row.api_key_encrypted && !!row.secret_key_encrypted,
+    broker_name: row.broker_name,
+    trading_mode: row.trading_mode,
+    base_url: row.base_url,
+    enabled: row.enabled,
+    last_verified_status: row.last_verified_status,
+    last_verified_at: row.last_verified_at,
+    last_error: row.last_error,
+    account_label: row.account_label,
+    masked_api_key: maskCredential(decryptedApiKey),
+    masked_secret_key: maskCredential(decryptedSecretKey),
+    metadata: row.metadata ?? {},
+  };
+}
+
+async function verifyAlpacaCredentials(apiKey: string, secretKey: string, baseUrl: string): Promise<JsonMap> {
+  const endpoint = `${baseUrl.replace(/\/$/, "")}/v2/account`;
+  const res = await fetch(endpoint, {
+    headers: {
+      "APCA-API-KEY-ID": apiKey,
+      "APCA-API-SECRET-KEY": secretKey,
+      "Accept": "application/json",
+    },
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof payload?.message === "string" ? payload.message : `Broker verification returned ${res.status}`;
+    throw new Error(detail);
+  }
+  return payload as JsonMap;
+}
+
+function workerAuthorized(req: Request, expectedToken = ""): boolean {
+  const token = req.headers.get("x-atzma-worker-token") ?? "";
+  return !!expectedToken && token === expectedToken;
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
@@ -298,21 +477,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     if (path === "/account") {
-      const data = await alpacaGet("/account") as Record<string, string>;
+      const session = await resolveScopedBrokerSession(req);
+      const data = await alpacaGetWithSession(session ?? {
+        apiKey: ALPACA_KEY,
+        secretKey: ALPACA_SECRET,
+        baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
+        scoped: false,
+        mode: "paper",
+      }, "/account") as Record<string, string>;
       return json({
         equity: parseFloat(data.equity ?? "0"),
         last_equity: parseFloat(data.last_equity ?? "0"),
         cash: parseFloat(data.cash ?? "0"),
         buying_power: parseFloat(data.buying_power ?? "0"),
         portfolio_value: parseFloat(data.portfolio_value ?? "0"),
-        account_type: data.account_blocked ? "restricted" : "paper",
+        account_type: data.account_blocked ? "restricted" : (session?.mode ?? "paper"),
         id: data.account_number ?? data.id ?? "",
         status: data.status ?? "active",
+        scoped_user: !!session?.scoped,
       });
     }
 
     if (path === "/positions") {
-      const positions = await alpacaGet("/positions") as Array<Record<string, string>>;
+      const session = await resolveScopedBrokerSession(req);
+      const positions = await alpacaGetWithSession(session ?? {
+        apiKey: ALPACA_KEY,
+        secretKey: ALPACA_SECRET,
+        baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
+        scoped: false,
+        mode: "paper",
+      }, "/positions") as Array<Record<string, string>>;
       return json(positions.map((p) => ({
         symbol: p.symbol,
         qty: parseFloat(p.qty ?? "0"),
@@ -326,7 +520,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (path === "/orders") {
-      const orders = await alpacaGet("/orders", "status=closed&limit=50&direction=desc") as Array<Record<string, string>>;
+      const session = await resolveScopedBrokerSession(req);
+      const orders = await alpacaGetWithSession(session ?? {
+        apiKey: ALPACA_KEY,
+        secretKey: ALPACA_SECRET,
+        baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
+        scoped: false,
+        mode: "paper",
+      }, "/orders", "status=closed&limit=50&direction=desc") as Array<Record<string, string>>;
       return json(orders
         .filter((o) => o.filled_at && o.filled_avg_price)
         .map((o) => ({
@@ -343,7 +544,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (path === "/history") {
       const period = qs.get("period") ?? "1M";
       const timeframe = qs.get("timeframe") ?? "1D";
-      const data = await alpacaGet(
+      const session = await resolveScopedBrokerSession(req);
+      const data = await alpacaGetWithSession(
+        session ?? {
+          apiKey: ALPACA_KEY,
+          secretKey: ALPACA_SECRET,
+          baseUrl: ALPACA_BASE.replace(/\/v2$/, ""),
+          scoped: false,
+          mode: "paper",
+        },
         "/account/portfolio/history",
         `period=${period}&timeframe=${timeframe}&intraday_reporting=market_hours`,
       ) as { timestamp: number[]; equity: number[] };
@@ -461,6 +670,152 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ events: await res.json() });
     }
 
+    if (path === "/me/broker" && req.method === "GET") {
+      const user = await requireUser(req);
+      const row = await fetchBrokerConnection(String(user.id));
+      let apiKey = "";
+      let secretKey = "";
+      if (row) {
+        apiKey = await decryptSecret(row.api_key_encrypted);
+        secretKey = await decryptSecret(row.secret_key_encrypted);
+      }
+      return json({ connection: serializeBrokerConnection(row, apiKey, secretKey) });
+    }
+
+    if (path === "/me/broker" && req.method === "PUT") {
+      const user = await requireUser(req);
+      const body = await req.json().catch(() => ({})) as JsonMap;
+      const userId = String(user.id);
+      const existing = await fetchBrokerConnection(userId);
+      const apiKeyPlain = typeof body.api_key === "string" && body.api_key.trim()
+        ? body.api_key.trim()
+        : existing ? await decryptSecret(existing.api_key_encrypted) : "";
+      const secretKeyPlain = typeof body.secret_key === "string" && body.secret_key.trim()
+        ? body.secret_key.trim()
+        : existing ? await decryptSecret(existing.secret_key_encrypted) : "";
+      const tradingMode = typeof body.trading_mode === "string" ? body.trading_mode : (existing?.trading_mode ?? "paper");
+      const baseUrl = typeof body.base_url === "string" && body.base_url.trim()
+        ? body.base_url.trim()
+        : (tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets");
+      const payload = {
+        user_id: userId,
+        broker_name: "alpaca",
+        account_label: typeof body.account_label === "string" ? body.account_label : existing?.account_label ?? null,
+        trading_mode: tradingMode,
+        base_url: baseUrl,
+        enabled: body.enabled === undefined ? (existing?.enabled ?? true) : !!body.enabled,
+        api_key_encrypted: apiKeyPlain ? await encryptSecret(apiKeyPlain) : null,
+        secret_key_encrypted: secretKeyPlain ? await encryptSecret(secretKeyPlain) : null,
+        last_error: existing?.last_error ?? null,
+        last_verified_status: existing?.last_verified_status ?? "pending",
+      };
+      const method = existing ? "PATCH" : "POST";
+      const pathSuffix = existing ? `/broker_connections?id=eq.${encodeURIComponent(existing.id)}` : "/broker_connections";
+      const res = await restAdmin(pathSuffix, {
+        method,
+        headers: { "Prefer": "return=representation" },
+        body: JSON.stringify(payload),
+      });
+      const rows = await res.json() as BrokerConnectionRow[];
+      await audit(userId, "broker_connection_saved", {
+        trading_mode: tradingMode,
+        base_url: baseUrl,
+        enabled: payload.enabled,
+      });
+      return json({ connection: serializeBrokerConnection(rows[0] ?? existing ?? null, apiKeyPlain, secretKeyPlain) });
+    }
+
+    if (path === "/me/broker/verify" && req.method === "POST") {
+      const user = await requireUser(req);
+      const row = await fetchBrokerConnection(String(user.id));
+      if (!row) return json({ error: "Broker connection not found" }, 404);
+      const apiKey = await decryptSecret(row.api_key_encrypted);
+      const secretKey = await decryptSecret(row.secret_key_encrypted);
+      try {
+        const account = await verifyAlpacaCredentials(apiKey, secretKey, row.base_url);
+        const res = await restAdmin(`/broker_connections?id=eq.${encodeURIComponent(row.id)}`, {
+          method: "PATCH",
+          headers: { "Prefer": "return=representation" },
+          body: JSON.stringify({
+            enabled: true,
+            last_verified_status: "verified",
+            last_verified_at: new Date().toISOString(),
+            last_error: null,
+            metadata: { account_number: account.account_number ?? account.id ?? null },
+          }),
+        });
+        const rows = await res.json() as BrokerConnectionRow[];
+        await audit(String(user.id), "broker_connection_verified", {});
+        return json({
+          connection: serializeBrokerConnection(rows[0] ?? row, apiKey, secretKey),
+          account: {
+            id: account.id ?? null,
+            account_number: account.account_number ?? null,
+            status: account.status ?? null,
+            buying_power: account.buying_power ?? null,
+          },
+        });
+      } catch (e) {
+        await restAdmin(`/broker_connections?id=eq.${encodeURIComponent(row.id)}`, {
+          method: "PATCH",
+          headers: { "Prefer": "return=minimal" },
+          body: JSON.stringify({
+            last_verified_status: "failed",
+            last_verified_at: new Date().toISOString(),
+            last_error: String(e),
+          }),
+        });
+        return json({ error: String(e) }, 400);
+      }
+    }
+
+    if (path === "/me/execution/jobs" && req.method === "GET") {
+      const user = await requireUser(req);
+      const res = await restAdmin(`/execution_jobs?user_id=eq.${encodeURIComponent(String(user.id))}&select=*&order=requested_at.desc&limit=30`);
+      const jobs = await res.json() as JsonMap[];
+      return json({ jobs: jobs.map((job) => sanitizeJob(job)) });
+    }
+
+    if (path === "/me/execution/run" && req.method === "POST") {
+      const user = await requireUser(req);
+      const broker = await fetchBrokerConnection(String(user.id));
+      if (!broker?.enabled || !broker.api_key_encrypted || !broker.secret_key_encrypted) {
+        return json({ error: "Verified broker connection is required" }, 400);
+      }
+      const body = await req.json().catch(() => ({})) as JsonMap;
+      const actor = String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id);
+      const requestedMode = broker.trading_mode === "live" ? "live" : "paper";
+      const claimToken = createJobClaimToken();
+      const sourcePayload = typeof body.payload === "object" && body.payload ? body.payload as JsonMap : {};
+      const res = await restAdmin("/execution_jobs", {
+        method: "POST",
+        headers: { "Prefer": "return=representation" },
+        body: JSON.stringify({
+          user_id: String(user.id),
+          broker_connection_id: broker.id,
+          job_type: "trade_once",
+          status: "queued",
+          actor,
+          requested_mode: requestedMode,
+          payload: { ...sourcePayload, claim_token: claimToken },
+        }),
+      });
+      const rows = await res.json() as JsonMap[];
+      const job = rows[0] ?? null;
+      const dispatch = await dispatchTradeWorkflow(actor, {
+        job_id: String(job?.id ?? ""),
+        user_id: String(user.id),
+        claim_token: claimToken,
+      });
+      await restAdmin(`/execution_jobs?id=eq.${encodeURIComponent(String(job?.id ?? ""))}`, {
+        method: "PATCH",
+        headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify({ workflow_run_id: String(dispatch.dispatched_at ?? "") }),
+      });
+      await audit(String(user.id), "execution_job_requested", { job_id: job?.id ?? null });
+      return json({ job: sanitizeJob(job), dispatch }, 202);
+    }
+
     if (path === "/control" && req.method === "GET") {
       return json(await loadControlState());
     }
@@ -476,9 +831,103 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (path === "/control/run_once" && req.method === "POST") {
       const user = await requireUser(req);
+      const broker = await fetchBrokerConnection(String(user.id));
+      if (broker?.enabled && broker.api_key_encrypted && broker.secret_key_encrypted) {
+        const actor = String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id);
+        const claimToken = createJobClaimToken();
+        const res = await restAdmin("/execution_jobs", {
+          method: "POST",
+          headers: { "Prefer": "return=representation" },
+          body: JSON.stringify({
+            user_id: String(user.id),
+            broker_connection_id: broker.id,
+            job_type: "trade_once",
+            status: "queued",
+            actor,
+            requested_mode: broker.trading_mode === "live" ? "live" : "paper",
+            payload: { claim_token: claimToken },
+          }),
+        });
+        const rows = await res.json() as JsonMap[];
+        const job = rows[0] ?? null;
+        const result = await dispatchTradeWorkflow(actor, {
+          job_id: String(job?.id ?? ""),
+          user_id: String(user.id),
+          claim_token: claimToken,
+        });
+        await audit(String(user.id), "run_once_dispatch", { job_id: job?.id ?? null });
+        return json({ ...result, job: sanitizeJob(job) }, 202);
+      }
       const result = await dispatchTradeWorkflow(String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id));
       await audit(String(user.id), "run_once_dispatch", {});
       return json(result, 202);
+    }
+
+    if (path === "/worker/jobs/claim" && req.method === "POST") {
+      const body = await req.json().catch(() => ({})) as { job_id?: string };
+      if (!body.job_id) return json({ error: "job_id is required" }, 400);
+      const jobRes = await restAdmin(`/execution_jobs?id=eq.${encodeURIComponent(body.job_id)}&select=*`);
+      const jobRows = await jobRes.json() as JsonMap[];
+      const job = jobRows[0];
+      if (!job) return json({ error: "Job not found" }, 404);
+      const expectedToken = String(((job.payload as JsonMap | undefined)?.claim_token ?? ""));
+      if (!workerAuthorized(req, expectedToken)) return json({ error: "Unauthorized" }, 401);
+      if (!["queued", "claimed"].includes(String(job.status ?? ""))) {
+        return json({ error: "Job is not claimable", job: sanitizeJob(job) }, 409);
+      }
+      await restAdmin(`/execution_jobs?id=eq.${encodeURIComponent(body.job_id)}`, {
+        method: "PATCH",
+        headers: { "Prefer": "return=representation" },
+        body: JSON.stringify({
+          status: "running",
+          started_at: new Date().toISOString(),
+        }),
+      });
+      const broker = job.broker_connection_id
+        ? await restAdmin(`/broker_connections?id=eq.${encodeURIComponent(String(job.broker_connection_id))}&select=*`)
+        : null;
+      const brokerRow = broker ? ((await broker.json()) as BrokerConnectionRow[])[0] ?? null : null;
+      const profileRes = await restAdmin(`/profiles?id=eq.${encodeURIComponent(String(job.user_id))}&select=*`);
+      const profile = ((await profileRes.json()) as JsonMap[])[0] ?? null;
+      return json({
+        job: sanitizeJob({
+          ...job,
+          status: "running",
+        }),
+        profile,
+        broker_connection: brokerRow ? {
+          id: brokerRow.id,
+          broker_name: brokerRow.broker_name,
+          trading_mode: brokerRow.trading_mode,
+          base_url: brokerRow.base_url,
+          account_label: brokerRow.account_label,
+          api_key: await decryptSecret(brokerRow.api_key_encrypted),
+          secret_key: await decryptSecret(brokerRow.secret_key_encrypted),
+        } : null,
+      });
+    }
+
+    if (path === "/worker/jobs/complete" && req.method === "POST") {
+      const body = await req.json().catch(() => ({})) as { job_id?: string; status?: string; result?: JsonMap; error?: string };
+      if (!body.job_id || !body.status) return json({ error: "job_id and status are required" }, 400);
+      const jobRes = await restAdmin(`/execution_jobs?id=eq.${encodeURIComponent(body.job_id)}&select=*`);
+      const jobRows = await jobRes.json() as JsonMap[];
+      const job = jobRows[0];
+      if (!job) return json({ error: "Job not found" }, 404);
+      const expectedToken = String(((job.payload as JsonMap | undefined)?.claim_token ?? ""));
+      if (!workerAuthorized(req, expectedToken)) return json({ error: "Unauthorized" }, 401);
+      const normalizedStatus = ["succeeded", "failed", "skipped", "cancelled"].includes(body.status) ? body.status : "failed";
+      await restAdmin(`/execution_jobs?id=eq.${encodeURIComponent(body.job_id)}`, {
+        method: "PATCH",
+        headers: { "Prefer": "return=representation" },
+        body: JSON.stringify({
+          status: normalizedStatus,
+          completed_at: new Date().toISOString(),
+          result: body.result ?? {},
+          error_text: body.error ?? null,
+        }),
+      });
+      return json({ ok: true, job_id: body.job_id, status: normalizedStatus });
     }
 
     return json({ error: "Not found" }, 404);
