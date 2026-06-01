@@ -2381,23 +2381,23 @@ const NAMES = {
 // Dynamic stocks — populated from Alpaca positions
 let STOCKS = [];
 
-let portBase = 97377.96;   // will be overwritten by real Alpaca data
-let portOpen = 97000.00;
+let portBase = 0;
+let portOpen = 0;
 let trades = 0;
 let controlState = {
-  tradingStatus: 'Running',
-  tradingSub: 'Paper engine is allowed to execute.',
+  tradingStatus: 'Locked',
+  tradingSub: 'Sign in and verify a broker connection to activate trading.',
   executor: 'GitHub Actions',
   executorSub: 'Primary engine for automated runs.',
-  broker: 'Connected',
-  brokerSub: 'Paper account reachable and responsive.',
-  sync: 'Synced',
-  syncSub: 'Broker check completed just now.',
+  broker: 'Not connected',
+  brokerSub: 'No broker connection is attached to this workspace yet.',
+  sync: 'Locked',
+  syncSub: 'No personal broker session is active.',
   mode: 'Paper',
-  lastDecision: 'Hold',
-  lastDecisionSub: 'Waiting for next confirmed signal.',
-  lastOrder: 'No recent order',
-  lastOrderSub: 'The audit trail will update after broker activity.',
+  lastDecision: 'Onboarding',
+  lastDecisionSub: 'No model decision until your broker is verified.',
+  lastOrder: 'No broker activity',
+  lastOrderSub: 'The audit trail will update after your first verified run.',
   emergency: false,
   canDispatch: false,
 };
@@ -2443,7 +2443,15 @@ function applyPortfolioOnboardingState(message = 'Connect and verify your person
   const bEl = document.getElementById('st-buys');  if (bEl) bEl.textContent = '0';
   const sEl = document.getElementById('st-sells'); if (sEl) sEl.textContent = '0';
   const kEl = document.getElementById('k-tr');     if (kEl) kEl.textContent = '0';
+  setText('h-val', '$0.00');
+  setText('h-chg', '$0.00');
+  setText('h-pct', '(0.00%) Today');
+  setText('summary-equity', '$0.00');
+  setText('summary-day-pnl', '$0.00');
+  setText('summary-unrealized', '$0.00');
+  setText('summary-buying-power', '$0.00');
   setDataStatus('LOCKED');
+  updateControlSurface();
   renderHomeAudit();
 }
 
