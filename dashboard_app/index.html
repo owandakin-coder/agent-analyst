@@ -1802,6 +1802,7 @@ let currentPreferences = null;
 let currentBrokerConnection = null;
 let currentExecutionJobs = [];
 let authBusy = false;
+var S = JSON.parse(localStorage.getItem('atzma_s') || '{}');
 
 function getAuthHeaders(includeJson = false) {
   const headers = {};
@@ -3259,7 +3260,6 @@ let alpacaAccount = null;
 let syncPrefsTimer = null;
 
 // ── Persistence ──
-const S = JSON.parse(localStorage.getItem('atzma_s') || '{}');
 function queuePreferenceSync() {
   if (!currentUser || !authSession?.access_token) return;
   clearTimeout(syncPrefsTimer);
