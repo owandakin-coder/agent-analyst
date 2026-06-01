@@ -29,6 +29,14 @@ This is the minimum release checklist for launching ATZMA tomorrow without guess
 - Confirm a job is created
 - Confirm job status moves from `queued` to `running` to `succeeded` or `skipped`
 - Confirm no duplicate run is created from the same manual action
+- Confirm the latest job contains a readable decision summary
+- Confirm the summary mentions regime or agent reasoning, not only raw status
+
+## 3.5. Multi-agent and regime checks
+
+- Confirm the decision layer blocks trades when the vote is not unanimous
+- Confirm high-volatility or crash regimes reduce or fully block long exposure
+- Confirm at least one successful run writes a decision explanation for the dashboard
 
 ## 4. Control plane
 
@@ -58,7 +66,7 @@ Run before launch:
 
 ```powershell
 python health_check.py
-python -m pytest -q tests/test_user_execution_worker.py tests/test_control_plane.py tests/test_config.py tests/test_idempotency.py tests/test_broker.py tests/test_market_sync.py tests/test_end_to_end.py
+python -m pytest -q tests/test_multi_agent.py tests/test_user_execution_worker.py tests/test_control_plane.py tests/test_config.py tests/test_idempotency.py tests/test_broker.py tests/test_market_sync.py tests/test_end_to_end.py
 ```
 
 ## 7. Go / no-go
@@ -68,6 +76,7 @@ Go only if all are true:
 - Auth flow works end-to-end
 - Broker verify works with a real Paper account
 - Execution queue can create and finish a job
+- Multi-agent decisions produce readable explanations
 - Health check passes
 - Test suite passes
 - Guest users see only `Locked` state

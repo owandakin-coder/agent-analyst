@@ -8,6 +8,9 @@ ATZMA is an autonomous trading platform built around an RL decision engine, a pr
 - Backend API on Supabase Edge Functions
 - Control plane backed by GitHub Actions
 - Alpaca broker integration
+- Multi-agent decision engine with unanimous execution voting
+- Market regime detection with adaptive strategy modes
+- Explainable execution summaries stored per run
 - Per-user broker connections and isolated execution jobs
 - Guest `Locked` state with no live portfolio access
 - Health checks, launch checklist, and automated tests
@@ -18,7 +21,32 @@ ATZMA is an autonomous trading platform built around an RL decision engine, a pr
 - Backend API: `supabase/functions/api/index.ts`
 - Local dashboard server: `dashboard_app/server.py`
 - Trading runtime: `main.py`, `live_trader.py`, `broker_api.py`, `risk_manager.py`
+- Decision layer: `multi_agent.py`, `regime_detector.py`, `decision_journal.py`
 - Per-user worker: `user_execution_worker.py`
+
+## Decision Stack
+
+ATZMA no longer relies on a single opaque model output.
+
+Each live trading cycle now flows through:
+
+1. `RegimeDetector`
+   - Classifies the market as `TRENDING_UP`, `TRENDING_DOWN`, `RANGE_BOUND`, `HIGH_VOLATILITY`, or `CRASH_CORRECTION`
+   - Sets adaptive exposure through the risk manager
+
+2. `RL proposal`
+   - The trained model still proposes a raw action vector
+
+3. `MultiAgentDecisionEngine`
+   - `Trend Agent` validates direction with MA / MACD structure
+   - `Entry Agent` validates timing with RSI / Bollinger context
+   - `Defense Agent` can veto new risk or force defense
+   - Orders only proceed on unanimous agreement
+
+4. `Explainability`
+   - The final decision bundle is persisted
+   - Execution jobs carry a human-readable decision summary
+   - Dashboard surfaces the latest decision context
 
 ## Environment Setup
 
@@ -104,7 +132,7 @@ python main.py --mode live_once --auto-approve
 Run the launch-critical suite:
 
 ```powershell
-python -m pytest -q tests/test_user_execution_worker.py tests/test_control_plane.py tests/test_config.py tests/test_idempotency.py tests/test_broker.py tests/test_market_sync.py tests/test_end_to_end.py
+python -m pytest -q tests/test_multi_agent.py tests/test_user_execution_worker.py tests/test_control_plane.py tests/test_config.py tests/test_idempotency.py tests/test_broker.py tests/test_market_sync.py tests/test_end_to_end.py
 ```
 
 Run everything:
