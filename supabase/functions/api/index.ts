@@ -866,10 +866,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (path === "/me/broker/verify" && req.method === "POST") {
       const user = await requireUser(req);
-      const row = await fetchBrokerConnection(String(user.id));
+      const body = await req.json().catch(() => ({})) as JsonMap;
+      const userId = String(user.id);
+      let row = await fetchBrokerConnection(userId);
+      const sanitized = sanitizeBrokerInput(body, row);
+      const apiKey = typeof body.api_key === "string" && body.api_key.trim()
+        ? body.api_key.trim()
+        : row ? await decryptSecret(row.api_key_encrypted) : "";
+      const secretKey = typeof body.secret_key === "string" && body.secret_key.trim()
+        ? body.secret_key.trim()
+        : row ? await decryptSecret(row.secret_key_encrypted) : "";
+
+      if ((!row || body.api_key || body.secret_key || body.base_url || body.account_label || body.trading_mode) && apiKey && secretKey) {
+        const payload = {
+          user_id: userId,
+          broker_name: "alpaca",
+          account_label: sanitized.accountLabel,
+          trading_mode: sanitized.tradingMode,
+          base_url: sanitized.baseUrl,
+          enabled: body.enabled === undefined ? (row?.enabled ?? true) : !!body.enabled,
+          api_key_encrypted: await encryptSecret(apiKey),
+          secret_key_encrypted: await encryptSecret(secretKey),
+          last_error: row?.last_error ?? null,
+          last_verified_status: row?.last_verified_status ?? "pending",
+        };
+        const method = row ? "PATCH" : "POST";
+        const pathSuffix = row ? `/broker_connections?id=eq.${encodeURIComponent(row.id)}` : "/broker_connections";
+        const saveRes = await restAdmin(pathSuffix, {
+          method,
+          headers: { "Prefer": "return=representation" },
+          body: JSON.stringify(payload),
+        });
+        const saveRows = await saveRes.json() as BrokerConnectionRow[];
+        row = saveRows[0] ?? row;
+      }
+
       if (!row) return json({ error: "Broker connection not found" }, 404);
-      const apiKey = await decryptSecret(row.api_key_encrypted);
-      const secretKey = await decryptSecret(row.secret_key_encrypted);
+      if (!apiKey || !secretKey) return json({ error: "API key and secret key are required" }, 400);
       try {
         const account = await verifyAlpacaCredentials(apiKey, secretKey, row.base_url);
         const res = await restAdmin(`/broker_connections?id=eq.${encodeURIComponent(row.id)}`, {
