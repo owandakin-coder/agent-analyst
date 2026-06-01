@@ -610,6 +610,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ ok: true, ...payload });
     }
 
+    if (path === "/auth/verify" && req.method === "POST") {
+      const body = await req.json().catch(() => ({})) as { token_hash?: string; type?: string; email?: string; token?: string };
+      if (!body.type) return json({ error: "type is required" }, 400);
+      if (!body.token_hash && !body.token) return json({ error: "token_hash or token is required" }, 400);
+      const res = await authRequest("/auth/v1/verify", {
+        method: "POST",
+        body: JSON.stringify({
+          type: body.type,
+          token_hash: body.token_hash,
+          email: body.email,
+          token: body.token,
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) return json(payload, res.status);
+      return json(payload);
+    }
+
     if (path === "/auth/me" && req.method === "GET") {
       const user = await requireUser(req);
       await ensureUserRows(user);

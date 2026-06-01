@@ -1909,6 +1909,17 @@ function extractAuthSessionFromUrl() {
   };
 }
 
+function extractOtpVerificationFromUrl() {
+  const qs = new URLSearchParams(window.location.search);
+  const tokenHash = qs.get('token_hash');
+  const type = qs.get('type');
+  if (!tokenHash || !type) return null;
+  return {
+    token_hash: tokenHash,
+    type,
+  };
+}
+
 function clearAuthUrlState() {
   const clean = window.location.pathname + window.location.search.replace(/([?&])(code|type|access_token|refresh_token|expires_in|token_type|error|error_code|error_description)=[^&]*/g, '').replace(/[?&]$/, '');
   window.history.replaceState({}, document.title, clean);
@@ -3571,6 +3582,43 @@ setInterval(fetchControlState, 30000);
 
 async function bootstrapAuth() {
   setAuthMode('signin');
+  const otpVerification = extractOtpVerificationFromUrl();
+  if (otpVerification) {
+    try {
+      showAuthOverlay();
+      setAuthBusy(true, 'Verifying email...');
+      const payload = await apiJSON('/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify(otpVerification),
+      });
+      if (payload.access_token && payload.refresh_token) {
+        storeAuthSession({
+          access_token: payload.access_token,
+          refresh_token: payload.refresh_token,
+          token_type: payload.token_type || 'bearer',
+          expires_in: payload.expires_in || 3600,
+          expires_at: Math.floor(Date.now() / 1000) + Number(payload.expires_in || 3600),
+        });
+        await hydrateCurrentUser();
+        hideAuthOverlay();
+        clearAuthUrlState();
+        toast('Email verified and signed in');
+        setAuthBusy(false);
+        return;
+      }
+      showAuthStatus('Email confirmed. You can sign in now.');
+      clearAuthUrlState();
+      setAuthBusy(false);
+      showAuthOverlay();
+      return;
+    } catch (e) {
+      document.getElementById('auth-error').textContent = humanizeAuthError(e.message).error;
+      showAuthOverlay();
+      setAuthBusy(false);
+      return;
+    }
+  }
   const callbackSession = extractAuthSessionFromUrl();
   if (callbackSession) {
     try {
