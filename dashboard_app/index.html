@@ -2147,6 +2147,22 @@ function inferredBrokerBaseUrl(mode) {
   return mode === 'live' ? 'https://api.alpaca.markets' : 'https://paper-api.alpaca.markets';
 }
 
+function normalizeBrokerBaseUrl(rawValue, mode) {
+  const fallback = inferredBrokerBaseUrl(mode);
+  const value = String(rawValue || '').trim();
+  if (!value) return fallback;
+  try {
+    const url = new URL(value);
+    const host = (url.hostname || '').toLowerCase();
+    if (host === 'app.alpaca.markets') return fallback;
+    if (host === 'paper-api.alpaca.markets') return 'https://paper-api.alpaca.markets';
+    if (host === 'api.alpaca.markets') return 'https://api.alpaca.markets';
+    return `${url.protocol}//${url.host}`;
+  } catch (_) {
+    return fallback;
+  }
+}
+
 function applyBrokerConnectionUI(connection) {
   currentBrokerConnection = connection || null;
   if (!connection) {
@@ -2258,13 +2274,15 @@ async function saveBrokerConnection(options = {}) {
   try {
     const mode = document.getElementById('broker-trading-mode').value;
     const rawBaseUrl = document.getElementById('broker-base-url').value.trim();
+    const normalizedBaseUrl = normalizeBrokerBaseUrl(rawBaseUrl, mode);
+    document.getElementById('broker-base-url').value = normalizedBaseUrl;
     const payload = await apiJSON('/me/broker', {
       method: 'PUT',
       headers: getAuthHeaders(true),
       body: JSON.stringify({
         account_label: document.getElementById('broker-account-label').value.trim() || null,
         trading_mode: mode,
-        base_url: rawBaseUrl || inferredBrokerBaseUrl(mode),
+        base_url: normalizedBaseUrl,
         api_key: document.getElementById('broker-api-key').value.trim(),
         secret_key: document.getElementById('broker-secret-key').value.trim(),
         enabled: document.getElementById('broker-enabled').checked,

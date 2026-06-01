@@ -522,9 +522,25 @@ function serializeBrokerConnection(row: BrokerConnectionRow | null, decryptedApi
 
 function sanitizeBrokerInput(body: JsonMap, existing?: BrokerConnectionRow | null) {
   const tradingMode = typeof body.trading_mode === "string" && body.trading_mode.toLowerCase() === "live" ? "live" : "paper";
-  const baseUrl = typeof body.base_url === "string" && /^https:\/\/[A-Za-z0-9.-]+$/.test(body.base_url.trim())
-    ? body.base_url.trim()
-    : existing?.base_url ?? (tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets");
+  const fallbackBaseUrl = existing?.base_url ?? (tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets");
+  let baseUrl = fallbackBaseUrl;
+  if (typeof body.base_url === "string" && body.base_url.trim()) {
+    try {
+      const parsed = new URL(body.base_url.trim());
+      const host = parsed.hostname.toLowerCase();
+      if (host === "app.alpaca.markets") {
+        baseUrl = tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets";
+      } else if (host === "paper-api.alpaca.markets") {
+        baseUrl = "https://paper-api.alpaca.markets";
+      } else if (host === "api.alpaca.markets") {
+        baseUrl = "https://api.alpaca.markets";
+      } else {
+        baseUrl = `${parsed.protocol}//${parsed.host}`;
+      }
+    } catch {
+      baseUrl = fallbackBaseUrl;
+    }
+  }
   const accountLabel = typeof body.account_label === "string"
     ? body.account_label.replace(/[<>{}]/g, "").trim().slice(0, 80)
     : existing?.account_label ?? null;
