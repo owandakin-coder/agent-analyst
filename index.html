@@ -1072,7 +1072,7 @@ select.m-input { appearance:none; cursor:pointer; }
       <input id="auth-password-confirm" class="auth-input" type="password" placeholder="Confirm password" autocomplete="new-password">
     </div>
     <input id="auth-email" class="auth-input" type="email" placeholder="Email address" autocomplete="email">
-    <input id="auth-password" class="auth-input" type="password" placeholder="Password" autocomplete="current-password">
+    <input id="auth-password" class="auth-input" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){submitAuth();}">
     <button id="auth-submit" class="auth-submit" onclick="submitAuth()">Sign In</button>
     <div id="auth-error" class="auth-error"></div>
     <div id="auth-status" class="auth-status hidden"></div>
@@ -1891,6 +1891,43 @@ function storeAuthSession(session) {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
   } else {
     localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+function extractAuthSessionFromUrl() {
+  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+  const params = new URLSearchParams(hash);
+  const accessToken = params.get('access_token');
+  const refreshToken = params.get('refresh_token');
+  if (!accessToken || !refreshToken) return null;
+  return {
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    token_type: params.get('token_type') || 'bearer',
+    expires_in: Number(params.get('expires_in') || '3600'),
+    expires_at: Math.floor(Date.now() / 1000) + Number(params.get('expires_in') || '3600'),
+  };
+}
+
+function clearAuthUrlState() {
+  const clean = window.location.pathname + window.location.search.replace(/([?&])(code|type|access_token|refresh_token|expires_in|token_type|error|error_code|error_description)=[^&]*/g, '').replace(/[?&]$/, '');
+  window.history.replaceState({}, document.title, clean);
+}
+
+function showAuthUrlFeedback() {
+  const qs = new URLSearchParams(window.location.search);
+  const err = qs.get('error_description') || qs.get('error');
+  if (err) {
+    const mapped = humanizeAuthError(decodeURIComponent(err));
+    document.getElementById('auth-error').textContent = mapped.error;
+    if (mapped.status) showAuthStatus(mapped.status);
+    showAuthOverlay();
+    return;
+  }
+  const type = qs.get('type');
+  if (type === 'signup') {
+    showAuthStatus('Email confirmed. You can sign in now.');
+    showAuthOverlay();
   }
 }
 
@@ -3534,10 +3571,24 @@ setInterval(fetchControlState, 30000);
 
 async function bootstrapAuth() {
   setAuthMode('signin');
+  const callbackSession = extractAuthSessionFromUrl();
+  if (callbackSession) {
+    try {
+      storeAuthSession(callbackSession);
+      await hydrateCurrentUser();
+      hideAuthOverlay();
+      clearAuthUrlState();
+      toast('Email confirmed and session restored');
+      return;
+    } catch (_) {
+      storeAuthSession(null);
+    }
+  }
   const raw = localStorage.getItem(AUTH_STORAGE_KEY);
   if (!raw) {
     updateIdentityUI();
     applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
+    showAuthUrlFeedback();
     showAuthOverlay();
     return;
   }
@@ -3545,7 +3596,9 @@ async function bootstrapAuth() {
     storeAuthSession(JSON.parse(raw));
     await hydrateCurrentUser();
     hideAuthOverlay();
+    clearAuthUrlState();
   } catch (_) {
+    showAuthUrlFeedback();
     showAuthOverlay();
   }
 }
