@@ -1051,7 +1051,7 @@ select.m-input { appearance:none; cursor:pointer; }
 <!-- Neural background -->
 <canvas id="bg-canvas"></canvas>
 
-<div id="auth-overlay" class="auth-overlay hidden">
+<div id="auth-overlay" class="auth-overlay">
   <div class="auth-card">
     <div class="auth-brand">
       <img src="logo.png" alt="ATZMA">
@@ -1106,14 +1106,14 @@ select.m-input { appearance:none; cursor:pointer; }
     <div class="page active" id="pg-home">
 
       <div class="card hero card-pad">
-        <div class="live-badge"><div class="ldot" id="live-dot"></div><span id="market-status">RUNNING</span></div>
+        <div class="live-badge"><div class="ldot" id="live-dot"></div><span id="market-status">LOCKED</span></div>
         <div id="last-updated-lbl" style="position:absolute;top:40px;right:14px;font-size:8px;color:var(--g3);letter-spacing:0.2px;font-family:'JetBrains Mono',monospace;"></div>
         <div class="lbl">Autonomous Trading Control</div>
-        <div class="hero-val" id="h-val">$124,830.50</div>
+        <div class="hero-val" id="h-val">Connect Account</div>
         <div class="hero-chg">
-          <span class="trend-arrow trend-up" id="h-arrow">↑</span>
-          <span id="h-chg" style="color:var(--green)">+$3,241.20</span>
-          <span id="h-pct" class="sub" style="color:var(--green)">(+2.67%) Today</span>
+          <span class="trend-arrow" id="h-arrow">•</span>
+          <span id="h-chg" style="color:var(--g2)">Sign in to unlock your workspace</span>
+          <span id="h-pct" class="sub" style="color:var(--g3)">No broker data loaded</span>
         </div>
         <div class="spark-wrap"><svg id="home-spark" viewBox="0 0 130 80" preserveAspectRatio="none"></svg></div>
       </div>
@@ -1121,14 +1121,14 @@ select.m-input { appearance:none; cursor:pointer; }
       <div class="meta-strip">
         <div class="meta-chip">
           <div class="meta-dot"></div>
-          <span id="meta-market-open">Markets Open</span>
+          <span id="meta-market-open">Sign In</span>
         </div>
         <div class="meta-chip">
           <svg class="meta-icon" viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"></circle>
             <path d="M8.5 12.5L10.8 14.8L15.8 9.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           </svg>
-          <span id="meta-sync-line">Synced 3s ago</span>
+          <span id="meta-sync-line">No account linked</span>
         </div>
       </div>
 
@@ -3537,6 +3537,7 @@ async function bootstrapAuth() {
   const raw = localStorage.getItem(AUTH_STORAGE_KEY);
   if (!raw) {
     updateIdentityUI();
+    applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
     showAuthOverlay();
     return;
   }
