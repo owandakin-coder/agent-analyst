@@ -595,6 +595,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(payload);
     }
 
+    if (path === "/auth/resend" && req.method === "POST") {
+      const body = await req.json().catch(() => ({})) as { email?: string };
+      if (!body.email) return json({ error: "email is required" }, 400);
+      const res = await authRequest("/auth/v1/resend", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "signup",
+          email: body.email,
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) return json(payload, res.status);
+      return json({ ok: true, ...payload });
+    }
+
     if (path === "/auth/me" && req.method === "GET") {
       const user = await requireUser(req);
       await ensureUserRows(user);

@@ -1014,8 +1014,24 @@ select.m-input { appearance:none; cursor:pointer; }
   width:100%; margin-top:6px; border:none; border-radius:14px; padding:14px 16px;
   background:linear-gradient(135deg, #2d8cff, #34c759); color:#021017; font:inherit; font-size:14px; font-weight:800; cursor:pointer;
 }
+.auth-submit:disabled { opacity:0.6; cursor:not-allowed; }
 .auth-meta { margin-top:14px; font-size:12px; color:var(--g3); line-height:1.45; }
 .auth-error { min-height:18px; margin-top:10px; font-size:12px; color:#ff8f88; }
+.auth-status {
+  margin-top:10px; padding:11px 12px; border-radius:14px;
+  background:rgba(10,132,255,0.08); border:1px solid rgba(10,132,255,0.18);
+  color:#9ac5ff; font-size:12px; line-height:1.45;
+}
+.auth-status.hidden { display:none; }
+.auth-actions { display:flex; gap:10px; margin-top:10px; }
+.auth-secondary {
+  flex:1; border:none; border-radius:12px; padding:12px 14px;
+  background:rgba(255,255,255,0.05); color:var(--white); font:inherit; font-size:12px; font-weight:700; cursor:pointer;
+}
+.auth-secondary.hidden { display:none; }
+.auth-field-label {
+  display:block; margin:6px 0 5px; font-size:11px; color:var(--g3); letter-spacing:0.4px;
+}
 .auth-userbar {
   display:flex; align-items:center; justify-content:space-between;
   gap:12px; margin-top:10px; padding:11px 12px;
@@ -1052,11 +1068,19 @@ select.m-input { appearance:none; cursor:pointer; }
     <div id="auth-signup-row" class="auth-row" style="display:none;">
       <input id="auth-display-name" class="auth-input" type="text" placeholder="Display name">
     </div>
+    <div id="auth-confirm-row" style="display:none;">
+      <input id="auth-password-confirm" class="auth-input" type="password" placeholder="Confirm password" autocomplete="new-password">
+    </div>
     <input id="auth-email" class="auth-input" type="email" placeholder="Email address" autocomplete="email">
     <input id="auth-password" class="auth-input" type="password" placeholder="Password" autocomplete="current-password">
     <button id="auth-submit" class="auth-submit" onclick="submitAuth()">Sign In</button>
     <div id="auth-error" class="auth-error"></div>
-    <div class="auth-meta">Paper trading stays centralized for now. Identity, profile, and settings are already per user.</div>
+    <div id="auth-status" class="auth-status hidden"></div>
+    <div class="auth-actions">
+      <button id="auth-resend-btn" class="auth-secondary hidden" onclick="resendConfirmation()">Resend Confirmation</button>
+      <button id="auth-switch-btn" class="auth-secondary" onclick="toggleAuthMode()">Need an account?</button>
+    </div>
+    <div class="auth-meta" id="auth-meta">Paper trading stays centralized for now. Identity, profile, and settings are already per user.</div>
   </div>
 </div>
 
@@ -1769,6 +1793,7 @@ let currentUser = null;
 let currentPreferences = null;
 let currentBrokerConnection = null;
 let currentExecutionJobs = [];
+let authBusy = false;
 
 function getAuthHeaders(includeJson = false) {
   const headers = {};
@@ -1793,8 +1818,63 @@ function setAuthMode(mode) {
   document.getElementById('auth-tab-signin').classList.toggle('active', authMode === 'signin');
   document.getElementById('auth-tab-signup').classList.toggle('active', authMode === 'signup');
   document.getElementById('auth-signup-row').style.display = authMode === 'signup' ? 'flex' : 'none';
+  document.getElementById('auth-confirm-row').style.display = authMode === 'signup' ? 'block' : 'none';
   document.getElementById('auth-submit').textContent = authMode === 'signup' ? 'Create Account' : 'Sign In';
   document.getElementById('auth-error').textContent = '';
+  hideAuthStatus();
+  document.getElementById('auth-resend-btn').classList.add('hidden');
+  document.getElementById('auth-switch-btn').textContent = authMode === 'signup' ? 'Already have an account?' : 'Need an account?';
+  document.getElementById('auth-meta').textContent = authMode === 'signup'
+    ? 'Create a secure workspace first. We will verify your email before unlocking personal broker access.'
+    : 'Sign in to access your personal broker connection, execution queue, and portfolio data.';
+}
+
+function toggleAuthMode() {
+  setAuthMode(authMode === 'signup' ? 'signin' : 'signup');
+}
+
+function setAuthBusy(isBusy, label = null) {
+  authBusy = isBusy;
+  const submit = document.getElementById('auth-submit');
+  submit.disabled = isBusy;
+  submit.textContent = isBusy ? (label || 'Please wait...') : (authMode === 'signup' ? 'Create Account' : 'Sign In');
+}
+
+function showAuthStatus(message) {
+  const el = document.getElementById('auth-status');
+  el.textContent = message;
+  el.classList.remove('hidden');
+}
+
+function hideAuthStatus() {
+  document.getElementById('auth-status').classList.add('hidden');
+  document.getElementById('auth-status').textContent = '';
+}
+
+function humanizeAuthError(message) {
+  const text = String(message || '');
+  if (/email rate limit exceeded/i.test(text)) {
+    return {
+      error: 'Too many confirmation emails were requested. Wait a bit, then try again or resend later.',
+      showResend: true,
+      status: 'Supabase is temporarily limiting email delivery for this project.',
+    };
+  }
+  if (/email not confirmed/i.test(text)) {
+    return {
+      error: 'Your account exists, but the email is not confirmed yet.',
+      showResend: true,
+      status: 'Open the confirmation email, then come back and sign in.',
+    };
+  }
+  if (/invalid login credentials/i.test(text)) {
+    return {
+      error: 'Email or password is incorrect.',
+      showResend: false,
+      status: '',
+    };
+  }
+  return { error: text, showResend: false, status: '' };
 }
 
 function showAuthOverlay() {
@@ -1815,15 +1895,24 @@ function storeAuthSession(session) {
 }
 
 async function submitAuth() {
+  if (authBusy) return;
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
+  const passwordConfirm = document.getElementById('auth-password-confirm').value;
   const displayName = document.getElementById('auth-display-name').value.trim();
   const errEl = document.getElementById('auth-error');
   errEl.textContent = '';
+  hideAuthStatus();
+  document.getElementById('auth-resend-btn').classList.add('hidden');
   if (!email || !password) {
     errEl.textContent = 'Email and password are required.';
     return;
   }
+  if (authMode === 'signup' && password !== passwordConfirm) {
+    errEl.textContent = 'Passwords do not match.';
+    return;
+  }
+  setAuthBusy(true, authMode === 'signup' ? 'Creating account...' : 'Signing in...');
   try {
     const path = authMode === 'signup' ? '/auth/signup' : '/auth/signin';
     const payload = await apiJSON(path, {
@@ -1840,11 +1929,48 @@ async function submitAuth() {
       await hydrateCurrentUser();
       hideAuthOverlay();
       toast(authMode === 'signup' ? 'Account created' : 'Signed in');
+      setAuthBusy(false);
       return;
     }
-    errEl.textContent = 'Account created. Check your email if confirmation is enabled.';
+    showAuthStatus('Account created. Check your email and confirm the account before signing in.');
+    setAuthMode('signin');
+    document.getElementById('auth-email').value = email;
+    document.getElementById('auth-password').value = password;
+    document.getElementById('auth-resend-btn').classList.remove('hidden');
   } catch (e) {
-    errEl.textContent = e.message;
+    const mapped = humanizeAuthError(e.message);
+    errEl.textContent = mapped.error;
+    if (mapped.status) showAuthStatus(mapped.status);
+    if (mapped.showResend && email) document.getElementById('auth-resend-btn').classList.remove('hidden');
+  } finally {
+    setAuthBusy(false);
+  }
+}
+
+async function resendConfirmation() {
+  const email = document.getElementById('auth-email').value.trim();
+  const errEl = document.getElementById('auth-error');
+  errEl.textContent = '';
+  hideAuthStatus();
+  if (!email) {
+    errEl.textContent = 'Enter your email first.';
+    return;
+  }
+  setAuthBusy(true, 'Sending confirmation...');
+  try {
+    await apiJSON('/auth/resend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ email }),
+    });
+    showAuthStatus('Confirmation email was requested again. Check your inbox in a few moments.');
+    toast('Confirmation sent');
+  } catch (e) {
+    const mapped = humanizeAuthError(e.message);
+    errEl.textContent = mapped.error;
+    if (mapped.status) showAuthStatus(mapped.status);
+  } finally {
+    setAuthBusy(false);
   }
 }
 
