@@ -2169,6 +2169,10 @@ function applyBrokerConnectionUI(connection) {
   if (!connection) {
     setText('broker-sub', 'Connect your personal Alpaca workspace');
     setText('broker-status', 'Setup ›');
+    setText('alpaca-sub', currentUser ? 'No broker connected' : 'Sign in to connect a broker');
+    setText('alpaca-status', currentUser ? 'Locked' : 'Sign in');
+    const alpacaStatusEl = document.getElementById('alpaca-status');
+    if (alpacaStatusEl) alpacaStatusEl.style.color = currentUser ? 'var(--orange)' : 'var(--g2)';
     setText('broker-sheet-status', 'Not connected');
     setText('broker-sheet-verified', 'Never');
     setText('broker-sheet-api-mask', '-');
@@ -2182,6 +2186,10 @@ function applyBrokerConnectionUI(connection) {
   const verified = connection.last_verified_status === 'verified';
   setText('broker-sub', connection.account_label || (verified ? 'Workspace verified and ready' : 'Saved but not verified yet'));
   setText('broker-status', verified ? ((connection.trading_mode || 'paper').toUpperCase() + ' OK') : (connection.last_verified_status || 'Pending'));
+  setText('alpaca-sub', verified ? 'Broker verified · loading live account data' : 'Broker saved · verification pending');
+  setText('alpaca-status', verified ? 'Verified' : 'Pending');
+  const alpacaStatusEl = document.getElementById('alpaca-status');
+  if (alpacaStatusEl) alpacaStatusEl.style.color = verified ? 'var(--green)' : 'var(--orange)';
   const brokerStatusEl = document.getElementById('broker-status');
   if (brokerStatusEl) brokerStatusEl.style.color = brokerStatusTone(connection.last_verified_status);
   setText('broker-sheet-status', verified ? 'Verified' : (connection.connected ? 'Saved but not verified' : 'Not connected'));
@@ -2331,6 +2339,7 @@ async function verifyBrokerConnection() {
     applyBrokerConnectionUI(payload.connection || null);
     document.getElementById('broker-api-key').value = '';
     document.getElementById('broker-secret-key').value = '';
+    await refreshMemberWorkspace();
     toast('Broker verified');
   } catch (e) {
     errorEl.textContent = e.message;
@@ -2450,6 +2459,8 @@ function applyPortfolioOnboardingState(message = 'Connect and verify your person
   setText('summary-day-pnl', '$0.00');
   setText('summary-unrealized', '$0.00');
   setText('summary-buying-power', '$0.00');
+  setText('alpaca-sub', currentUser ? 'No broker connected' : 'Sign in to connect a broker');
+  setText('alpaca-status', currentUser ? 'Locked' : 'Sign in');
   setDataStatus('LOCKED');
   updateControlSurface();
   renderHomeAudit();
@@ -2719,6 +2730,10 @@ async function fetchAlpacaData() {
     controlState.broker = 'Connected';
     controlState.brokerSub = 'Account reachable and returning live broker state.';
     controlState.sync = 'Synced';
+    setText('alpaca-sub', `${controlState.mode} · ${positions.length} positions open`);
+    setText('alpaca-status', controlState.mode.toUpperCase());
+    const alpacaLiveStatusEl = document.getElementById('alpaca-status');
+    if (alpacaLiveStatusEl) alpacaLiveStatusEl.style.color = controlState.mode === 'Live' ? 'var(--red)' : 'var(--green)';
 
     // Build STOCKS from real positions
     STOCKS.length = 0;
@@ -3776,6 +3791,16 @@ async function bootstrapAuth() {
 }
 
 bootstrapAuth();
+window.addEventListener('hashchange', () => {
+  if (!authSession?.access_token && window.location.hash.includes('access_token=')) {
+    bootstrapAuth();
+  }
+});
+setTimeout(() => {
+  if (!authSession?.access_token && window.location.hash.includes('access_token=')) {
+    bootstrapAuth();
+  }
+}, 300);
 
 // ════════════════════════════════════════════════════════
 // TOAST
