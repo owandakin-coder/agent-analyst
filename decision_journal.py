@@ -10,26 +10,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-RUNTIME_DIR = Path(os.getenv("ATZMA_RUNTIME_DIR", Path(__file__).resolve().parent / "runtime"))
-LAST_DECISION_FILE = RUNTIME_DIR / "last_decision.json"
+
+def _runtime_dir() -> Path:
+    return Path(os.getenv("ATZMA_RUNTIME_DIR", Path(__file__).resolve().parent / "runtime"))
+
+
+def _last_decision_file() -> Path:
+    return _runtime_dir() / "last_decision.json"
 
 
 def write_last_decision(payload: dict[str, Any]) -> None:
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    runtime_dir = _runtime_dir()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
     enriched = {
         "written_at": datetime.now(timezone.utc).isoformat(),
         **payload,
     }
-    LAST_DECISION_FILE.write_text(
+    _last_decision_file().write_text(
         json.dumps(enriched, indent=2, ensure_ascii=True),
         encoding="utf-8",
     )
 
 
 def read_last_decision() -> dict[str, Any] | None:
-    if not LAST_DECISION_FILE.exists():
+    last_decision_file = _last_decision_file()
+    if not last_decision_file.exists():
         return None
     try:
-        return json.loads(LAST_DECISION_FILE.read_text(encoding="utf-8"))
+        return json.loads(last_decision_file.read_text(encoding="utf-8"))
     except Exception:
         return None

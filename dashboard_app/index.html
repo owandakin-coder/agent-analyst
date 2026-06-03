@@ -1149,7 +1149,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-body">
             <div class="status-row-label">Trading Status</div>
-            <div class="status-row-value good" id="ctl-trading-status">Running</div>
+            <div class="status-row-value warn" id="ctl-trading-status">Locked</div>
           </div>
           <div class="status-row-arrow">›</div>
         </div>
@@ -1162,7 +1162,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-body">
             <div class="status-row-label">Mode</div>
-            <div class="status-row-value paper" id="active-mode-row">Paper</div>
+            <div class="status-row-value warn" id="active-mode-row">Locked</div>
           </div>
           <div class="status-row-arrow">›</div>
         </div>
@@ -1174,7 +1174,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-body">
             <div class="status-row-label">Active Executor</div>
-            <div class="status-row-value paper" id="ctl-executor">GitHub Actions</div>
+            <div class="status-row-value warn" id="ctl-executor">Sign in required</div>
           </div>
           <div class="status-row-arrow">›</div>
         </div>
@@ -1188,7 +1188,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-body">
             <div class="status-row-label">Broker Status</div>
-            <div class="status-row-value good" id="ctl-broker">Connected</div>
+            <div class="status-row-value warn" id="ctl-broker">Not connected</div>
           </div>
           <div class="status-row-arrow">›</div>
         </div>
@@ -1202,24 +1202,24 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-body">
             <div class="status-row-label">Sync Status</div>
-            <div class="status-row-value good" id="ctl-sync-status">Synced 3s ago</div>
+            <div class="status-row-value warn" id="ctl-sync-status">Locked</div>
           </div>
           <div class="status-row-arrow">›</div>
         </div>
       </div>
 
-      <button class="ctl-btn ctl-btn-danger" style="margin-bottom:12px;" onclick="runControlAction('stop')">Emergency Stop</button>
+      <button class="ctl-btn ctl-btn-danger" id="btn-emergency-stop" style="margin-bottom:12px;" onclick="runControlAction('stop')">Emergency Stop</button>
 
       <div class="action-strip">
         <button class="action-mini" id="btn-run-once" onclick="runControlAction('run_once')">
           <strong>Run Once</strong>
           <span>Execute now</span>
         </button>
-        <button class="action-mini" onclick="runControlAction('pause')">
+        <button class="action-mini" id="btn-pause" onclick="runControlAction('pause')">
           <strong>Pause</strong>
           <span>Pause trading</span>
         </button>
-        <button class="action-mini primary" onclick="runControlAction('resume')">
+        <button class="action-mini primary" id="btn-resume" onclick="runControlAction('resume')">
           <strong>Resume</strong>
           <span>Resume trading</span>
         </button>
@@ -1230,24 +1230,24 @@ select.m-input { appearance:none; cursor:pointer; }
           <div class="summary-card-pad">
             <div class="summary-header">
               <div class="summary-title">Portfolio Summary</div>
-              <span class="health-pill" id="decision-pill">MODEL LIVE</span>
+              <span class="health-pill" id="decision-pill">LOCKED</span>
             </div>
             <div class="summary-body">
               <div>
                 <div class="metric-name">Total Equity</div>
-                <div class="hero-val" style="font-size:22px;margin:8px 0 0;" id="summary-equity">$124,830.50</div>
+                <div class="hero-val" style="font-size:22px;margin:8px 0 0;" id="summary-equity">$0.00</div>
               </div>
               <div class="metric-line">
                 <span class="metric-name">Day P&amp;L</span>
-                <span class="metric-value good" id="summary-day-pnl">+$3,241.20</span>
+                <span class="metric-value" id="summary-day-pnl">$0.00</span>
               </div>
               <div class="metric-line">
                 <span class="metric-name">Unrealized P&amp;L</span>
-                <span class="metric-value good" id="summary-unrealized">+$2,104.32</span>
+                <span class="metric-value" id="summary-unrealized">$0.00</span>
               </div>
               <div class="metric-line">
                 <span class="metric-name">Buying Power</span>
-                <span class="metric-value" id="summary-buying-power">$365,484.38</span>
+                <span class="metric-value" id="summary-buying-power">$0.00</span>
               </div>
             </div>
           </div>
@@ -1287,12 +1287,12 @@ select.m-input { appearance:none; cursor:pointer; }
           <div class="summary-card-pad">
             <div class="summary-header">
               <div class="summary-title">Last Order</div>
-              <span class="health-pill" id="ctl-broker-pill">PAPER</span>
+              <span class="health-pill" id="ctl-broker-pill">LOCKED</span>
             </div>
             <div class="detail-stack">
               <div>
-                <div class="detail-value" id="last-order-main">No recent order</div>
-                <div class="detail-copy" id="last-order-sub">The audit trail will update after broker activity.</div>
+                <div class="detail-value" id="last-order-main">No broker linked</div>
+                <div class="detail-copy" id="last-order-sub">Sign in and verify your broker to load account activity.</div>
               </div>
             </div>
           </div>
@@ -1302,12 +1302,12 @@ select.m-input { appearance:none; cursor:pointer; }
           <div class="summary-card-pad">
             <div class="summary-header">
               <div class="summary-title">Last Model Decision</div>
-              <span class="health-pill" id="ctl-trading-pill">ACTIVE</span>
+              <span class="health-pill" id="ctl-trading-pill">LOCKED</span>
             </div>
             <div class="detail-stack">
               <div>
-                <div class="detail-value" id="last-decision-main">Hold</div>
-                <div class="detail-copy" id="last-decision-sub">Waiting for next confirmed signal.</div>
+                <div class="detail-value" id="last-decision-main">Connect Account</div>
+                <div class="detail-copy" id="last-decision-sub">Sign in and verify a broker workspace to start trading.</div>
               </div>
             </div>
           </div>
@@ -1340,8 +1340,8 @@ select.m-input { appearance:none; cursor:pointer; }
       </div>
 
       <div class="chart-meta">
-        <div class="cmeta"><div class="v" style="color:var(--green)" id="cm-ret">+24.8%</div><div class="l">Total Return</div></div>
-        <div class="cmeta"><div class="v" style="color:var(--blue)"  id="cm-spy">+18.2%</div><div class="l">vs SPY</div></div>
+        <div class="cmeta"><div class="v" style="color:var(--g2)" id="cm-ret">—</div><div class="l">Total Return</div></div>
+        <div class="cmeta"><div class="v" style="color:var(--g2)"  id="cm-spy">—</div><div class="l">vs SPY</div></div>
         <div class="cmeta"><div class="v" style="color:var(--red)"   id="cm-dd">−8.3%</div><div class="l">Max DD</div></div>
       </div>
 
@@ -1359,9 +1359,9 @@ select.m-input { appearance:none; cursor:pointer; }
     <!-- ══ TRADES ══ -->
     <div class="page" id="pg-trades">
       <div class="trades-top">
-        <div class="tstat"><div class="v" style="color:var(--green)" id="st-buys">156</div><div class="l">Buys</div></div>
-        <div class="tstat"><div class="v" style="color:var(--red)"   id="st-sells">91</div><div class="l">Sells</div></div>
-        <div class="tstat"><div class="v" style="color:var(--orange)">62.4%</div><div class="l">Win Rate</div></div>
+        <div class="tstat"><div class="v" style="color:var(--g2)" id="st-buys">0</div><div class="l">Buys</div></div>
+        <div class="tstat"><div class="v" style="color:var(--g2)"   id="st-sells">0</div><div class="l">Sells</div></div>
+        <div class="tstat"><div class="v" style="color:var(--g2)">—</div><div class="l">Win Rate</div></div>
       </div>
       <div class="pill-row">
         <div class="pill active" onclick="filterT(this,'ALL')">All</div>
@@ -1379,8 +1379,8 @@ select.m-input { appearance:none; cursor:pointer; }
     <div class="page" id="pg-settings">
       <div class="s-sec">
         <div class="s-sec-lbl">Account</div>
-        <div class="s-item" onclick="openProfile()"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">👤</div><div><div class="s-txt-main">Profile</div><div class="s-txt-sub" id="profile-sub">EA Arage · Paper Account</div></div></div><span class="chev">›</span></div>
-        <div class="s-item" onclick="openAlpacaInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">🔗</div><div><div class="s-txt-main">Alpaca API</div><div class="s-txt-sub" id="alpaca-sub">Paper trading connected</div></div></div><span style="color:var(--green);font-size:13px" id="alpaca-status">● Live</span></div>
+        <div class="s-item" onclick="openProfile()"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">👤</div><div><div class="s-txt-main">Profile</div><div class="s-txt-sub" id="profile-sub">No account linked</div></div></div><span class="chev">›</span></div>
+        <div class="s-item" onclick="openAlpacaInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">🔗</div><div><div class="s-txt-main">Alpaca API</div><div class="s-txt-sub" id="alpaca-sub">No broker connected</div></div></div><span style="color:var(--orange);font-size:13px" id="alpaca-status">Locked</span></div>
         <div class="s-item" onclick="openBrokerSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">🛡️</div><div><div class="s-txt-main">Broker Connection</div><div class="s-txt-sub" id="broker-sub">Connect your personal Alpaca workspace</div></div></div><span class="s-r" id="broker-status" style="color:var(--orange)">Setup ›</span></div>
       </div>
 
@@ -1391,7 +1391,7 @@ select.m-input { appearance:none; cursor:pointer; }
         <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(255,59,48,.12)">🛑</div><div><div class="s-txt-main">Trailing Stop-Loss</div><div class="s-txt-sub">8% from peak · per ticker</div></div></div><label class="tog"><input type="checkbox" id="tog-stoploss" checked onchange="togSetting(this,'stop_loss')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
         <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(191,90,242,.12)">🎲</div><div><div class="s-txt-main">Kelly Criterion</div><div class="s-txt-sub">Fractional 0.25× sizing</div></div></div><label class="tog"><input type="checkbox" id="tog-kelly" checked onchange="togSetting(this,'kelly')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
         <div class="s-item" onclick="openRegimeInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">📡</div><div><div class="s-txt-main">Regime Detector</div><div class="s-txt-sub">Bull · Sideways · Bear mode</div></div></div><span class="s-r" id="regime-badge" style="color:var(--green);font-size:12px">BULL ›</span></div>
-        <div class="s-item" onclick="openExecutionSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🚀</div><div><div class="s-txt-main">Execution Queue</div><div class="s-txt-sub" id="execution-sub">Personal isolated jobs are not active yet</div></div></div><span class="s-r" id="execution-status" style="color:var(--g2)">0 jobs</span></div>
+        <div class="s-item" onclick="openExecutionSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🚀</div><div><div class="s-txt-main">Execution Queue</div><div class="s-txt-sub" id="execution-sub">Sign in and verify a broker workspace first</div></div></div><span class="s-r" id="execution-status" style="color:var(--g2)">Locked</span></div>
       </div>
 
       <div class="s-sec">
@@ -2121,7 +2121,7 @@ function updateIdentityUI() {
   if (!currentUser) {
     setText('broker-sub', 'Connect your personal Alpaca workspace');
     setText('broker-status', 'Setup ›');
-    setText('execution-sub', 'Personal isolated jobs are not active yet');
+    setText('execution-sub', 'Sign in and verify a broker workspace first');
     setText('execution-status', '0 jobs');
   }
 }
@@ -2387,13 +2387,13 @@ let trades = 0;
 let controlState = {
   tradingStatus: 'Locked',
   tradingSub: 'Sign in and verify a broker connection to activate trading.',
-  executor: 'GitHub Actions',
-  executorSub: 'Primary engine for automated runs.',
+  executor: 'Sign in required',
+  executorSub: 'Authentication required before control access.',
   broker: 'Not connected',
   brokerSub: 'No broker connection is attached to this workspace yet.',
   sync: 'Locked',
   syncSub: 'No personal broker session is active.',
-  mode: 'Paper',
+  mode: 'Locked',
   lastDecision: 'Onboarding',
   lastDecisionSub: 'No model decision until your broker is verified.',
   lastOrder: 'No broker activity',
@@ -2497,6 +2497,8 @@ function setRiskCard(id, value, sub) {
   setText(id + '-sub', sub);
 }
 function updateControlSurface() {
+  const guestLocked = !authSession?.access_token || !currentUser;
+  const brokerVerified = hasVerifiedBrokerConnection();
   setText('ctl-trading-status', controlState.tradingStatus);
   setText('ctl-trading-sub', controlState.tradingSub);
   setText('ctl-sync-status', controlState.sync);
@@ -2512,7 +2514,9 @@ function updateControlSurface() {
   setText('last-order-main', controlState.lastOrder);
   setText('last-order-sub', controlState.lastOrderSub);
 
-  if (controlState.emergency) {
+  if (guestLocked) {
+    setPill('ctl-trading-pill', 'LOCKED', 'warn');
+  } else if (controlState.emergency) {
     setPill('ctl-trading-pill', 'STOPPED', 'stop');
   } else if (controlState.tradingStatus === 'Paused') {
     setPill('ctl-trading-pill', 'PAUSED', 'warn');
@@ -2521,20 +2525,34 @@ function updateControlSurface() {
   }
 
   const syncMode = controlState.sync === 'Degraded' ? 'warn' : 'ok';
-  setPill('ctl-sync-pill', controlState.sync === 'Degraded' ? 'CHECK BROKER' : 'BROKER OK', syncMode);
+  setPill('ctl-sync-pill', guestLocked ? 'LOCKED' : controlState.sync === 'Degraded' ? 'CHECK BROKER' : 'BROKER OK', guestLocked ? 'warn' : syncMode);
   setPill('ctl-executor-pill', 'PRIMARY');
-  setPill('ctl-broker-pill', controlState.mode.toUpperCase(), controlState.broker === 'Connected' ? 'ok' : 'warn');
-  setPill('decision-pill', controlState.emergency ? 'MODEL BLOCKED' : 'MODEL LIVE', controlState.emergency ? 'stop' : 'ok');
-  setPill('risk-pill', 'ENFORCED', controlState.emergency ? 'warn' : 'ok');
-  const runOnceBtn = document.getElementById('btn-run-once');
-  if (runOnceBtn) {
-    runOnceBtn.disabled = !controlState.canDispatch;
-    runOnceBtn.style.opacity = controlState.canDispatch ? '1' : '0.45';
-    runOnceBtn.style.cursor = controlState.canDispatch ? 'pointer' : 'not-allowed';
+  setPill('ctl-broker-pill', (guestLocked ? 'LOCKED' : controlState.mode.toUpperCase()), controlState.broker === 'Connected' ? 'ok' : 'warn');
+  if (guestLocked) {
+    setPill('decision-pill', 'LOCKED', 'warn');
+  } else if (!brokerVerified) {
+    setPill('decision-pill', 'ONBOARDING', 'warn');
+  } else {
+    setPill('decision-pill', controlState.emergency ? 'MODEL BLOCKED' : 'MODEL LIVE', controlState.emergency ? 'stop' : 'ok');
   }
+  setPill('risk-pill', 'ENFORCED', controlState.emergency ? 'warn' : 'ok');
+  const controlActionsEnabled = !guestLocked && !!controlState.canDispatch;
+  ['btn-run-once', 'btn-pause', 'btn-resume', 'btn-emergency-stop'].forEach(id => {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.disabled = !controlActionsEnabled;
+    button.style.opacity = controlActionsEnabled ? '1' : '0.45';
+    button.style.cursor = controlActionsEnabled ? 'pointer' : 'not-allowed';
+  });
 }
 function applyBackendControlState(payload) {
   if (!payload) return;
+  if (!authSession?.access_token || !currentUser) {
+    controlState.canDispatch = false;
+    setText('control-note', 'Sign in to unlock your personal trading workspace.');
+    updateControlSurface();
+    return;
+  }
   controlState.mode = ((payload.mode || 'paper') + '').toLowerCase() === 'live' ? 'Live' : 'Paper';
   controlState.emergency = !!payload.emergency_stop;
   controlState.tradingStatus = controlState.emergency
