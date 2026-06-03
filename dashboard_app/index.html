@@ -3796,11 +3796,18 @@ window.addEventListener('hashchange', () => {
     bootstrapAuth();
   }
 });
-setTimeout(() => {
-  if (!authSession?.access_token && window.location.hash.includes('access_token=')) {
-    bootstrapAuth();
+let authHashRecoveryAttempts = 0;
+const authHashRecoveryTimer = setInterval(() => {
+  if (authSession?.access_token || !window.location.hash.includes('access_token=')) {
+    clearInterval(authHashRecoveryTimer);
+    return;
   }
-}, 300);
+  authHashRecoveryAttempts += 1;
+  bootstrapAuth();
+  if (authHashRecoveryAttempts >= 5) {
+    clearInterval(authHashRecoveryTimer);
+  }
+}, 1000);
 
 // ════════════════════════════════════════════════════════
 // TOAST
