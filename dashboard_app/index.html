@@ -2233,6 +2233,10 @@ function renderExecutionJobs(jobs) {
   }).join('');
 }
 
+function hasOpenExecutionJob() {
+  return currentExecutionJobs.some(job => ['queued', 'claimed', 'running'].includes(String(job.status || '').toLowerCase()));
+}
+
 async function refreshMemberWorkspace() {
   if (!authSession?.access_token) {
     applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
@@ -2561,7 +2565,15 @@ function updateControlSurface() {
   }
   setPill('risk-pill', 'ENFORCED', controlState.emergency ? 'warn' : 'ok');
   const controlActionsEnabled = !guestLocked && brokerVerified && !!controlState.canDispatch;
-  ['btn-run-once', 'btn-pause', 'btn-resume', 'btn-emergency-stop'].forEach(id => {
+  const runLockedByQueue = hasOpenExecutionJob();
+  const runButton = document.getElementById('btn-run-once');
+  if (runButton) {
+    const runEnabled = controlActionsEnabled && !runLockedByQueue && !controlState.emergency;
+    runButton.disabled = !runEnabled;
+    runButton.style.opacity = runEnabled ? '1' : '0.45';
+    runButton.style.cursor = runEnabled ? 'pointer' : 'not-allowed';
+  }
+  ['btn-pause', 'btn-resume', 'btn-emergency-stop'].forEach(id => {
     const button = document.getElementById(id);
     if (!button) return;
     button.disabled = !controlActionsEnabled;
@@ -2619,6 +2631,12 @@ async function runControlAction(action) {
       return;
     }
     if (action === 'run_once') {
+      if (hasOpenExecutionJob()) {
+        setText('control-note', 'A trade cycle is already queued or running for this workspace.');
+        toast('Run already queued');
+        updateControlSurface();
+        return;
+      }
       const res = await fetch(API_BASE + '/control/run_once', {
         method: 'POST',
         headers: getAuthHeaders(true),
@@ -2626,6 +2644,9 @@ async function runControlAction(action) {
       });
       const payload = await res.json();
       if (payload.error) throw new Error(payload.error);
+      if (payload.job) {
+        renderExecutionJobs([payload.job, ...currentExecutionJobs.filter(job => String(job.id || '') !== String(payload.job.id || ''))]);
+      }
       controlState.lastDecision = 'Manual Run Requested';
       controlState.lastDecisionSub = 'GitHub workflow dispatch accepted for a single paper cycle.';
       setText('control-note', 'Run Once was dispatched to the primary GitHub workflow.');
