@@ -2629,6 +2629,11 @@ async function runControlAction(action) {
       controlState.lastDecision = 'Manual Run Requested';
       controlState.lastDecisionSub = 'GitHub workflow dispatch accepted for a single paper cycle.';
       setText('control-note', 'Run Once was dispatched to the primary GitHub workflow.');
+      try {
+        await refreshMemberWorkspace();
+      } catch (workspaceError) {
+        console.warn('runControlAction workspace:', workspaceError.message);
+      }
       toast('Run Once dispatched');
       updateControlSurface();
       renderHomeAudit();
@@ -2643,6 +2648,11 @@ async function runControlAction(action) {
     const payload = await res.json();
     if (payload.error) throw new Error(payload.error);
     applyBackendControlState(payload);
+    try {
+      await refreshMemberWorkspace();
+    } catch (workspaceError) {
+      console.warn('runControlAction refresh:', workspaceError.message);
+    }
     toast(action === 'stop' ? 'Emergency stop saved' : (action.charAt(0).toUpperCase() + action.slice(1)) + ' saved');
   } catch (e) {
     console.warn('runControlAction:', e.message);

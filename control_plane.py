@@ -23,6 +23,7 @@ DEFAULT_GITHUB_CONTROL_PATH = "runtime/control_state.json"
 DEFAULT_GITHUB_WORKFLOW = "trade.yml"
 DEFAULT_GITHUB_BRANCH = "main"
 USER_AGENT = "ATZMA-ControlPlane/1.0"
+DEFAULT_CONTROL_API_URL = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api/control"
 
 
 def _cfg_get(*keys, default=None):
@@ -65,6 +66,14 @@ def github_default_branch() -> str:
         os.getenv("GITHUB_REF_NAME", "").strip()
         or os.getenv("ATZMA_GITHUB_BRANCH", "").strip()
         or str(_cfg_get("github", "branch", default=DEFAULT_GITHUB_BRANCH)).strip()
+    )
+
+
+def control_api_url() -> str:
+    return (
+        os.getenv("ATZMA_CONTROL_API_URL", "").strip()
+        or str(_cfg_get("supabase", "control_api_url", default="")).strip()
+        or DEFAULT_CONTROL_API_URL
     )
 
 
@@ -137,6 +146,19 @@ def _github_request(url: str, *, method: str = "GET", token: str = "", payload: 
 
 
 def load_remote_control_state() -> dict:
+    api_url = control_api_url()
+    if api_url:
+        try:
+            req = urllib.request.Request(api_url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                body = response.read().decode("utf-8")
+                payload = json.loads(body) if body else {}
+            normalized = normalize_control_state(payload)
+            normalized["_source"] = str(payload.get("_source") or "control_api")
+            return normalized
+        except Exception:
+            pass
+
     repo = github_repo()
     if not repo:
         raise RuntimeError("GitHub repository is not configured")

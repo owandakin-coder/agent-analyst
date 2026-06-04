@@ -269,6 +269,16 @@ function normalizeControlState(input: JsonMap | null | undefined) {
 }
 
 async function loadControlState(): Promise<JsonMap> {
+  try {
+    const dbRes = await restAdmin("/audit_events?event_type=eq.control_state&select=event_payload,created_at&order=created_at.desc&limit=1");
+    if (dbRes.ok) {
+      const rows = await dbRes.json() as Array<{ event_payload?: JsonMap }>;
+      const payload = rows[0]?.event_payload ?? {};
+      return { ...normalizeControlState(payload), _source: "supabase_db", can_dispatch: !!GITHUB_TOKEN };
+    }
+  } catch {
+    // Fall back to GitHub-backed state for older deployments.
+  }
   const res = await githubRequest(`/repos/${GITHUB_REPO}/contents/${CONTROL_PATH}`);
   if (res.status === 404) return { ...defaultControlState(), _source: "default", can_dispatch: !!GITHUB_TOKEN };
   if (!res.ok) throw new Error(`GitHub control state returned ${res.status}`);
@@ -280,8 +290,51 @@ async function loadControlState(): Promise<JsonMap> {
 }
 
 async function saveControlState(state: JsonMap, actor: string): Promise<JsonMap> {
-  if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN secret is missing");
   const normalized = normalizeControlState(state);
+  try {
+    const res = await restAdmin("/audit_events", {
+      method: "POST",
+      headers: { "Prefer": "return=minimal" },
+      body: JSON.stringify({
+        user_id: null,
+        event_type: "control_state",
+        event_payload: normalized,
+      }),
+    });
+    if (res.ok) {
+      if (GITHUB_TOKEN) {
+        try {
+          const urlPath = `/repos/${GITHUB_REPO}/contents/${CONTROL_PATH}`;
+          const existing = await githubRequest(urlPath);
+          let sha: string | undefined;
+          if (existing.ok) {
+            const payload = await existing.json() as { sha?: string };
+            sha = payload.sha;
+          } else if (existing.status !== 404) {
+            throw new Error(`GitHub control state returned ${existing.status}`);
+          }
+          const body: JsonMap = {
+            message: `ATZMA control update by ${actor}`,
+            content: btoa(JSON.stringify(normalized, null, 2)),
+            branch: GITHUB_BRANCH,
+          };
+          if (sha) body.sha = sha;
+          await githubRequest(urlPath, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } catch {
+          // DB state is the source of truth; GitHub mirror is best effort only.
+        }
+      }
+      return { ...normalized, _source: "supabase_db", can_dispatch: !!GITHUB_TOKEN };
+    }
+  } catch {
+    // Fall through to GitHub-only persistence for older deployments.
+  }
+
+  if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN secret is missing");
   const urlPath = `/repos/${GITHUB_REPO}/contents/${CONTROL_PATH}`;
   const existing = await githubRequest(urlPath);
   let sha: string | undefined;
