@@ -376,6 +376,45 @@ body {
   color:var(--g2);
   line-height:1.45;
 }
+.workspace-banner {
+  margin:14px 0 12px;
+  padding:14px 14px 12px;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,0.06);
+  background:linear-gradient(135deg, rgba(10,132,255,0.12), rgba(52,199,89,0.08)), rgba(18,20,24,0.92);
+  box-shadow:0 10px 30px rgba(0,0,0,0.18);
+}
+.workspace-banner-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.workspace-banner-title { font-size:14px; font-weight:700; letter-spacing:-0.2px; }
+.workspace-banner-copy { margin-top:5px; font-size:11.5px; color:var(--g2); line-height:1.5; }
+.workspace-banner-pill {
+  padding:5px 9px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:0.4px;
+  text-transform:uppercase;
+  white-space:nowrap;
+  background:rgba(255,255,255,0.06);
+  color:var(--g2);
+}
+.workspace-banner-actions { display:flex; gap:10px; margin-top:12px; }
+.workspace-banner-btn {
+  border:none;
+  border-radius:12px;
+  padding:11px 14px;
+  font:inherit;
+  font-size:12px;
+  font-weight:800;
+  cursor:pointer;
+}
+.workspace-banner-btn.primary { background:linear-gradient(135deg, #2d8cff, #34c759); color:#06111b; }
+.workspace-banner-btn.secondary { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:var(--white); }
 .detail-card {
   background:var(--c2);
   border-radius:18px;
@@ -1137,6 +1176,20 @@ select.m-input { appearance:none; cursor:pointer; }
             <path d="M8.5 12.5L10.8 14.8L15.8 9.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           </svg>
           <span id="meta-sync-line">No account linked</span>
+        </div>
+      </div>
+
+      <div class="workspace-banner">
+        <div class="workspace-banner-head">
+          <div>
+            <div class="workspace-banner-title" id="workspace-banner-title">Secure your personal trading workspace</div>
+            <div class="workspace-banner-copy" id="workspace-banner-copy">Sign in first, then attach your Alpaca Paper account. Live portfolio data appears only after broker verification.</div>
+          </div>
+          <div class="workspace-banner-pill" id="workspace-banner-pill">Locked</div>
+        </div>
+        <div class="workspace-banner-actions">
+          <button class="workspace-banner-btn primary" id="workspace-banner-primary" onclick="handleWorkspacePrimaryAction()">Sign In</button>
+          <button class="workspace-banner-btn secondary" id="workspace-banner-secondary" onclick="handleWorkspaceSecondaryAction()">How it works</button>
         </div>
       </div>
 
@@ -2217,24 +2270,121 @@ function renderExecutionJobs(jobs) {
     setText('last-decision-main', latest.result.regime || 'Decision');
     setText('last-decision-sub', latest.result.decision_summary);
   }
-  setText('execution-sub', latest ? ((latest.status || 'queued').toUpperCase() + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at || new Date().toISOString())) : 'No personal runs yet');
+  setText('execution-sub', latest ? (formatExecutionStatus(latest.status) + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at || new Date().toISOString())) : 'No personal runs yet');
   const root = document.getElementById('execution-jobs-list');
   if (!root) return;
   if (!currentExecutionJobs.length) {
     root.innerHTML = '<div class="profile-row"><span class="profile-key">Queue</span><span class="profile-val">No jobs yet</span></div>';
+    updateWorkspaceBanner();
     return;
   }
   root.innerHTML = currentExecutionJobs.map(job => {
-    const status = String(job.status || 'queued').toUpperCase();
+    const status = formatExecutionStatus(job.status);
     const color = job.status === 'succeeded' ? 'var(--green)' : job.status === 'failed' ? 'var(--red)' : job.status === 'running' ? 'var(--blue)' : 'var(--orange)';
     const when = fmtOrderTime(job.requested_at || job.created_at || new Date().toISOString());
     const detail = esc(job.error_text || (((job.requested_mode || 'paper') + '').toUpperCase() + ' · ' + when));
     return `<div class="profile-row"><div><div style="font-size:13px;font-weight:700;">${esc(job.job_type || 'trade_once')}</div><div style="font-size:11px;color:var(--g3);margin-top:3px;">${detail}</div></div><span class="profile-val" style="color:${color};text-transform:uppercase;">${esc(status)}</span></div>`;
   }).join('');
+  updateWorkspaceBanner();
 }
 
 function hasOpenExecutionJob() {
   return currentExecutionJobs.some(job => ['queued', 'claimed', 'running'].includes(String(job.status || '').toLowerCase()));
+}
+
+function formatExecutionStatus(status) {
+  const value = String(status || 'queued').toLowerCase();
+  if (value === 'queued') return 'Queued';
+  if (value === 'claimed') return 'Claimed';
+  if (value === 'running') return 'Running';
+  if (value === 'succeeded') return 'Succeeded';
+  if (value === 'failed') return 'Failed';
+  if (value === 'skipped') return 'Skipped';
+  if (value === 'cancelled') return 'Cancelled';
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function updateWorkspaceBanner() {
+  const titleEl = document.getElementById('workspace-banner-title');
+  const copyEl = document.getElementById('workspace-banner-copy');
+  const pillEl = document.getElementById('workspace-banner-pill');
+  const primaryEl = document.getElementById('workspace-banner-primary');
+  const secondaryEl = document.getElementById('workspace-banner-secondary');
+  if (!titleEl || !copyEl || !pillEl || !primaryEl || !secondaryEl) return;
+
+  if (!currentUser) {
+    titleEl.textContent = 'Secure your personal trading workspace';
+    copyEl.textContent = 'Sign in first, then attach your Alpaca Paper account. Live portfolio data appears only after broker verification.';
+    pillEl.textContent = 'Locked';
+    pillEl.style.color = 'var(--g2)';
+    pillEl.style.background = 'rgba(255,255,255,0.06)';
+    primaryEl.textContent = 'Sign In';
+    secondaryEl.textContent = 'How it works';
+    return;
+  }
+
+  if (!hasVerifiedBrokerConnection()) {
+    titleEl.textContent = 'Broker connection required';
+    copyEl.textContent = 'Your account is ready. Connect and verify your own Alpaca Paper workspace to unlock live positions, orders, and execution.';
+    pillEl.textContent = 'Setup';
+    pillEl.style.color = 'var(--orange)';
+    pillEl.style.background = 'rgba(255,159,10,0.14)';
+    primaryEl.textContent = 'Connect Broker';
+    secondaryEl.textContent = 'View Queue';
+    return;
+  }
+
+  if (hasOpenExecutionJob()) {
+    titleEl.textContent = 'Execution in progress';
+    copyEl.textContent = 'A trade cycle is already queued or running for this workspace. Monitor the queue instead of sending another run.';
+    pillEl.textContent = 'Active';
+    pillEl.style.color = 'var(--blue)';
+    pillEl.style.background = 'rgba(10,132,255,0.14)';
+    primaryEl.textContent = 'Open Queue';
+    secondaryEl.textContent = 'Refresh';
+    return;
+  }
+
+  titleEl.textContent = 'Workspace ready';
+  copyEl.textContent = 'Your broker is verified and live data is flowing. You can run a paper cycle now or manage trading state from the control panel.';
+  pillEl.textContent = 'Ready';
+  pillEl.style.color = 'var(--green)';
+  pillEl.style.background = 'rgba(52,199,89,0.14)';
+  primaryEl.textContent = 'Run Once';
+  secondaryEl.textContent = 'View Queue';
+}
+
+function handleWorkspacePrimaryAction() {
+  if (!currentUser) {
+    showAuthOverlay();
+    return;
+  }
+  if (!hasVerifiedBrokerConnection()) {
+    openBrokerSheet();
+    return;
+  }
+  if (hasOpenExecutionJob()) {
+    openExecutionSheet();
+    return;
+  }
+  runControlAction('run_once');
+}
+
+function handleWorkspaceSecondaryAction() {
+  if (!currentUser) {
+    toast('Sign in, verify broker, then run paper trades.');
+    return;
+  }
+  if (!hasVerifiedBrokerConnection()) {
+    openExecutionSheet();
+    return;
+  }
+  if (hasOpenExecutionJob()) {
+    refreshMemberWorkspace();
+    toast('Workspace refreshed');
+    return;
+  }
+  openExecutionSheet();
 }
 
 async function refreshMemberWorkspace() {
