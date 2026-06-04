@@ -2076,7 +2076,12 @@ async function hydrateCurrentUser() {
     currentPreferences = payload.preferences || null;
     mergeRemotePreferences();
     loadSettings();
-    await refreshMemberWorkspace();
+    try {
+      await refreshMemberWorkspace();
+    } catch (workspaceError) {
+      console.warn('hydrateCurrentUser workspace:', workspaceError.message);
+      applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
+    }
     updateIdentityUI();
     return payload;
   } catch (e) {
@@ -2234,11 +2239,14 @@ async function refreshMemberWorkspace() {
     return;
   }
   try {
-    const [brokerPayload, jobsPayload] = await Promise.all([
-      apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' }),
-      apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' }),
-    ]);
+    const brokerPayload = await apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' });
     applyBrokerConnectionUI(brokerPayload.connection || null);
+    let jobsPayload = { jobs: [] };
+    try {
+      jobsPayload = await apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' });
+    } catch (jobsError) {
+      console.warn('refreshMemberWorkspace jobs:', jobsError.message);
+    }
     renderExecutionJobs(jobsPayload.jobs || []);
     if (hasVerifiedBrokerConnection()) {
       fetchAlpacaData();
@@ -2339,7 +2347,11 @@ async function verifyBrokerConnection() {
     applyBrokerConnectionUI(payload.connection || null);
     document.getElementById('broker-api-key').value = '';
     document.getElementById('broker-secret-key').value = '';
-    await refreshMemberWorkspace();
+    try {
+      await refreshMemberWorkspace();
+    } catch (refreshError) {
+      console.warn('verifyBrokerConnection refresh:', refreshError.message);
+    }
     toast('Broker verified');
   } catch (e) {
     errorEl.textContent = e.message;
@@ -2389,6 +2401,7 @@ const NAMES = {
 
 // Dynamic stocks — populated from Alpaca positions
 let STOCKS = [];
+let ALL_TRADES = [];
 
 let portBase = 0;
 let portOpen = 0;
@@ -2547,7 +2560,7 @@ function updateControlSurface() {
     setPill('decision-pill', controlState.emergency ? 'MODEL BLOCKED' : 'MODEL LIVE', controlState.emergency ? 'stop' : 'ok');
   }
   setPill('risk-pill', 'ENFORCED', controlState.emergency ? 'warn' : 'ok');
-  const controlActionsEnabled = !guestLocked && !!controlState.canDispatch;
+  const controlActionsEnabled = !guestLocked && brokerVerified && !!controlState.canDispatch;
   ['btn-run-once', 'btn-pause', 'btn-resume', 'btn-emergency-stop'].forEach(id => {
     const button = document.getElementById(id);
     if (!button) return;
@@ -3108,7 +3121,6 @@ function initCharts() {
 // ════════════════════════════════════════════════════════
 // TRADES — Real data from Alpaca
 // ════════════════════════════════════════════════════════
-let ALL_TRADES = [];
 let tradeFilter = 'ALL';
 
 function renderHomeAudit() {
@@ -3270,7 +3282,9 @@ let alertsData = [
 ];
 
 function renderAlerts() {
-  document.getElementById('alerts-list').innerHTML =
+  const alertsList = document.getElementById('alerts-list');
+  if (!alertsList) return;
+  alertsList.innerHTML =
     alertsData.map((a,i)=>`
       <div class="arow" onclick="dismissAlert(${i})">
         <div class="arow-bar" style="background:${a.col}"></div>
@@ -3284,7 +3298,8 @@ function renderAlerts() {
       </div>`).join('') +
     `<button class="full-btn" onclick="openModal()">+ Create New Alert</button>`;
   const newCount = alertsData.filter(a=>['2 min ago','34 min ago','1h ago'].includes(a.time)).length;
-  document.getElementById('alert-count').textContent = newCount + ' new';
+  const alertCount = document.getElementById('alert-count');
+  if (alertCount) alertCount.textContent = newCount + ' new';
 }
 renderAlerts();
 
