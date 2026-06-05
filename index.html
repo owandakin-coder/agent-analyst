@@ -1942,6 +1942,7 @@ async function apiJSON(path, options = {}) {
     const error = new Error(message);
     error.status = res.status;
     error.payload = payload;
+    error.path = path;
     throw error;
   }
   return payload;
@@ -1956,7 +1957,7 @@ function isAuthFailure(error) {
   const status = Number(error?.status || 0);
   if (status === 401 || status === 403) return true;
   const text = String(error?.message || '');
-  return /jwt|token|expired|unauthorized|forbidden|invalid claim|session/i.test(text);
+  return /jwt|token|expired|unauthorized|authorization header|auth header|forbidden|invalid claim|session/i.test(text);
 }
 
 async function refreshAuthSession(force = false) {
@@ -2220,9 +2221,13 @@ async function submitAuth() {
     const sessionPayload = extractSessionPayload(payload);
     if (sessionPayload?.access_token) {
       storeAuthSession(sessionPayload);
-      await hydrateCurrentUser();
       hideAuthOverlay();
       toast(authMode === 'signup' ? 'Account created' : 'Signed in');
+      try {
+        await hydrateCurrentUser();
+      } catch (hydrateError) {
+        console.warn('post-signin hydrate failed:', hydrateError.path || '/me', hydrateError.message);
+      }
       setAuthBusy(false);
       return;
     }
