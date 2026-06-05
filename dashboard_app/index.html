@@ -2070,6 +2070,14 @@ function humanizeAuthError(message) {
   return { error: text, showResend: false, status: '' };
 }
 
+function shouldFallbackToDirectAuth(message) {
+  const text = String(message || '').toLowerCase();
+  return text.includes('missing authorization header')
+    || text.includes('missing authorization')
+    || text.includes('auth header')
+    || text.includes('unauthorized');
+}
+
 function showAuthOverlay() {
   document.getElementById('auth-overlay').classList.remove('hidden');
 }
@@ -2182,15 +2190,36 @@ async function submitAuth() {
   setAuthBusy(true, authMode === 'signup' ? 'Creating account...' : 'Signing in...');
   try {
     const path = authMode === 'signup' ? '/auth/signup' : '/auth/signin';
-    const payload = await apiJSON(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-      body: JSON.stringify({
-        email,
-        password,
-        display_name: displayName || email.split('@')[0],
-      }),
-    });
+    let payload;
+    try {
+      payload = await apiJSON(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+        body: JSON.stringify({
+          email,
+          password,
+          display_name: displayName || email.split('@')[0],
+        }),
+      });
+    } catch (edgeError) {
+      if (authMode === 'signin' && shouldFallbackToDirectAuth(edgeError.message)) {
+        const directRes = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ email, password }),
+        });
+        payload = await directRes.json().catch(() => ({}));
+        if (!directRes.ok) {
+          const directMessage = payload?.error_description || payload?.msg || payload?.message || payload?.error || edgeError.message;
+          throw new Error(directMessage);
+        }
+      } else {
+        throw edgeError;
+      }
+    }
     const sessionPayload = extractSessionPayload(payload);
     if (sessionPayload?.access_token) {
       storeAuthSession(sessionPayload);
@@ -2337,6 +2366,11 @@ async function signOutUser() {
   currentPreferences = null;
   currentBrokerConnection = null;
   currentExecutionJobs = [];
+  setAuthMode('signin');
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-password-confirm').value = '';
+  document.getElementById('auth-error').textContent = '';
+  hideAuthStatus();
   updateIdentityUI();
   applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
   showAuthOverlay();
