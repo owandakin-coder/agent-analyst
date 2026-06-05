@@ -578,6 +578,7 @@ body {
   padding:15px 16px;
   border-bottom:1px solid rgba(255,255,255,0.05);
 }
+.status-row.clickable { cursor:pointer; }
 .status-row:last-child {
   border-bottom:none;
 }
@@ -1194,7 +1195,7 @@ select.m-input { appearance:none; cursor:pointer; }
       </div>
 
       <div class="status-panel">
-        <div class="status-row">
+        <div class="status-row clickable" onclick="handleTradingStatusTap()">
           <div class="status-row-icon" style="color:var(--green);border-color:rgba(72,235,117,0.18);background:rgba(72,235,117,0.06);">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M3 12H7L9 6L13 18L15 11L17 14H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -1206,7 +1207,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-arrow">›</div>
         </div>
-        <div class="status-row">
+        <div class="status-row clickable" onclick="handleModeTap()">
           <div class="status-row-icon">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M8 3H16L20 7V21H4V3H8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
@@ -1219,7 +1220,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-arrow">›</div>
         </div>
-        <div class="status-row">
+        <div class="status-row clickable" onclick="handleExecutorTap()">
           <div class="status-row-icon" style="color:#ffffff;border-color:rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);">
             <svg viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2C6.48 2 2 6.58 2 12.22C2 16.74 4.87 20.57 8.84 21.92C9.34 22.02 9.5 21.7 9.5 21.42C9.5 21.17 9.49 20.49 9.49 19.73C6.73 20.35 6.14 18.52 6.14 18.52C5.68 17.32 5.03 17 5.03 17C4.12 16.36 5.1 16.37 5.1 16.37C6.11 16.44 6.64 17.44 6.64 17.44C7.53 19 8.97 18.55 9.54 18.28C9.63 17.61 9.89 17.15 10.18 16.89C7.97 16.63 5.65 15.75 5.65 11.8C5.65 10.67 6.04 9.74 6.69 9C6.59 8.74 6.25 7.69 6.79 6.28C6.79 6.28 7.64 6 9.48 7.28C10.29 7.05 11.16 6.94 12.03 6.94C12.9 6.94 13.77 7.05 14.58 7.28C16.42 6 17.27 6.28 17.27 6.28C17.81 7.69 17.47 8.74 17.37 9C18.02 9.74 18.41 10.67 18.41 11.8C18.41 15.76 16.08 16.62 13.86 16.88C14.23 17.21 14.56 17.86 14.56 18.85C14.56 20.28 14.55 21.08 14.55 21.42C14.55 21.7 14.71 22.03 15.22 21.92C19.19 20.57 22.06 16.74 22.06 12.22C22.06 6.58 17.58 2 12 2Z"></path>
@@ -1231,7 +1232,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-arrow">›</div>
         </div>
-        <div class="status-row">
+        <div class="status-row clickable" onclick="handleBrokerStatusTap()">
           <div class="status-row-icon" style="color:var(--green);border-color:rgba(72,235,117,0.18);background:rgba(72,235,117,0.06);">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M5 12A7 7 0 0 1 19 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
@@ -1245,7 +1246,7 @@ select.m-input { appearance:none; cursor:pointer; }
           </div>
           <div class="status-row-arrow">›</div>
         </div>
-        <div class="status-row">
+        <div class="status-row clickable" onclick="handleSyncStatusTap()">
           <div class="status-row-icon" style="color:var(--green);border-color:rgba(72,235,117,0.18);background:rgba(72,235,117,0.06);">
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M4 4V10H10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -2460,6 +2461,56 @@ function handleWorkspaceSecondaryAction() {
     return;
   }
   openExecutionSheet();
+}
+
+function handleTradingStatusTap() {
+  if (!currentUser) {
+    showAuthOverlay();
+    return;
+  }
+  if (!hasVerifiedBrokerConnection()) {
+    openBrokerSheet();
+    return;
+  }
+  openExecutionSheet();
+}
+
+function handleModeTap() {
+  if (!currentUser) {
+    showAuthOverlay();
+    return;
+  }
+  openBrokerSheet();
+}
+
+function handleExecutorTap() {
+  if (!currentUser) {
+    showAuthOverlay();
+    toast('Sign in to inspect execution routing.');
+    return;
+  }
+  openExecutionSheet();
+}
+
+function handleBrokerStatusTap() {
+  if (!currentUser) {
+    showAuthOverlay();
+    return;
+  }
+  openBrokerSheet();
+}
+
+function handleSyncStatusTap() {
+  if (!currentUser) {
+    showAuthOverlay();
+    return;
+  }
+  if (!hasVerifiedBrokerConnection()) {
+    openBrokerSheet();
+    return;
+  }
+  refreshMemberWorkspace();
+  toast('Workspace refreshed');
 }
 
 async function refreshMemberWorkspace() {
