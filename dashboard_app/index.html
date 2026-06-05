@@ -52,6 +52,10 @@ body {
   overflow: hidden;
   position: relative;
 }
+body.booting #app {
+  opacity: 0;
+  pointer-events: none;
+}
 
 /* ── Neural grid background ── */
 #bg-canvas {
@@ -67,7 +71,59 @@ body {
   height: 100dvh;
   max-width: 430px;
   margin: 0 auto;
+  transition: opacity 0.22s ease;
 }
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 450;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(10,30,60,0.45), rgba(0,0,0,0.94) 56%);
+  backdrop-filter: blur(18px);
+}
+.boot-overlay.hidden { display: none; }
+.boot-card {
+  width: 100%;
+  max-width: 390px;
+  padding: 28px 22px;
+  border-radius: 28px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(17,19,22,0.96), rgba(10,12,14,0.96));
+  box-shadow: 0 24px 80px rgba(0,0,0,0.45);
+  text-align: center;
+}
+.boot-logo {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 16px;
+  object-fit: cover;
+}
+.boot-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.7px;
+}
+.boot-copy {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--g2);
+}
+.boot-loader {
+  width: 42px;
+  height: 42px;
+  margin: 18px auto 0;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.08);
+  border-top-color: var(--green);
+  animation: boot-spin 0.9s linear infinite;
+}
+@keyframes boot-spin { to { transform: rotate(360deg); } }
 
 /* ── Header ── */
 .hdr {
@@ -1097,12 +1153,21 @@ select.m-input { appearance:none; cursor:pointer; }
 
 </style>
 </head>
-<body>
+<body class="booting">
 
 <!-- Neural background -->
 <canvas id="bg-canvas"></canvas>
 
-<div id="auth-overlay" class="auth-overlay">
+<div id="boot-overlay" class="boot-overlay">
+  <div class="boot-card">
+    <img src="logo.png" alt="ATZMA" class="boot-logo">
+    <div class="boot-title">ATZMA</div>
+    <div class="boot-copy" id="boot-copy">Securing your workspace and restoring your session.</div>
+    <div class="boot-loader"></div>
+  </div>
+</div>
+
+<div id="auth-overlay" class="auth-overlay hidden">
   <div class="auth-card">
     <div class="auth-brand">
       <img src="logo.png" alt="ATZMA">
@@ -2011,6 +2076,16 @@ function showAuthOverlay() {
 
 function hideAuthOverlay() {
   document.getElementById('auth-overlay').classList.add('hidden');
+}
+
+function setBootMessage(message) {
+  const el = document.getElementById('boot-copy');
+  if (el && message) el.textContent = message;
+}
+
+function finishBootstrap() {
+  document.body.classList.remove('booting');
+  document.getElementById('boot-overlay')?.classList.add('hidden');
 }
 
 function storeAuthSession(session) {
@@ -4079,7 +4154,7 @@ async function bootstrapAuth() {
   const otpVerification = extractOtpVerificationFromUrl();
   if (otpVerification) {
     try {
-      showAuthOverlay();
+      setBootMessage('Verifying your email and restoring secure access.');
       setAuthBusy(true, 'Verifying email...');
       const payload = await apiJSON('/auth/verify', {
         method: 'POST',
@@ -4099,28 +4174,33 @@ async function bootstrapAuth() {
         clearAuthUrlState();
         toast('Email verified and signed in');
         setAuthBusy(false);
+        finishBootstrap();
         return;
       }
       showAuthStatus('Email confirmed. You can sign in now.');
       clearAuthUrlState();
       setAuthBusy(false);
       showAuthOverlay();
+      finishBootstrap();
       return;
     } catch (e) {
       document.getElementById('auth-error').textContent = humanizeAuthError(e.message).error;
       showAuthOverlay();
       setAuthBusy(false);
+      finishBootstrap();
       return;
     }
   }
   const callbackSession = extractAuthSessionFromUrl();
   if (callbackSession) {
     try {
+      setBootMessage('Restoring your secure session.');
       storeAuthSession(callbackSession);
       await hydrateCurrentUser();
       hideAuthOverlay();
       clearAuthUrlState();
       toast('Email confirmed and session restored');
+      finishBootstrap();
       return;
     } catch (_) {
       storeAuthSession(null);
@@ -4132,16 +4212,20 @@ async function bootstrapAuth() {
     applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
     showAuthUrlFeedback();
     showAuthOverlay();
+    finishBootstrap();
     return;
   }
   try {
+    setBootMessage('Restoring your personal trading workspace.');
     storeAuthSession(JSON.parse(raw));
     await hydrateCurrentUser({ showOverlayOnAuthFailure: false });
     hideAuthOverlay();
     clearAuthUrlState();
+    finishBootstrap();
   } catch (_) {
     showAuthUrlFeedback();
     showAuthOverlay();
+    finishBootstrap();
   }
 }
 
