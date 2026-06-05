@@ -1855,6 +1855,7 @@ let currentPreferences = null;
 let currentBrokerConnection = null;
 let currentExecutionJobs = [];
 let authBusy = false;
+let authRefreshPromise = null;
 var S = JSON.parse(localStorage.getItem('atzma_s') || '{}');
 var alpacaAccount = null;
 var toastTimer = null;
@@ -1867,14 +1868,73 @@ function getAuthHeaders(includeJson = false) {
 }
 
 async function apiJSON(path, options = {}) {
-  const res = await fetch(API_BASE + path, options);
+  let res;
+  try {
+    res = await fetch(API_BASE + path, options);
+  } catch (networkError) {
+    const error = new Error(networkError?.message || 'Network request failed');
+    error.status = 0;
+    throw error;
+  }
   let payload = {};
   try { payload = await res.json(); } catch (_) {}
   if (!res.ok) {
     const message = payload.error_description || payload.msg || payload.message || payload.error || ('Request failed: ' + res.status);
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = res.status;
+    error.payload = payload;
+    throw error;
   }
   return payload;
+}
+
+function sessionExpiresSoon(session, skewSeconds = 90) {
+  if (!session?.expires_at) return false;
+  return Number(session.expires_at) <= Math.floor(Date.now() / 1000) + skewSeconds;
+}
+
+function isAuthFailure(error) {
+  const status = Number(error?.status || 0);
+  if (status === 401 || status === 403) return true;
+  const text = String(error?.message || '');
+  return /jwt|token|expired|unauthorized|forbidden|invalid claim|session/i.test(text);
+}
+
+async function refreshAuthSession(force = false) {
+  if (!authSession?.refresh_token) return authSession;
+  if (!force && !sessionExpiresSoon(authSession)) return authSession;
+  if (authRefreshPromise) return authRefreshPromise;
+
+  authRefreshPromise = (async () => {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ refresh_token: authSession.refresh_token }),
+    });
+    let payload = {};
+    try { payload = await res.json(); } catch (_) {}
+    if (!res.ok) {
+      const message = payload.error_description || payload.msg || payload.message || payload.error || ('Refresh failed: ' + res.status);
+      const error = new Error(message);
+      error.status = res.status;
+      throw error;
+    }
+    const sessionPayload = extractSessionPayload(payload);
+    if (!sessionPayload?.access_token) {
+      throw new Error('Refresh did not return a new session.');
+    }
+    storeAuthSession(sessionPayload);
+    return sessionPayload;
+  })();
+
+  try {
+    return await authRefreshPromise;
+  } finally {
+    authRefreshPromise = null;
+  }
 }
 
 function setAuthMode(mode) {
@@ -2113,7 +2173,8 @@ async function resendConfirmation() {
   }
 }
 
-async function hydrateCurrentUser() {
+async function hydrateCurrentUser(options = {}) {
+  const { retryOnAuthFailure = true, showOverlayOnAuthFailure = true } = options;
   if (!authSession?.access_token) {
     currentUser = null;
     currentPreferences = null;
@@ -2121,6 +2182,7 @@ async function hydrateCurrentUser() {
     return null;
   }
   try {
+    await refreshAuthSession(false);
     const payload = await apiJSON('/me', {
       headers: getAuthHeaders(),
       cache: 'no-store',
@@ -2138,14 +2200,27 @@ async function hydrateCurrentUser() {
     updateIdentityUI();
     return payload;
   } catch (e) {
-    storeAuthSession(null);
-    currentUser = null;
-    currentPreferences = null;
-    currentBrokerConnection = null;
-    currentExecutionJobs = [];
+    if (retryOnAuthFailure && isAuthFailure(e) && authSession?.refresh_token) {
+      try {
+        await refreshAuthSession(true);
+        return await hydrateCurrentUser({ retryOnAuthFailure: false, showOverlayOnAuthFailure });
+      } catch (refreshError) {
+        e = refreshError;
+      }
+    }
+    if (isAuthFailure(e)) {
+      storeAuthSession(null);
+      currentUser = null;
+      currentPreferences = null;
+      currentBrokerConnection = null;
+      currentExecutionJobs = [];
+      updateIdentityUI();
+      if (showOverlayOnAuthFailure) showAuthOverlay();
+      throw e;
+    }
+    console.warn('hydrateCurrentUser transient:', e.message);
     updateIdentityUI();
-    showAuthOverlay();
-    throw e;
+    return null;
   }
 }
 
@@ -3977,7 +4052,7 @@ async function bootstrapAuth() {
   }
   try {
     storeAuthSession(JSON.parse(raw));
-    await hydrateCurrentUser();
+    await hydrateCurrentUser({ showOverlayOnAuthFailure: false });
     hideAuthOverlay();
     clearAuthUrlState();
   } catch (_) {
@@ -3991,6 +4066,18 @@ window.addEventListener('hashchange', () => {
   if (!authSession?.access_token && window.location.hash.includes('access_token=')) {
     bootstrapAuth();
   }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !authSession?.refresh_token) return;
+  refreshAuthSession(false)
+    .then(() => hydrateCurrentUser({ showOverlayOnAuthFailure: false }))
+    .catch(err => console.warn('visibility auth refresh:', err.message));
+});
+window.addEventListener('pageshow', () => {
+  if (!authSession?.refresh_token) return;
+  refreshAuthSession(false)
+    .then(() => hydrateCurrentUser({ showOverlayOnAuthFailure: false }))
+    .catch(err => console.warn('pageshow auth refresh:', err.message));
 });
 let authHashRecoveryAttempts = 0;
 const authHashRecoveryTimer = setInterval(() => {
