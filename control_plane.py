@@ -18,12 +18,28 @@ except Exception:  # pragma: no cover - config fallback for isolated use
     CFG = None
 
 
-LOCAL_CONTROL_STATE_FILE = Path("runtime/control_state.local.json")
 DEFAULT_GITHUB_CONTROL_PATH = "runtime/control_state.json"
 DEFAULT_GITHUB_WORKFLOW = "trade.yml"
 DEFAULT_GITHUB_BRANCH = "main"
 USER_AGENT = "ATZMA-ControlPlane/1.0"
 DEFAULT_CONTROL_API_URL = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api/control"
+
+
+def runtime_dir() -> Path:
+    return Path(os.getenv("ATZMA_RUNTIME_DIR", Path(__file__).resolve().parent / "runtime"))
+
+
+def local_control_state_file() -> Path:
+    legacy = globals().get("LOCAL_CONTROL_STATE_FILE")
+    if isinstance(legacy, Path):
+        return legacy
+    override = os.getenv("ATZMA_LOCAL_CONTROL_STATE_FILE", "").strip()
+    if override:
+        return Path(override)
+    return runtime_dir() / "control_state.local.json"
+
+
+LOCAL_CONTROL_STATE_FILE = local_control_state_file()
 
 
 def _cfg_get(*keys, default=None):
@@ -70,9 +86,10 @@ def github_default_branch() -> str:
 
 
 def control_api_url() -> str:
+    if "ATZMA_CONTROL_API_URL" in os.environ:
+        return os.getenv("ATZMA_CONTROL_API_URL", "").strip()
     return (
-        os.getenv("ATZMA_CONTROL_API_URL", "").strip()
-        or str(_cfg_get("supabase", "control_api_url", default="")).strip()
+        str(_cfg_get("supabase", "control_api_url", default="")).strip()
         or DEFAULT_CONTROL_API_URL
     )
 
@@ -177,8 +194,9 @@ def load_remote_control_state() -> dict:
 
 
 def load_local_control_state() -> dict:
-    if LOCAL_CONTROL_STATE_FILE.exists():
-        with open(LOCAL_CONTROL_STATE_FILE, encoding="utf-8") as handle:
+    state_file = local_control_state_file()
+    if state_file.exists():
+        with open(state_file, encoding="utf-8") as handle:
             state = json.load(handle)
         normalized = normalize_control_state(state)
         normalized["_source"] = "local_file"
@@ -198,9 +216,10 @@ def load_control_state(prefer_remote: bool = True) -> dict:
 
 
 def save_local_control_state(state: dict) -> dict:
-    LOCAL_CONTROL_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    state_file = local_control_state_file()
+    state_file.parent.mkdir(parents=True, exist_ok=True)
     normalized = normalize_control_state(state)
-    with open(LOCAL_CONTROL_STATE_FILE, "w", encoding="utf-8") as handle:
+    with open(state_file, "w", encoding="utf-8") as handle:
         json.dump(normalized, handle, ensure_ascii=True, indent=2, sort_keys=True)
     normalized["_source"] = "local_file"
     return normalized

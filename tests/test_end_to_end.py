@@ -28,6 +28,9 @@ def _make_broker(monkeypatch, tmp_path, trading_mock):
     monkeypatch.setenv("ALPACA_API_KEY", "FAKE_KEY")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "FAKE_SECRET")
     monkeypatch.setenv("ATZMA_RUNTIME_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setenv("ATZMA_CONTROL_API_URL", "")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "")
+    monkeypatch.setenv("GITHUB_TOKEN", "")
 
     import broker_api as ba
 
