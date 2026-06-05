@@ -1556,14 +1556,7 @@ select.m-input { appearance:none; cursor:pointer; }
   <div class="modal">
     <div class="m-handle"></div>
     <div class="m-title">New Alert</div>
-    <select class="m-input" id="m-ticker">
-      <option>AAPL – Apple Inc.</option>
-      <option>NVDA – NVIDIA Corp.</option>
-      <option>MSFT – Microsoft</option>
-      <option>JPM – JPMorgan Chase</option>
-      <option>META – Meta Platforms</option>
-      <option>SPY – S&P 500 ETF</option>
-    </select>
+    <select class="m-input" id="m-ticker"></select>
     <select class="m-input" id="m-type">
       <option>Price rises above →</option>
       <option>Price drops below ↓</option>
@@ -2677,13 +2670,46 @@ async function requestPersonalRun() {
   }
 }
 
+const TRADING_UNIVERSE = [
+  'AAPL', 'MSFT', 'GOOGL', 'NVDA', 'AMZN',
+  'META', 'TSLA', 'JPM', 'V', 'BAC',
+  'JNJ', 'UNH', 'XOM', 'WMT', 'SPY',
+];
+
 // Company name mapping
 const NAMES = {
-  AAPL:'Apple Inc.', NVDA:'NVIDIA Corp.', MSFT:'Microsoft', JPM:'JPMorgan Chase',
-  META:'Meta Platforms', GOOGL:'Alphabet (Google)', TSLA:'Tesla Inc.', BAC:'Bank of America',
-  JNJ:'Johnson & Johnson', SPY:'S&P 500 ETF', UNH:'UnitedHealth', WMT:'Walmart Inc.',
-  XOM:'ExxonMobil', AMZN:'Amazon', NFLX:'Netflix', AMD:'AMD', INTC:'Intel',
+  AAPL:'Apple Inc.',
+  MSFT:'Microsoft',
+  GOOGL:'Alphabet (Google)',
+  NVDA:'NVIDIA Corp.',
+  AMZN:'Amazon',
+  META:'Meta Platforms',
+  TSLA:'Tesla Inc.',
+  JPM:'JPMorgan Chase',
+  V:'Visa Inc.',
+  BAC:'Bank of America',
+  JNJ:'Johnson & Johnson',
+  UNH:'UnitedHealth',
+  XOM:'ExxonMobil',
+  WMT:'Walmart Inc.',
+  SPY:'S&P 500 ETF',
+  NFLX:'Netflix',
+  AMD:'AMD',
+  INTC:'Intel',
 };
+
+function populateTickerOptions() {
+  const select = document.getElementById('m-ticker');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = TRADING_UNIVERSE.map((ticker) => {
+    const label = NAMES[ticker] || ticker;
+    return `<option value="${ticker}">${ticker} – ${label}</option>`;
+  }).join('');
+  if (current && TRADING_UNIVERSE.includes(current)) {
+    select.value = current;
+  }
+}
 
 // Dynamic stocks — populated from Alpaca positions
 let STOCKS = [];
@@ -3615,6 +3641,7 @@ function renderAlerts() {
   if (alertCount) alertCount.textContent = newCount + ' new';
 }
 renderAlerts();
+populateTickerOptions();
 
 function dismissAlert(i) {
   alertsData.splice(i,1);

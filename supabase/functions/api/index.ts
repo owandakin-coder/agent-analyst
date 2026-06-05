@@ -737,7 +737,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (path === "/quotes") {
-      const symbolsStr = qs.get("symbols") ?? "AAPL,NVDA,MSFT,JPM,META";
+      const symbolsStr = qs.get("symbols") ?? "AAPL,MSFT,GOOGL,NVDA,AMZN,META,TSLA,JPM,V,BAC,JNJ,UNH,XOM,WMT,SPY";
       const symbols = symbolsStr.split(",").map((s) => s.trim()).filter(Boolean);
       const quotes = await Promise.all(symbols.map(fetchYF));
       return json({ quotes });
