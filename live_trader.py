@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ import pandas as pd
 
 from control_plane import can_trade, load_control_state
 from decision_journal import write_last_decision
+from execution_runtime import emit_execution_event, emit_risk_event
 from multi_agent import MultiAgentDecisionEngine
 from notifications import send_operator_alert
 from regime_detector import RegimeDetector
@@ -33,6 +35,35 @@ if TYPE_CHECKING:
     from ensemble_agent import EnsembleAgent
 
 log = logging.getLogger("LiveTrader")
+
+
+def _fail_closed_control_enabled() -> bool:
+    return os.getenv("ATZMA_FAIL_CLOSED_CONTROL", "1").strip().lower() not in {"0", "false", "no"}
+
+
+def _require_fresh_quotes() -> bool:
+    return os.getenv("ATZMA_REQUIRE_FRESH_QUOTES", "1").strip().lower() not in {"0", "false", "no"}
+
+
+def _fresh_quote_max_age_seconds() -> int:
+    try:
+        return max(5, int(os.getenv("ATZMA_MAX_QUOTE_AGE_SECONDS", "60")))
+    except Exception:
+        return 60
+
+
+def _daily_realized_loss_limit() -> float:
+    try:
+        return max(0.0, float(os.getenv("ATZMA_DAILY_REALIZED_LOSS_LIMIT", "2500")))
+    except Exception:
+        return 2500.0
+
+
+def _daily_unrealized_loss_limit() -> float:
+    try:
+        return max(0.0, float(os.getenv("ATZMA_DAILY_UNREALIZED_LOSS_LIMIT", "4000")))
+    except Exception:
+        return 4000.0
 
 # ─── קבועים (מ-config.yaml) ─────────────────────────────────────────────────
 try:
@@ -179,16 +210,28 @@ class LiveTrader:
         בנה תצפית → חזה פעולה → בדוק סיכון → שלח פקודות.
         """
         # ── נתונים עדכניים ──────────────────────────────────────────────────
+        emit_execution_event("execution_started", {"tickers": self.tickers, "initial_capital": self.initial_capital})
         try:
             state = load_control_state()
             allowed, reason = can_trade(state)
+            emit_execution_event("control_validated", {
+                "allowed": allowed,
+                "reason": reason,
+                "mode": state.get("mode"),
+                "trading_enabled": state.get("trading_enabled"),
+                "emergency_stop": state.get("emergency_stop"),
+                "command_version": state.get("command_version"),
+            })
         except Exception as exc:
             log.warning(f"Control plane unavailable: {exc}")
-            allowed, reason = True, None
+            allowed, reason = (False, "control_plane_unavailable") if _fail_closed_control_enabled() else (True, None)
 
         if not allowed:
             status = "emergency stop" if reason == "emergency_stop" else "paused"
+            if reason == "control_plane_unavailable":
+                status = "control plane unavailable"
             log.warning(f"Trading skipped by control plane: {status}")
+            emit_execution_event("execution_blocked", {"reason": reason or status})
             self._telegram(
                 f"⏸ *Agent skipped* — control plane is {status}.\n"
                 f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -204,12 +247,17 @@ class LiveTrader:
 
         # ── מחירים נוכחיים ──────────────────────────────────────────────────
         current_prices = self.broker.get_latest_prices(self.tickers)
+        quote_info = self.broker.get_latest_quotes_info(self.tickers) if hasattr(self.broker, "get_latest_quotes_info") else {}
         if not current_prices:
             current_prices = {
                 t: float(fresh_data[t]["close"].iloc[-1])
                 for t in self.tickers if t in fresh_data
             }
         current_prices = self.validate_prices(current_prices, fresh_data)
+        if not self._quotes_are_fresh(quote_info, current_prices):
+            emit_execution_event("execution_aborted", {"reason": "stale_quotes", "quotes": quote_info})
+            log.error("Aborting execution due to stale or missing live quotes.")
+            return
         log.info(f"Prices: {current_prices}")
 
         # ── שווי תיק עדכני ──────────────────────────────────────────────────
@@ -234,10 +282,19 @@ class LiveTrader:
         # ── ניהול סיכונים ───────────────────────────────────────────────────
         prev_halted = self.risk_manager.is_halted
         risk_level  = self.risk_manager.update(net_worth)
+        emit_risk_event("risk_updated", {"risk_level": risk_level.value, "drawdown": drawdown, "net_worth": net_worth})
+        if self._enforce_daily_loss_limits(snapshot, net_worth):
+            emit_risk_event("daily_loss_breached", {
+                "net_worth": net_worth,
+                "drawdown": drawdown,
+            })
+            log.warning("Daily loss circuit breaker triggered. Skipping this cycle.")
+            return
         if self.risk_manager.is_halted:
             log.warning("TRADING HALTED by RiskManager. Skipping this cycle.")
             if not prev_halted:
                 self._notify_halt(net_worth, drawdown)
+            emit_risk_event("risk_halted", {"drawdown": drawdown, "net_worth": net_worth})
             return
 
         # ── Regime detection ─────────────────────────────────────────────────
@@ -250,6 +307,11 @@ class LiveTrader:
                 f"(conf={regime_signal.confidence:.0%}, multiplier={multiplier}) | "
                 f"{regime_signal.description}"
             )
+            emit_execution_event("regime_detected", {
+                "regime": regime_signal.regime.value,
+                "confidence": regime_signal.confidence,
+                "description": regime_signal.description,
+            })
 
         # ── Alternative data ─────────────────────────────────────────────────
         alt_data = self._alt_fetcher.fetch_all()
@@ -288,6 +350,12 @@ class LiveTrader:
         )
         action = decision_bundle.final_action_vector(self.tickers)
         log.info("Multi-agent summary: %s", decision_bundle.top_summary())
+        emit_execution_event("decision_ready", {
+            "regime": decision_bundle.regime,
+            "strategy_mode": decision_bundle.strategy_mode,
+            "summary": decision_bundle.top_summary(),
+            "decisions": [decision.as_dict() for decision in decision_bundle.decisions],
+        })
 
         # התאמת גודל פוזיציה לפי סיכון (with regime multiplier + kelly + correlation)
         price_history = {t: fresh_data[t]["close"] for t in self.tickers if t in fresh_data}
@@ -299,23 +367,40 @@ class LiveTrader:
         log.info(f"Scaled action: {action.round(3)}")
 
         # ── המרה לפקודות ────────────────────────────────────────────────────
-        self._execute_actions(action, current_prices, cash, positions)
+        broker_orders = self._execute_actions(action, current_prices, cash, positions)
         self.last_cycle_result = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "model_version": os.getenv("ATZMA_MODEL_VERSION", "unknown"),
+            "strategy_version": os.getenv("ATZMA_STRATEGY_VERSION", "default"),
             "regime": decision_bundle.regime,
             "strategy_mode": decision_bundle.strategy_mode,
             "net_worth": float(net_worth),
             "cash": float(cash),
             "drawdown": float(drawdown),
+            "risk_level": self.risk_manager.risk_level.value,
+            "market_data_source": "alpaca_latest_quote",
+            "broker_snapshot_hash": self._snapshot_hash(snapshot),
+            "market_snapshot_hash": self._snapshot_hash({"prices": current_prices, "quotes": quote_info}),
+            "feature_snapshot_hash": self._snapshot_hash({"tickers": self.tickers, "obs_shape": list(obs.shape)}),
+            "broker_snapshot": snapshot,
+            "market_snapshot": self._build_market_snapshot(fresh_data, current_prices, quote_info),
+            "feature_snapshot": {
+                "observation": obs.tolist(),
+                "tickers": list(self.tickers),
+                "window_size": WINDOW_SIZE,
+                "feature_columns": list(FEATURE_COLS),
+            },
             "raw_action": [float(x) for x in raw_action.tolist()],
             "scaled_action": [float(x) for x in action.tolist()],
             "summary": decision_bundle.top_summary(),
             "decisions": [decision.as_dict() for decision in decision_bundle.decisions],
+            "broker_orders": broker_orders,
         }
         write_last_decision(self.last_cycle_result)
 
         # ── דוח יומי לטלגרם ─────────────────────────────────────────────────
         self._send_daily_summary(net_worth, cash, drawdown, action, current_prices, decision_bundle)
+        emit_execution_event("execution_completed", {"summary": self.last_cycle_result.get("summary"), "broker_orders": broker_orders})
         return self.last_cycle_result
 
     def _seconds_until_next_open(self, buffer_minutes: int = 5) -> float:
@@ -387,6 +472,31 @@ class LiveTrader:
                     )
         return validated
 
+    def _quotes_are_fresh(self, quote_info: dict[str, dict], prices: dict[str, float]) -> bool:
+        if not _require_fresh_quotes():
+            return True
+        if not prices:
+            return False
+        now = datetime.now(timezone.utc)
+        max_age = _fresh_quote_max_age_seconds()
+        for ticker in self.tickers:
+            if ticker not in prices:
+                return False
+            info = quote_info.get(ticker) or {}
+            timestamp = info.get("timestamp")
+            if not timestamp:
+                return False
+            try:
+                quote_time = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+            except Exception:
+                return False
+            if quote_time.tzinfo is None:
+                quote_time = quote_time.replace(tzinfo=timezone.utc)
+            age = (now - quote_time.astimezone(timezone.utc)).total_seconds()
+            if age < 0 or age > max_age:
+                return False
+        return True
+
     # ──────────────────────────────────────────────────────────────────────────
     # בניית תצפית
     # ──────────────────────────────────────────────────────────────────────────
@@ -444,7 +554,7 @@ class LiveTrader:
         prices: dict[str, float],
         cash: float,
         positions: dict[str, float],
-    ):
+    ) -> list[dict]:
         """
         ממיר וקטור פעולות [-1,1] לפקודות קנייה/מכירה בפועל.
 
@@ -454,6 +564,7 @@ class LiveTrader:
         - ריכוזיות > 30%     → מדלג על קנייה
         - אחרת → החזק
         """
+        order_events: list[dict] = []
         buy_threshold = BUY_THRESHOLD
         sell_threshold = SELL_THRESHOLD
 
@@ -480,6 +591,7 @@ class LiveTrader:
                     f"from high ${trail_high:.2f} → now ${price:.2f}. Selling all."
                 )
                 result = self.broker.sell(ticker, int(held), price)
+                order_events.append({"event_type": "trailing_stop_exit", **result})
                 if result.get("status") not in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
                     # Record Kelly outcome
                     entry = self._entry_prices.get(ticker, 0.0)
@@ -507,6 +619,7 @@ class LiveTrader:
                 shares_to_sell = max(1, int(held * abs(act)))
                 log.info(f"Action {act:.3f} -> SELL {shares_to_sell} {ticker} @ ${price:.2f}")
                 result = self.broker.sell(ticker, shares_to_sell, price)
+                order_events.append({"event_type": "sell_signal", **result})
                 if result.get("status") in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
                     log.warning(f"SELL {ticker} failed: {result}")
                 else:
@@ -572,6 +685,7 @@ class LiveTrader:
 
             log.info(f"Action {act:.3f} -> BUY {shares_to_buy} {ticker} @ ${price:.2f}")
             result = self.broker.buy(ticker, shares_to_buy, price)
+            order_events.append({"event_type": "buy_signal", **result})
             if result.get("status") in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
                 log.warning(f"BUY {ticker} failed: {result}")
             else:
@@ -590,6 +704,8 @@ class LiveTrader:
                     positions[ticker] = total_shares
                     cash = max(0.0, cash - shares_to_buy * price)
 
+        return order_events
+
     def _reconcile_snapshot(self) -> dict | None:
         try:
             snapshot = self.broker.reconcile_account_state()
@@ -603,6 +719,59 @@ class LiveTrader:
         if "cash" not in snapshot or "positions" not in snapshot:
             log.error("Account reconciliation failed: missing cash or positions")
             return None
+        return snapshot
+
+    def _enforce_daily_loss_limits(self, snapshot: dict, net_worth: float) -> bool:
+        position_details = snapshot.get("position_details") or {}
+        unrealized_pnl = 0.0
+        if isinstance(position_details, dict):
+            for details in position_details.values():
+                if isinstance(details, dict):
+                    unrealized_pnl += float(details.get("unrealized_pl", 0.0) or 0.0)
+        baseline = float(snapshot.get("equity", net_worth) or net_worth) - unrealized_pnl
+        realized_pnl = float(net_worth) - baseline - unrealized_pnl
+        realized_loss = max(0.0, -realized_pnl)
+        unrealized_loss = max(0.0, -unrealized_pnl)
+        emit_risk_event("daily_loss_state", {
+            "trading_day": datetime.now(timezone.utc).date().isoformat(),
+            "baseline_equity": baseline,
+            "current_equity": net_worth,
+            "realized_pnl": realized_pnl,
+            "unrealized_pnl": unrealized_pnl,
+            "realized_loss_limit": _daily_realized_loss_limit(),
+            "unrealized_loss_limit": _daily_unrealized_loss_limit(),
+        })
+        return realized_loss >= _daily_realized_loss_limit() or unrealized_loss >= _daily_unrealized_loss_limit()
+
+    def _snapshot_hash(self, payload: dict) -> str:
+        import hashlib
+        import json
+
+        encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _build_market_snapshot(
+        self,
+        fresh_data: dict[str, pd.DataFrame],
+        current_prices: dict[str, float],
+        quote_info: dict[str, dict],
+    ) -> dict:
+        snapshot: dict[str, dict] = {
+            "prices": {ticker: float(price) for ticker, price in current_prices.items()},
+            "quotes": quote_info,
+            "tickers": list(self.tickers),
+        }
+        bars: dict[str, dict] = {}
+        for ticker, df in fresh_data.items():
+            if df is None or df.empty:
+                continue
+            tail = df.tail(WINDOW_SIZE).copy()
+            bars[ticker] = {
+                "columns": [str(col) for col in tail.columns],
+                "index": [str(idx) for idx in tail.index.tolist()],
+                "rows": tail.astype(float, errors="ignore").replace({np.nan: None}).values.tolist(),
+            }
+        snapshot["bars"] = bars
         return snapshot
 
     # ──────────────────────────────────────────────────────────────────────────

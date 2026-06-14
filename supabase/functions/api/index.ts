@@ -18,6 +18,8 @@ const GITHUB_REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "owandakin-coder/agent-
 const GITHUB_BRANCH = Deno.env.get("ATZMA_GITHUB_BRANCH") ?? "main";
 const CONTROL_PATH = Deno.env.get("ATZMA_CONTROL_STATE_PATH") ?? "runtime/control_state.json";
 const TRADE_WORKFLOW = Deno.env.get("ATZMA_TRADE_WORKFLOW") ?? "trade.yml";
+const WORKER_SHARED_TOKEN = Deno.env.get("ATZMA_WORKER_SHARED_TOKEN") ?? "";
+const ALLOW_LEGACY_CONTROL_FALLBACK = (Deno.env.get("ATZMA_ALLOW_LEGACY_CONTROL_FALLBACK") ?? "").toLowerCase() === "1";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -54,7 +56,57 @@ type BrokerConnectionRow = {
   last_verified_status: string;
   last_error: string | null;
   metadata: JsonMap | null;
+  key_version?: number | null;
+  kms_key_id?: string | null;
+  encrypted_data_key?: string | null;
+  rotated_at?: string | null;
 };
+
+type ExecutionRequestRow = {
+  id: string;
+  user_id: string;
+  broker_connection_id: string | null;
+  strategy_id: string;
+  trigger_type: string;
+  requested_mode: string;
+  idempotency_key: string;
+  priority: number;
+  status: string;
+  actor: string | null;
+  payload: JsonMap | null;
+  result: JsonMap | null;
+  error_text: string | null;
+  run_after: string;
+  attempt_count: number;
+  max_attempts: number;
+  lease_expires_at: string | null;
+  worker_id: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type BrokerOrderRow = {
+  id: string;
+  user_id: string;
+  execution_request_id: string | null;
+  broker_connection_id: string | null;
+  broker_name: string;
+  broker_order_id: string | null;
+  client_order_id: string | null;
+  symbol: string | null;
+  side: string | null;
+  quantity: number | null;
+  requested_price: number | null;
+  status: string;
+  idempotency_key?: string | null;
+  payload: JsonMap | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type TransitionResult = BrokerOrderRow[];
 
 type AlpacaSession = {
   apiKey: string;
@@ -244,8 +296,8 @@ function defaultControlState() {
     trading_enabled: true,
     emergency_stop: false,
     status: "running",
-    executor: "github_actions",
-    executor_label: "GitHub Actions",
+    executor: "worker_pool",
+    executor_label: "ATZMA Worker Pool",
     last_command: "bootstrap",
     last_command_at: now,
     updated_at: now,
@@ -270,6 +322,25 @@ function normalizeControlState(input: JsonMap | null | undefined) {
 
 async function loadControlState(): Promise<JsonMap> {
   try {
+    const stateRes = await restAdmin("/control_state?id=eq.global&select=*");
+    if (stateRes.ok) {
+      const rows = await stateRes.json() as Array<{ state?: JsonMap; updated_by?: string; command_version?: number }>;
+      const row = rows[0];
+      if (row?.state) {
+        return {
+          ...normalizeControlState(row.state),
+          _source: "control_state",
+          updated_by: row.updated_by ?? null,
+          command_version: row.command_version ?? 1,
+          can_dispatch: !!GITHUB_TOKEN,
+        };
+      }
+    }
+  } catch {
+    if (!ALLOW_LEGACY_CONTROL_FALLBACK) throw new Error("Control state unavailable");
+  }
+  if (!ALLOW_LEGACY_CONTROL_FALLBACK) throw new Error("Authoritative control state missing");
+  try {
     const dbRes = await restAdmin("/audit_events?event_type=eq.control_state&select=event_payload,created_at&order=created_at.desc&limit=1");
     if (dbRes.ok) {
       const rows = await dbRes.json() as Array<{ event_payload?: JsonMap }>;
@@ -291,6 +362,26 @@ async function loadControlState(): Promise<JsonMap> {
 
 async function saveControlState(state: JsonMap, actor: string): Promise<JsonMap> {
   const normalized = normalizeControlState(state);
+  try {
+    const controlRes = await restAdmin("/control_state?id=eq.global", {
+      method: "PATCH",
+      headers: { "Prefer": "return=representation" },
+      body: JSON.stringify({
+        state: normalized,
+        updated_at: new Date().toISOString(),
+        updated_by: actor,
+        command_version: Number(normalized.command_version ?? 1),
+      }),
+    });
+    if (controlRes.ok) {
+      const saved = { ...normalized, _source: "control_state", can_dispatch: !!GITHUB_TOKEN };
+      await appendControlEvent("control_state_updated", saved, null, null, Number(normalized.command_version ?? 1));
+      return saved;
+    }
+  } catch {
+    if (!ALLOW_LEGACY_CONTROL_FALLBACK) throw new Error("Could not persist authoritative control state");
+  }
+  if (!ALLOW_LEGACY_CONTROL_FALLBACK) throw new Error("Authoritative control state write failed");
   try {
     const res = await restAdmin("/audit_events", {
       method: "POST",
@@ -434,6 +525,24 @@ async function restAdmin(path: string, init: RequestInit = {}): Promise<Response
   return fetchWithRetry(`${SUPABASE_URL}/rest/v1${path}`, { ...init, headers });
 }
 
+async function restRpc<T>(fn: string, payload: JsonMap = {}): Promise<T> {
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY secret is missing");
+  const res = await fetchWithRetry(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_SERVICE_ROLE_KEY,
+      "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await readJsonSafe<T | JsonMap>(res);
+  if (!res.ok) {
+    throw new Error(extractServiceError(body, `RPC ${fn} failed`));
+  }
+  return body as T;
+}
+
 async function readJsonSafe<T>(res: Response): Promise<T | null> {
   try {
     return await res.json() as T;
@@ -517,9 +626,206 @@ async function audit(userId: string, eventType: string, payload: JsonMap = {}) {
   }
 }
 
+async function appendExecutionEvent(userId: string, executionRequestId: string, stage: string, payload: JsonMap = {}) {
+  await restAdmin("/execution_events", {
+    method: "POST",
+    headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({
+      user_id: userId,
+      execution_request_id: executionRequestId,
+      stage,
+      payload,
+    }),
+  });
+}
+
+async function appendControlEvent(eventType: string, payload: JsonMap = {}, executionRequestId?: string | null, userId?: string | null, commandVersion?: number | null) {
+  await restAdmin("/control_events", {
+    method: "POST",
+    headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({
+      user_id: userId ?? null,
+      execution_request_id: executionRequestId ?? null,
+      command_version: commandVersion ?? null,
+      event_type: eventType,
+      payload,
+    }),
+  });
+}
+
+async function appendRiskEvent(userId: string, executionRequestId: string, eventType: string, payload: JsonMap = {}) {
+  await restAdmin("/risk_events", {
+    method: "POST",
+    headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({
+      user_id: userId,
+      execution_request_id: executionRequestId,
+      event_type: eventType,
+      risk_level: typeof payload.risk_level === "string" ? payload.risk_level : null,
+      drawdown: typeof payload.drawdown === "number" ? payload.drawdown : null,
+      payload,
+    }),
+  });
+  if (eventType === "daily_loss_state" || eventType === "daily_loss_breached") {
+    const tradingDay = typeof payload.trading_day === "string" ? payload.trading_day : new Date().toISOString().slice(0, 10);
+    await restAdmin("/daily_risk_state", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        user_id: userId,
+        trading_day: tradingDay,
+        baseline_equity: Number(payload.baseline_equity ?? 0),
+        current_equity: Number(payload.current_equity ?? 0),
+        realized_pnl: Number(payload.realized_pnl ?? 0),
+        unrealized_pnl: Number(payload.unrealized_pnl ?? 0),
+        realized_loss_limit: Number(payload.realized_loss_limit ?? 0),
+        unrealized_loss_limit: Number(payload.unrealized_loss_limit ?? 0),
+        breached: eventType === "daily_loss_breached",
+        breached_at: eventType === "daily_loss_breached" ? new Date().toISOString() : null,
+        reset_required: eventType === "daily_loss_breached",
+        metadata: payload,
+      }),
+    });
+  }
+}
+
+async function appendPositionSnapshot(userId: string, executionRequestId: string, snapshotType: string, payload: JsonMap = {}) {
+  await restAdmin("/position_snapshots", {
+    method: "POST",
+    headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({
+      user_id: userId,
+      execution_request_id: executionRequestId,
+      snapshot_type: snapshotType,
+      snapshot_hash: typeof payload.snapshot_hash === "string" ? payload.snapshot_hash : null,
+      payload,
+    }),
+  });
+}
+
+async function upsertBrokerOrder(request: ExecutionRequestRow, payload: JsonMap): Promise<BrokerOrderRow | null> {
+  const userId = String(request.user_id);
+  const clientOrderId = typeof payload.client_order_id === "string" ? payload.client_order_id : null;
+  if (!clientOrderId) return null;
+  const existingRes = await restAdmin(`/broker_orders?client_order_id=eq.${encodeURIComponent(clientOrderId)}&select=*`);
+  const existingRows = await readJsonSafe<BrokerOrderRow[] | JsonMap>(existingRes);
+  if (existingRes.ok && Array.isArray(existingRows) && existingRows[0]) {
+    return existingRows[0];
+  }
+  const res = await restAdmin("/broker_orders", {
+    method: "POST",
+    headers: { "Prefer": "return=representation" },
+    body: JSON.stringify({
+      user_id: userId,
+      execution_request_id: request.id,
+      broker_connection_id: request.broker_connection_id,
+      broker_name: typeof payload.broker_name === "string" ? payload.broker_name : "alpaca",
+      broker_order_id: typeof payload.order_id === "string" ? payload.order_id : null,
+      client_order_id: clientOrderId,
+      symbol: typeof payload.ticker === "string" ? payload.ticker : null,
+      side: typeof payload.side === "string" ? payload.side : null,
+      quantity: typeof payload.shares === "number" ? payload.shares : null,
+      requested_price: typeof payload.requested_price === "number"
+        ? payload.requested_price
+        : (typeof payload.price === "number" ? payload.price : null),
+      status: typeof payload.status === "string" ? payload.status.toLowerCase() : "created",
+      idempotency_key: typeof payload.idempotency_key === "string" ? payload.idempotency_key : null,
+      submitted_at: typeof payload.status === "string" && ["submit_requested", "submit_acknowledged"].includes(payload.status) ? new Date().toISOString() : null,
+      reconciled_at: typeof payload.status === "string" && ["reconciled", "filled", "cancelled", "rejected"].includes(payload.status) ? new Date().toISOString() : null,
+      payload,
+    }),
+  });
+  const rows = await readJsonSafe<BrokerOrderRow[] | JsonMap>(res);
+  if (!res.ok) {
+    throw new Error(extractServiceError(rows, "Could not persist broker order"));
+  }
+  return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+async function patchBrokerOrderByClientOrderId(clientOrderId: string, patch: JsonMap): Promise<BrokerOrderRow | null> {
+  const nextStatus = typeof patch.status === "string" ? patch.status : null;
+  if (!nextStatus) {
+    throw new Error("Missing broker order status transition");
+  }
+  const rows = await restRpc<TransitionResult>("transition_broker_order_state", {
+    p_client_order_id: clientOrderId,
+    p_next_status: nextStatus,
+    p_payload: typeof patch.payload === "object" && patch.payload ? patch.payload : {},
+    p_broker_order_id: typeof patch.broker_order_id === "string" ? patch.broker_order_id : null,
+    p_event_type: typeof patch.event_type === "string" ? patch.event_type : null,
+  });
+  return rows[0] ?? null;
+}
+
+async function appendBrokerOrderEvent(userId: string, executionRequestId: string, brokerOrderId: string | null, eventType: string, payload: JsonMap = {}) {
+  await restAdmin("/broker_order_events", {
+    method: "POST",
+    headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({
+      user_id: userId,
+      broker_order_id: brokerOrderId,
+      execution_request_id: executionRequestId,
+      event_type: eventType,
+      payload,
+    }),
+  });
+}
+
+async function reconcileBrokerOrdersForRequest(request: ExecutionRequestRow, brokerRow: BrokerConnectionRow, clientOrderId?: string | null): Promise<JsonMap[]> {
+  const session = {
+    apiKey: await decryptSecret(brokerRow.api_key_encrypted),
+    secretKey: await decryptSecret(brokerRow.secret_key_encrypted),
+    baseUrl: brokerRow.base_url,
+    scoped: true,
+    mode: brokerRow.trading_mode,
+  } satisfies AlpacaSession;
+  const filter = clientOrderId
+    ? `client_order_id=eq.${encodeURIComponent(clientOrderId)}`
+    : `execution_request_id=eq.${encodeURIComponent(request.id)}&status=in.(submit_requested,submit_acknowledged,partial_fill,reconciliation_pending,cancel_requested,reconciled)`;
+  const orderRes = await restAdmin(`/broker_orders?${filter}&select=*`);
+  const orders = await orderRes.json() as BrokerOrderRow[];
+  const reconciled: JsonMap[] = [];
+  for (const order of orders) {
+    const currentClientOrderId = String(order.client_order_id ?? "").trim();
+    if (!currentClientOrderId) continue;
+    try {
+      const brokerOrder = await alpacaGetWithSession(session, "/orders:by_client_order_id", `client_order_id=${encodeURIComponent(currentClientOrderId)}`) as JsonMap;
+      const brokerStatus = String(brokerOrder.status ?? "").toLowerCase();
+      let mappedStatus = "reconciled";
+      if (brokerStatus === "partially_filled") mappedStatus = "partial_fill";
+      else if (brokerStatus === "filled") mappedStatus = "filled";
+      else if (brokerStatus === "canceled") mappedStatus = "cancelled";
+      else if (brokerStatus === "rejected") mappedStatus = "rejected";
+      else if (brokerStatus === "accepted" || brokerStatus === "new" || brokerStatus === "pending_new") mappedStatus = "submit_acknowledged";
+      const patched = await patchBrokerOrderByClientOrderId(currentClientOrderId, {
+        broker_order_id: String(brokerOrder.id ?? order.broker_order_id ?? ""),
+        status: mappedStatus,
+        payload: brokerOrder,
+        event_type: "reconciled_poll",
+      });
+      await appendBrokerOrderEvent(String(request.user_id), request.id, patched?.id ?? order.id, mappedStatus, brokerOrder);
+      reconciled.push({ client_order_id: currentClientOrderId, status: mappedStatus });
+    } catch (error) {
+      await appendBrokerOrderEvent(String(request.user_id), request.id, order.id, "reconciliation_mismatch", {
+        client_order_id: currentClientOrderId,
+        error: String(error),
+      });
+      reconciled.push({ client_order_id: currentClientOrderId, status: "mismatch", error: String(error) });
+    }
+  }
+  await appendExecutionEvent(String(request.user_id), request.id, "reconciliation_completed", { orders: reconciled });
+  return reconciled;
+}
+
 async function fetchBrokerConnection(userId: string): Promise<BrokerConnectionRow | null> {
   const res = await restAdmin(`/broker_connections?user_id=eq.${encodeURIComponent(userId)}&select=*`);
   const rows = await res.json() as BrokerConnectionRow[];
+  return rows[0] ?? null;
+}
+
+async function fetchExecutionRequest(requestId: string): Promise<ExecutionRequestRow | null> {
+  const res = await restAdmin(`/execution_requests?id=eq.${encodeURIComponent(requestId)}&select=*`);
+  const rows = await res.json() as ExecutionRequestRow[];
   return rows[0] ?? null;
 }
 
@@ -626,6 +932,26 @@ function sanitizeBrokerError(error: unknown): string {
   return "Broker disconnected";
 }
 
+function sanitizeExecutionRequest(request: ExecutionRequestRow | JsonMap | null | undefined): JsonMap | null {
+  if (!request) return null;
+  const payload = typeof request.payload === "object" && request.payload ? { ...(request.payload as JsonMap) } : {};
+  delete payload.claim_token;
+  return { ...request, payload };
+}
+
+function buildExecutionIdempotencyKey(userId: string, brokerConnectionId: string, requestedMode: string, triggerType: string): string {
+  const bucket = Math.floor(Date.now() / (JOB_DEDUPE_WINDOW_MINUTES * 60_000));
+  return `${triggerType}:${userId}:${brokerConnectionId}:${requestedMode}:${bucket}`;
+}
+
+async function findOpenTradeRequest(userId: string): Promise<ExecutionRequestRow | null> {
+  const since = new Date(Date.now() - (JOB_DEDUPE_WINDOW_MINUTES * 60_000)).toISOString();
+  const path = `/execution_requests?user_id=eq.${encodeURIComponent(userId)}&strategy_id=eq.default&status=in.(queued,leased,running,retrying,reconcile_pending)&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1`;
+  const res = await restAdmin(path);
+  const rows = await res.json() as ExecutionRequestRow[];
+  return rows[0] ?? null;
+}
+
 async function findOpenTradeJob(userId: string): Promise<JsonMap | null> {
   const since = new Date(Date.now() - (JOB_DEDUPE_WINDOW_MINUTES * 60_000)).toISOString();
   const path = `/execution_jobs?user_id=eq.${encodeURIComponent(userId)}&job_type=eq.trade_once&status=in.(queued,running)&requested_at=gte.${encodeURIComponent(since)}&order=requested_at.desc&limit=1`;
@@ -654,6 +980,113 @@ async function verifyAlpacaCredentials(apiKey: string, secretKey: string, baseUr
 function workerAuthorized(req: Request, expectedToken = ""): boolean {
   const token = req.headers.get("x-atzma-worker-token") ?? "";
   return !!expectedToken && token === expectedToken;
+}
+
+function sharedWorkerAuthorized(req: Request): boolean {
+  const token = req.headers.get("x-atzma-worker-token") ?? "";
+  return !!WORKER_SHARED_TOKEN && token === WORKER_SHARED_TOKEN;
+}
+
+async function enqueueExecutionRequest(user: JsonMap, broker: BrokerConnectionRow, triggerType: "manual" | "control_plane", sourcePayload: JsonMap = {}): Promise<ExecutionRequestRow> {
+  const userId = String(user.id);
+  const requestedMode = broker.trading_mode === "live" ? "live" : "paper";
+  const idempotencyKey = typeof sourcePayload.idempotency_key === "string" && sourcePayload.idempotency_key.trim()
+    ? sourcePayload.idempotency_key.trim()
+    : buildExecutionIdempotencyKey(userId, broker.id, requestedMode, triggerType);
+  const actor = String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id);
+  const claimToken = createJobClaimToken();
+  const res = await restAdmin("/execution_requests", {
+    method: "POST",
+    headers: { "Prefer": "return=representation,resolution=merge-duplicates" },
+    body: JSON.stringify({
+      user_id: userId,
+      broker_connection_id: broker.id,
+      strategy_id: "default",
+      trigger_type: triggerType,
+      requested_mode: requestedMode,
+      idempotency_key: idempotencyKey,
+      priority: triggerType === "control_plane" ? 50 : 100,
+      status: "queued",
+      actor,
+      payload: { ...sourcePayload, claim_token: claimToken },
+    }),
+  });
+  const rowsPayload = await readJsonSafe<ExecutionRequestRow[] | JsonMap>(res);
+  if (!res.ok) {
+    throw new Error(extractServiceError(rowsPayload, "Could not queue execution request"));
+  }
+  const rows = Array.isArray(rowsPayload) ? rowsPayload : [];
+  return rows[0];
+}
+
+async function persistExecutionArtifacts(request: ExecutionRequestRow, result: JsonMap = {}): Promise<void> {
+  const userId = String(request.user_id);
+  await restAdmin("/decision_events", {
+    method: "POST",
+    headers: { "Prefer": "return=minimal" },
+    body: JSON.stringify({
+      user_id: userId,
+      execution_request_id: request.id,
+      model_version: typeof result.model_version === "string" ? result.model_version : null,
+      feature_snapshot_hash: typeof result.feature_snapshot_hash === "string" ? result.feature_snapshot_hash : null,
+      market_data_source: typeof result.market_data_source === "string" ? result.market_data_source : "alpaca+yfinance",
+      regime: typeof result.regime === "string" ? result.regime : null,
+      strategy_mode: typeof result.strategy_mode === "string" ? result.strategy_mode : null,
+      summary: typeof result.decision_summary === "string" ? result.decision_summary : null,
+      raw_action: Array.isArray(result.raw_action) ? result.raw_action : [],
+      scaled_action: Array.isArray(result.scaled_action) ? result.scaled_action : [],
+      decisions: Array.isArray(result.decisions) ? result.decisions : [],
+      payload: typeof result.payload === "object" && result.payload ? result.payload : result,
+    }),
+  });
+  await appendExecutionEvent(userId, request.id, "execution_result_persisted", {
+    model_version: typeof result.model_version === "string" ? result.model_version : null,
+    strategy_version: typeof result.strategy_version === "string" ? result.strategy_version : null,
+    market_snapshot_hash: typeof result.market_snapshot_hash === "string" ? result.market_snapshot_hash : null,
+    broker_snapshot_hash: typeof result.broker_snapshot_hash === "string" ? result.broker_snapshot_hash : null,
+    feature_snapshot_hash: typeof result.feature_snapshot_hash === "string" ? result.feature_snapshot_hash : null,
+  });
+
+  if (typeof result.broker_snapshot_hash === "string") {
+    await appendPositionSnapshot(userId, request.id, "post_execution", {
+      snapshot_hash: result.broker_snapshot_hash,
+      snapshot: typeof result.broker_snapshot === "object" && result.broker_snapshot ? result.broker_snapshot : result,
+    });
+  }
+  if (typeof result.market_snapshot_hash === "string" && typeof result.market_snapshot === "object" && result.market_snapshot) {
+    await appendPositionSnapshot(userId, request.id, "market_snapshot", {
+      snapshot_hash: result.market_snapshot_hash,
+      snapshot: result.market_snapshot,
+    });
+  }
+  if (typeof result.feature_snapshot_hash === "string" && typeof result.feature_snapshot === "object" && result.feature_snapshot) {
+    await appendPositionSnapshot(userId, request.id, "feature_snapshot", {
+      snapshot_hash: result.feature_snapshot_hash,
+      snapshot: result.feature_snapshot,
+    });
+  }
+
+  const brokerOrders = Array.isArray(result.broker_orders) ? result.broker_orders : [];
+  for (const order of brokerOrders) {
+    const orderPayload = typeof order === "object" && order ? order as JsonMap : {};
+    const brokerOrder = await upsertBrokerOrder(request, orderPayload);
+    if (brokerOrder?.id) {
+      await appendBrokerOrderEvent(
+        userId,
+        request.id,
+        brokerOrder.id,
+        typeof orderPayload.event_type === "string" ? orderPayload.event_type : "submitted",
+        orderPayload,
+      );
+    }
+  }
+
+  if (typeof result.risk_level === "string" || typeof result.drawdown === "number") {
+    await appendRiskEvent(userId, request.id, "execution_cycle", {
+      risk_level: result.risk_level ?? null,
+      drawdown: result.drawdown ?? null,
+    });
+  }
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -1023,9 +1456,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (path === "/me/execution/jobs" && req.method === "GET") {
       const user = await requireUser(req);
-      const res = await restAdmin(`/execution_jobs?user_id=eq.${encodeURIComponent(String(user.id))}&select=*&order=requested_at.desc&limit=30`);
-      const jobs = await res.json() as JsonMap[];
-      return json({ jobs: jobs.map((job) => sanitizeJob(job)) });
+      const res = await restAdmin(`/execution_requests?user_id=eq.${encodeURIComponent(String(user.id))}&select=*&order=created_at.desc&limit=30`);
+      const jobs = await res.json() as ExecutionRequestRow[];
+      return json({ jobs: jobs.map((job) => sanitizeExecutionRequest(job)) });
     }
 
     if (path === "/me/execution/run" && req.method === "POST") {
@@ -1034,42 +1467,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!broker?.enabled || !broker.api_key_encrypted || !broker.secret_key_encrypted) {
         return json({ error: "Verified broker connection is required" }, 400);
       }
-      const existingJob = await findOpenTradeJob(String(user.id));
+      const existingJob = await findOpenTradeRequest(String(user.id));
       if (existingJob) {
-        return json({ job: sanitizeJob(existingJob), duplicate: true }, 202);
+        return json({ job: sanitizeExecutionRequest(existingJob), duplicate: true }, 202);
       }
       const body = await req.json().catch(() => ({})) as JsonMap;
-      const actor = String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id);
-      const requestedMode = broker.trading_mode === "live" ? "live" : "paper";
-      const claimToken = createJobClaimToken();
       const sourcePayload = typeof body.payload === "object" && body.payload ? body.payload as JsonMap : {};
-      const res = await restAdmin("/execution_jobs", {
-        method: "POST",
-        headers: { "Prefer": "return=representation" },
-        body: JSON.stringify({
-          user_id: String(user.id),
-          broker_connection_id: broker.id,
-          job_type: "trade_once",
-          status: "queued",
-          actor,
-          requested_mode: requestedMode,
-          payload: { ...sourcePayload, claim_token: claimToken },
-        }),
-      });
-      const rows = await res.json() as JsonMap[];
-      const job = rows[0] ?? null;
-      const dispatch = await dispatchTradeWorkflow(actor, {
-        job_id: String(job?.id ?? ""),
-        user_id: String(user.id),
-        claim_token: claimToken,
-      });
-      await restAdmin(`/execution_jobs?id=eq.${encodeURIComponent(String(job?.id ?? ""))}`, {
-        method: "PATCH",
-        headers: { "Prefer": "return=minimal" },
-        body: JSON.stringify({ workflow_run_id: String(dispatch.dispatched_at ?? "") }),
-      });
-      await audit(String(user.id), "execution_job_requested", { job_id: job?.id ?? null });
-      return json({ job: sanitizeJob(job), dispatch }, 202);
+      const job = await enqueueExecutionRequest(user, broker, "manual", sourcePayload);
+      const dispatch: JsonMap = { status: "queued", executor: "worker_pool" };
+      await audit(String(user.id), "execution_request_queued", { request_id: job?.id ?? null });
+      return json({ job: sanitizeExecutionRequest(job), dispatch }, 202);
     }
 
     if (path === "/control" && req.method === "GET") {
@@ -1085,42 +1492,294 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(state);
     }
 
+    if (path === "/control/reset_daily_loss" && req.method === "POST") {
+      const user = await requireUser(req);
+      const today = new Date().toISOString().slice(0, 10);
+      await restAdmin(`/daily_risk_state?user_id=eq.${encodeURIComponent(String(user.id))}&trading_day=eq.${today}`, {
+        method: "PATCH",
+        headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify({
+          breached: false,
+          breached_at: null,
+          reset_required: false,
+          metadata: { reset_by: String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id), reset_at: new Date().toISOString() },
+        }),
+      });
+      await appendControlEvent("daily_loss_reset", { trading_day: today }, null, String(user.id));
+      return json({ ok: true, trading_day: today });
+    }
+
     if (path === "/control/run_once" && req.method === "POST") {
       const user = await requireUser(req);
       const broker = await fetchBrokerConnection(String(user.id));
       if (broker?.enabled && broker.api_key_encrypted && broker.secret_key_encrypted) {
-        const existingJob = await findOpenTradeJob(String(user.id));
+        const existingJob = await findOpenTradeRequest(String(user.id));
         if (existingJob) {
-          return json({ job: sanitizeJob(existingJob), duplicate: true }, 202);
+          return json({ job: sanitizeExecutionRequest(existingJob), duplicate: true }, 202);
         }
         const actor = String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id);
-        const claimToken = createJobClaimToken();
-        const res = await restAdmin("/execution_jobs", {
-          method: "POST",
-          headers: { "Prefer": "return=representation" },
-          body: JSON.stringify({
-            user_id: String(user.id),
-            broker_connection_id: broker.id,
-            job_type: "trade_once",
-            status: "queued",
-            actor,
-            requested_mode: broker.trading_mode === "live" ? "live" : "paper",
-            payload: { claim_token: claimToken },
-          }),
-        });
-        const rows = await res.json() as JsonMap[];
-        const job = rows[0] ?? null;
-        const result = await dispatchTradeWorkflow(actor, {
-          job_id: String(job?.id ?? ""),
-          user_id: String(user.id),
-          claim_token: claimToken,
-        });
-        await audit(String(user.id), "run_once_dispatch", { job_id: job?.id ?? null });
-        return json({ ...result, job: sanitizeJob(job) }, 202);
+        const job = await enqueueExecutionRequest(user, broker, "control_plane");
+        const result = { status: "queued", executor: "worker_pool", actor };
+        await audit(String(user.id), "run_once_dispatch", { request_id: job?.id ?? null });
+        return json({ ...result, job: sanitizeExecutionRequest(job) }, 202);
       }
-      const result = await dispatchTradeWorkflow(String((user.user_metadata as JsonMap | undefined)?.display_name ?? user.email ?? user.id));
-      await audit(String(user.id), "run_once_dispatch", {});
-      return json(result, 202);
+      return json({ error: "Verified broker connection is required" }, 400);
+    }
+
+    if (path === "/worker/execution/claim-next" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { worker_id?: string; lease_seconds?: number; capacity?: number };
+      const workerId = String(body.worker_id ?? "").trim();
+      if (!workerId) return json({ error: "worker_id is required" }, 400);
+
+      await restRpc<number>("requeue_expired_execution_requests");
+      const claimed = await restRpc<ExecutionRequestRow[]>("claim_execution_request", {
+        p_worker_id: workerId,
+        p_lease_seconds: Math.max(15, Math.min(Number(body.lease_seconds ?? 90), 600)),
+      });
+      const request = claimed[0] ?? null;
+      await restAdmin("/worker_heartbeats", {
+        method: "POST",
+        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          worker_id: workerId,
+          version: "v2",
+          capacity: Math.max(1, Number(body.capacity ?? 1)),
+          active_jobs: request ? 1 : 0,
+          metadata: { source: "edge_api" },
+          last_seen_at: new Date().toISOString(),
+        }),
+      });
+      if (!request) {
+        return json({ request: null, worker_id: workerId });
+      }
+      await appendExecutionEvent(String(request.user_id), request.id, "execution_leased", {
+        worker_id: workerId,
+        lease_expires_at: request.lease_expires_at,
+      });
+
+      const brokerRow = request.broker_connection_id ? await fetchBrokerConnection(String(request.user_id)) : null;
+      const profileRes = await restAdmin(`/profiles?id=eq.${encodeURIComponent(String(request.user_id))}&select=*`);
+      const profile = ((await profileRes.json()) as JsonMap[])[0] ?? null;
+      if (brokerRow) {
+        await audit(String(request.user_id), "broker_secret_decrypt", { request_id: request.id, worker_id: workerId });
+      }
+      return json({
+        request: sanitizeExecutionRequest(request),
+        profile,
+        broker_connection: brokerRow ? {
+          id: brokerRow.id,
+          broker_name: brokerRow.broker_name,
+          trading_mode: brokerRow.trading_mode,
+          base_url: brokerRow.base_url,
+          account_label: brokerRow.account_label,
+          api_key: await decryptSecret(brokerRow.api_key_encrypted),
+          secret_key: await decryptSecret(brokerRow.secret_key_encrypted),
+        } : null,
+      });
+    }
+
+    if (path === "/worker/execution/start" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { request_id?: string; worker_id?: string };
+      if (!body.request_id || !body.worker_id) return json({ error: "request_id and worker_id are required" }, 400);
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!request) return json({ error: "Request not found" }, 404);
+      if (request.worker_id !== body.worker_id || request.status !== "leased") {
+        return json({ error: "Request is not leased by this worker" }, 409);
+      }
+      const control = await loadControlState();
+      const allowed = !!control.trading_enabled && !control.emergency_stop;
+      const today = new Date().toISOString().slice(0, 10);
+      const dailyRiskRes = await restAdmin(`/daily_risk_state?user_id=eq.${encodeURIComponent(String(request.user_id))}&trading_day=eq.${today}&select=*`);
+      const dailyRiskRows = await dailyRiskRes.json() as JsonMap[];
+      const dailyRisk = dailyRiskRows[0] ?? null;
+      const dailyRiskBlocked = !!dailyRisk && !!dailyRisk.reset_required;
+      await appendControlEvent("execution_control_check", {
+        request_id: request.id,
+        worker_id: body.worker_id,
+        allowed,
+        daily_risk_blocked: dailyRiskBlocked,
+        control,
+      }, request.id, String(request.user_id), Number(control.command_version ?? 1));
+      if (!allowed || dailyRiskBlocked) {
+        await restRpc<ExecutionRequestRow[]>("transition_execution_request", {
+          p_request_id: request.id,
+          p_worker_id: body.worker_id,
+          p_from_status: "leased",
+          p_to_status: "cancelled",
+          p_error_text: dailyRiskBlocked ? "daily_loss_reset_required" : "control_plane_blocked",
+        });
+        return json({ error: dailyRiskBlocked ? "Daily loss reset required" : "Control plane blocked execution" }, 409);
+      }
+      const transitioned = await restRpc<ExecutionRequestRow[]>("transition_execution_request", {
+        p_request_id: request.id,
+        p_worker_id: body.worker_id,
+        p_from_status: "leased",
+        p_to_status: "running",
+      });
+      const row = transitioned[0] ?? null;
+      if (!row) return json({ error: "Could not transition request to running" }, 409);
+      await appendExecutionEvent(String(request.user_id), request.id, "execution_running", {
+        worker_id: body.worker_id,
+        control_version: control.command_version ?? 1,
+      });
+      return json({ ok: true, request: sanitizeExecutionRequest(row), control });
+    }
+
+    if (path === "/worker/execution/event" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { request_id?: string; stage?: string; payload?: JsonMap };
+      if (!body.request_id || !body.stage) return json({ error: "request_id and stage are required" }, 400);
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!request) return json({ error: "Request not found" }, 404);
+      await appendExecutionEvent(String(request.user_id), request.id, body.stage, body.payload ?? {});
+      if (body.stage === "execution_aborted" || body.stage === "execution_blocked") {
+        await appendControlEvent(body.stage, body.payload ?? {}, request.id, String(request.user_id));
+      }
+      return json({ ok: true });
+    }
+
+    if (path === "/worker/risk/event" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { request_id?: string; event_type?: string; payload?: JsonMap };
+      if (!body.request_id || !body.event_type) return json({ error: "request_id and event_type are required" }, 400);
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!request) return json({ error: "Request not found" }, 404);
+      await appendRiskEvent(String(request.user_id), request.id, body.event_type, body.payload ?? {});
+      return json({ ok: true });
+    }
+
+    if (path === "/worker/orders/prepare" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { request_id?: string; order?: JsonMap };
+      if (!body.request_id || !body.order) return json({ error: "request_id and order are required" }, 400);
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!request) return json({ error: "Request not found" }, 404);
+      const order = await upsertBrokerOrder(request, body.order);
+      if (!order) return json({ error: "client_order_id is required" }, 400);
+      await appendBrokerOrderEvent(String(request.user_id), request.id, order.id, "created", body.order);
+      return json({ ok: true, order_id: order.id, client_order_id: order.client_order_id });
+    }
+
+    if (path === "/worker/orders/update" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { request_id?: string; order?: JsonMap };
+      if (!body.request_id || !body.order) return json({ error: "request_id and order are required" }, 400);
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!request) return json({ error: "Request not found" }, 404);
+      const orderPayload = body.order;
+      const clientOrderId = String(orderPayload.client_order_id ?? "").trim();
+      if (!clientOrderId) return json({ error: "client_order_id is required" }, 400);
+      const patched = await patchBrokerOrderByClientOrderId(clientOrderId, {
+        broker_order_id: typeof orderPayload.order_id === "string" ? orderPayload.order_id : null,
+        status: typeof orderPayload.status === "string" ? orderPayload.status.toLowerCase() : "created",
+        payload: orderPayload,
+        submitted_at: typeof orderPayload.status === "string" && ["submit_requested", "submit_acknowledged"].includes(orderPayload.status) ? new Date().toISOString() : undefined,
+        reconciled_at: typeof orderPayload.status === "string" && ["reconciled", "filled", "cancelled", "rejected", "partial_fill"].includes(orderPayload.status) ? new Date().toISOString() : undefined,
+      });
+      if (!patched) return json({ error: "Broker order not found" }, 404);
+      const eventType = typeof orderPayload.event_type === "string" ? orderPayload.event_type : String(orderPayload.status ?? "updated");
+      await appendBrokerOrderEvent(String(request.user_id), request.id, patched.id, eventType, orderPayload);
+      return json({ ok: true, broker_order_id: patched.id });
+    }
+
+    if (path === "/worker/execution/reconcile" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { request_id?: string; client_order_id?: string };
+      if (!body.request_id) return json({ error: "request_id is required" }, 400);
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!request) return json({ error: "Request not found" }, 404);
+      const brokerRow = await fetchBrokerConnection(String(request.user_id));
+      if (!brokerRow) return json({ error: "Broker connection missing" }, 404);
+      const reconciled = await reconcileBrokerOrdersForRequest(request, brokerRow, body.client_order_id ?? null);
+      return json({ ok: true, orders: reconciled });
+    }
+
+    if (path === "/worker/reconcile/open" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { limit?: number };
+      const limit = Math.max(1, Math.min(Number(body.limit ?? 20), 100));
+      const ordersRes = await restAdmin(`/broker_orders?status=in.(submit_requested,submit_acknowledged,partial_fill,reconciliation_pending,cancel_requested,reconciled)&order=updated_at.asc&limit=${limit}&select=execution_request_id`);
+      const rows = await ordersRes.json() as Array<{ execution_request_id?: string | null }>;
+      const requestIds = [...new Set(rows.map((row) => String(row.execution_request_id ?? "")).filter(Boolean))];
+      const results: JsonMap[] = [];
+      for (const requestId of requestIds) {
+        const request = await fetchExecutionRequest(requestId);
+        if (!request) continue;
+        const brokerRow = await fetchBrokerConnection(String(request.user_id));
+        if (!brokerRow) continue;
+        const reconciled = await reconcileBrokerOrdersForRequest(request, brokerRow, null);
+        results.push({ request_id: request.id, orders: reconciled });
+      }
+      return json({ ok: true, reconciled: results });
+    }
+
+    if (path === "/worker/execution/complete" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { request_id?: string; status?: string; result?: JsonMap; error?: string; worker_id?: string };
+      if (!body.request_id || !body.status) return json({ error: "request_id and status are required" }, 400);
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!request) return json({ error: "Request not found" }, 404);
+      if (request.worker_id && body.worker_id && request.worker_id !== body.worker_id) {
+        return json({ error: "Worker ownership mismatch" }, 409);
+      }
+      const normalizedStatus = ["succeeded", "failed", "skipped", "cancelled", "dead_letter", "reconcile_pending"].includes(body.status)
+        ? body.status
+        : "failed";
+      await restAdmin(`/execution_requests?id=eq.${encodeURIComponent(body.request_id)}`, {
+        method: "PATCH",
+        headers: { "Prefer": "return=representation" },
+        body: JSON.stringify({
+          status: normalizedStatus,
+          completed_at: new Date().toISOString(),
+          result: body.result ?? {},
+          error_text: body.error ?? null,
+          worker_id: body.worker_id ?? request.worker_id ?? null,
+          lease_expires_at: null,
+        }),
+      });
+      if (body.result && typeof body.result === "object") {
+        await persistExecutionArtifacts(request, body.result);
+      }
+      await appendExecutionEvent(String(request.user_id), request.id, "execution_completed", {
+        status: normalizedStatus,
+        worker_id: body.worker_id ?? request.worker_id ?? null,
+      });
+      await audit(String(request.user_id), "execution_request_completed", {
+        request_id: request.id,
+        status: normalizedStatus,
+        worker_id: body.worker_id ?? request.worker_id ?? null,
+      });
+      return json({ ok: true, request_id: body.request_id, status: normalizedStatus });
+    }
+
+    if (path === "/worker/execution/heartbeat" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as { worker_id?: string; request_id?: string; lease_seconds?: number; active_jobs?: number; capacity?: number };
+      const workerId = String(body.worker_id ?? "").trim();
+      if (!workerId) return json({ error: "worker_id is required" }, 400);
+      await restAdmin("/worker_heartbeats", {
+        method: "POST",
+        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          worker_id: workerId,
+          version: "v2",
+          capacity: Math.max(1, Number(body.capacity ?? 1)),
+          active_jobs: Math.max(0, Number(body.active_jobs ?? 0)),
+          metadata: { source: "edge_api" },
+          last_seen_at: new Date().toISOString(),
+        }),
+      });
+      let renewed = true;
+      if (body.request_id) {
+        renewed = await restRpc<boolean>("renew_execution_request_lease", {
+          p_request_id: body.request_id,
+          p_worker_id: workerId,
+          p_lease_seconds: Math.max(15, Math.min(Number(body.lease_seconds ?? 90), 600)),
+        });
+      }
+      return json({ ok: true, worker_id: workerId, renewed });
     }
 
     if (path === "/worker/jobs/claim" && req.method === "POST") {

@@ -1,103 +1,14 @@
-name: Daily Trade
+name: Legacy Trade Workflow Disabled
 
-# ──────────────────────────────────────────────────────────────
-# Runs every hour during US market hours (Mon–Fri).
-# The agent checks if the market is open; if not, it exits
-# cleanly without placing orders.
-#
-# Schedule: 9:40, 10:40, 11:40, 12:40, 13:40, 14:40, 15:40 ET
-# Summer UTC-4: 13:40–19:40 UTC
-# Winter UTC-5: 14:40–20:40 UTC  (both rows active — harmless overlap)
-# ──────────────────────────────────────────────────────────────
 on:
-  schedule:
-    # Summer (EDT, UTC-4)
-    - cron: '40 13 * * 1-5'
-    - cron: '40 14 * * 1-5'
-    - cron: '40 15 * * 1-5'
-    - cron: '40 16 * * 1-5'
-    - cron: '40 17 * * 1-5'
-    - cron: '40 18 * * 1-5'
-    - cron: '40 19 * * 1-5'
-    # Winter (EST, UTC-5) — extra hour shift
-    - cron: '40 20 * * 1-5'
   workflow_dispatch:
-    inputs:
-      job_id:
-        description: "Per-user execution job id"
-        required: false
-        type: string
-      user_id:
-        description: "Owning user id"
-        required: false
-        type: string
-      claim_token:
-        description: "Per-job claim token"
-        required: false
-        type: string
 
 jobs:
-  trade:
+  disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
 
     steps:
-      # ── 1. Checkout ───────────────────────────────────────────
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # ── 2. Python + pip cache ─────────────────────────────────
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      # ── 3. Dependencies ───────────────────────────────────────
-      - name: Install dependencies
+      - name: Trading workflow disabled
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # ── 4. Trade decision ─────────────────────────────────────
-      - name: Run trading decision
-        env:
-          ALPACA_API_KEY:      ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY:   ${{ secrets.ALPACA_SECRET_KEY }}
-          ALPACA_BASE_URL:     https://paper-api.alpaca.markets
-          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
-          GITHUB_TOKEN:        ${{ github.token }}
-          GITHUB_REPOSITORY:   ${{ github.repository }}
-          ATZMA_WORKER_TOKEN:  ${{ github.event.inputs.claim_token }}
-          ATZMA_JOB_ID:        ${{ github.event.inputs.job_id }}
-          ATZMA_REMOTE_API_BASE: https://sofowpweliticltlbxrj.supabase.co/functions/v1/api
-        run: |
-          ATTEMPT=1
-          until [ "$ATTEMPT" -gt 3 ]
-          do
-            echo "Trade attempt ${ATTEMPT}/3"
-            if [ -n "${ATZMA_JOB_ID}" ]; then
-              python user_execution_worker.py && break
-            else
-              python main.py --mode live_once --auto-approve && break
-            fi
-            if [ "$ATTEMPT" -eq 3 ]; then
-              echo "Trading workflow failed after 3 attempts"
-              exit 1
-            fi
-            sleep $((ATTEMPT * 15))
-            ATTEMPT=$((ATTEMPT + 1))
-          done
-
-      # ── 5. Upload logs ────────────────────────────────────────
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trade-logs-${{ github.run_number }}
-          path: |
-            agent_analyst.log
-            paper_orders.log
-            trades_history.csv
-          retention-days: 30
+          echo "ATZMA trading execution no longer runs on GitHub Actions."

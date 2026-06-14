@@ -31,6 +31,9 @@ def _make_broker(monkeypatch, tmp_path, trading_mock):
     monkeypatch.setenv("ATZMA_CONTROL_API_URL", "")
     monkeypatch.setenv("GITHUB_REPOSITORY", "")
     monkeypatch.setenv("GITHUB_TOKEN", "")
+    monkeypatch.setenv("ATZMA_FAIL_CLOSED_CONTROL", "0")
+    monkeypatch.setenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "1")
+    monkeypatch.setenv("ATZMA_REQUIRE_FRESH_QUOTES", "0")
 
     import broker_api as ba
 
@@ -100,6 +103,7 @@ class TestLiveTradingEndToEnd:
     def test_run_once_places_order_and_persists_state(self, monkeypatch, tmp_path, multi_featured, trading_mock):
         broker = _make_broker(monkeypatch, tmp_path, trading_mock)
         broker.get_latest_prices = MagicMock(return_value={"AAPL": 150.0, "MSFT": 300.0, "GOOGL": 130.0})
+        broker.get_latest_quotes_info = MagicMock(return_value={})
 
         trader = _make_trader(multi_featured, broker)
         result = trader.run_once()
@@ -114,6 +118,8 @@ class TestLiveTradingEndToEnd:
         assert saved_entry["side"] == "BUY"
         assert result["regime"] == "RANGE_BOUND"
         assert "AAPL" in result["summary"]
+        assert "market_snapshot" in result
+        assert "feature_snapshot" in result
         decision_path = tmp_path / "runtime" / "last_decision.json"
         assert decision_path.exists()
         decision_payload = json.loads(decision_path.read_text(encoding="utf-8"))
@@ -123,6 +129,7 @@ class TestLiveTradingEndToEnd:
     def test_second_run_new_process_blocks_duplicate(self, monkeypatch, tmp_path, multi_featured, trading_mock):
         broker1 = _make_broker(monkeypatch, tmp_path, trading_mock)
         broker1.get_latest_prices = MagicMock(return_value={"AAPL": 150.0, "MSFT": 300.0, "GOOGL": 130.0})
+        broker1.get_latest_quotes_info = MagicMock(return_value={})
         trader1 = _make_trader(multi_featured, broker1)
         trader1.run_once()
         assert trading_mock.submit_order.call_count == 1
@@ -135,6 +142,7 @@ class TestLiveTradingEndToEnd:
 
         broker2 = _make_broker(monkeypatch, tmp_path, trading_mock_2)
         broker2.get_latest_prices = MagicMock(return_value={"AAPL": 150.0, "MSFT": 300.0, "GOOGL": 130.0})
+        broker2.get_latest_quotes_info = MagicMock(return_value={})
         trader2 = _make_trader(multi_featured, broker2)
         trader2.run_once()
 
@@ -144,6 +152,7 @@ class TestLiveTradingEndToEnd:
         broker = _make_broker(monkeypatch, tmp_path, trading_mock)
         broker.reconcile_account_state = MagicMock(side_effect=ConnectionError("broker down"))
         broker.get_latest_prices = MagicMock(return_value={"AAPL": 150.0, "MSFT": 300.0, "GOOGL": 130.0})
+        broker.get_latest_quotes_info = MagicMock(return_value={})
 
         trader = _make_trader(multi_featured, broker)
         trader.run_once()

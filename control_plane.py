@@ -94,14 +94,18 @@ def control_api_url() -> str:
     )
 
 
+def allow_local_control_fallback() -> bool:
+    return os.getenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+
+
 def default_control_state() -> dict:
     return {
         "mode": "paper",
         "trading_enabled": True,
         "emergency_stop": False,
         "status": "running",
-        "executor": "github_actions",
-        "executor_label": "GitHub Actions",
+        "executor": "worker_pool",
+        "executor_label": "ATZMA Worker Pool",
         "last_command": "bootstrap",
         "last_command_at": utc_now_iso(),
         "updated_at": utc_now_iso(),
@@ -174,8 +178,11 @@ def load_remote_control_state() -> dict:
             normalized["_source"] = str(payload.get("_source") or "control_api")
             return normalized
         except Exception:
-            pass
+            if not allow_local_control_fallback():
+                raise
 
+    if not allow_local_control_fallback():
+        raise RuntimeError("Remote control plane unavailable")
     repo = github_repo()
     if not repo:
         raise RuntimeError("GitHub repository is not configured")
@@ -211,7 +218,8 @@ def load_control_state(prefer_remote: bool = True) -> dict:
         try:
             return load_remote_control_state()
         except Exception:
-            pass
+            if not allow_local_control_fallback():
+                raise
     return load_local_control_state()
 
 
@@ -226,6 +234,8 @@ def save_local_control_state(state: dict) -> dict:
 
 
 def save_remote_control_state(state: dict, actor: str = "dashboard") -> dict:
+    if not allow_local_control_fallback():
+        raise RuntimeError("Remote control writes must go through the authoritative control API")
     repo = github_repo()
     token = github_token()
     if not repo or not token:
@@ -262,7 +272,8 @@ def save_control_state(state: dict, actor: str = "dashboard", prefer_remote: boo
         try:
             return save_remote_control_state(state, actor=actor)
         except Exception:
-            pass
+            if not allow_local_control_fallback():
+                raise
     return save_local_control_state(state)
 
 

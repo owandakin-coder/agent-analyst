@@ -69,6 +69,10 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR,   exist_ok=True)
 
 
+def _fail_closed_control_enabled() -> bool:
+    return os.getenv("ATZMA_FAIL_CLOSED_CONTROL", "1").strip().lower() not in {"0", "false", "no"}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # שלב 1: הורדת נתונים
 # ══════════════════════════════════════════════════════════════════════════════
@@ -210,10 +214,12 @@ def step_live_paper(model, vec_norm, auto_approve: bool = False, ensemble=False)
         trade_allowed, block_reason = can_trade(control_state)
     except Exception as exc:
         print(f"  [WARN] Control state unavailable: {exc}")
-        trade_allowed, block_reason = True, None
+        trade_allowed, block_reason = (False, "control_plane_unavailable") if _fail_closed_control_enabled() else (True, None)
 
     if not trade_allowed:
         status = "EMERGENCY STOP" if block_reason == "emergency_stop" else "PAUSED"
+        if block_reason == "control_plane_unavailable":
+            status = "CONTROL PLANE UNAVAILABLE"
         print(f"  Trading skipped by control plane: {status}.")
         return
 

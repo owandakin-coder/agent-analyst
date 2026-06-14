@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from execution_runtime import prepare_order, update_order
 from notifications import send_operator_alert
 
 try:
@@ -46,7 +47,8 @@ except Exception:
     DUPLICATE_WINDOW_DAYS = 1
     RECENT_ORDERS_LIMIT = 100
 
-load_dotenv()
+if os.getenv("ATZMA_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes"}:
+    load_dotenv()
 
 log = logging.getLogger("BrokerAPI")
 
@@ -55,6 +57,8 @@ LIVE_BASE_URL = "https://api.alpaca.markets"
 
 
 class AlpacaBrokerAPI:
+    broker_name = "alpaca"
+
     def __init__(self, paper: bool = True, auto_approve: bool = False):
         self.api_key = os.getenv("ALPACA_API_KEY", "")
         self.secret_key = os.getenv("ALPACA_SECRET_KEY", "")
@@ -66,6 +70,7 @@ class AlpacaBrokerAPI:
         self._submitted_orders = self._load_submitted_orders()
         self._submitted_keys = set(self._submitted_orders.keys())
         self._last_snapshot: dict | None = None
+        self._last_quotes_info: dict[str, dict] = {}
 
         self._validate_credentials()
         self._init_client()
@@ -117,7 +122,7 @@ class AlpacaBrokerAPI:
         }
         if not self._request_approval(order_info):
             return self._log_rejected(order_info)
-        return self._submit_order(ticker, shares, "buy")
+        return self._submit_order(ticker, shares, "buy", price=price)
 
     def sell(self, ticker: str, shares: float, price: float | None = None) -> dict:
         shares = max(1, int(shares))
@@ -137,7 +142,7 @@ class AlpacaBrokerAPI:
         }
         if not self._request_approval(order_info):
             return self._log_rejected(order_info)
-        return self._submit_order(ticker, shares, "sell", account_snapshot=snapshot)
+        return self._submit_order(ticker, shares, "sell", price=price, account_snapshot=snapshot)
 
     def hold(self, ticker: str):
         log.info("HOLD %s (no order submitted)", ticker)
@@ -178,6 +183,7 @@ class AlpacaBrokerAPI:
         ticker: str,
         shares: int,
         side: str,
+        price: float | None = None,
         account_snapshot: dict | None = None,
     ) -> dict:
         if shares <= 0:
@@ -185,9 +191,30 @@ class AlpacaBrokerAPI:
 
         key = self._order_key(ticker, side, shares)
         client_order_id = self._client_order_id_from_key(key)
+        order_ref = prepare_order({
+            "broker_name": self.broker_name,
+            "client_order_id": client_order_id,
+            "ticker": ticker,
+            "side": side.upper(),
+            "shares": shares,
+            "requested_price": price,
+            "status": "created",
+            "idempotency_key": key,
+        }) or {}
 
         duplicate = self._check_duplicate_order(ticker, side, shares, client_order_id)
         if duplicate:
+            update_order({
+                "client_order_id": client_order_id,
+                "status": "rejected",
+                "event_type": "duplicate_blocked",
+                "payload": {
+                    "ticker": ticker,
+                    "side": side.upper(),
+                    "shares": shares,
+                    "source": duplicate["source"],
+                },
+            })
             log.warning(
                 "DUPLICATE ORDER BLOCKED | %s %s %s | source=%s",
                 side.upper(),
@@ -206,6 +233,16 @@ class AlpacaBrokerAPI:
 
         snapshot = account_snapshot or self.reconcile_account_state()
         if side == "sell" and snapshot["positions"].get(ticker, 0.0) < shares:
+            update_order({
+                "client_order_id": client_order_id,
+                "status": "rejected",
+                "event_type": "insufficient_position",
+                "payload": {
+                    "ticker": ticker,
+                    "side": side.upper(),
+                    "shares": shares,
+                },
+            })
             log.warning("SELL rejected after reconciliation: insufficient shares in %s", ticker)
             return {"status": "REJECTED", "reason": "insufficient_position"}
 
@@ -219,6 +256,17 @@ class AlpacaBrokerAPI:
         )
 
         try:
+            update_order({
+                "client_order_id": client_order_id,
+                "status": "submit_requested",
+                "event_type": "submit_requested",
+                "payload": {
+                    "ticker": ticker,
+                    "side": side.upper(),
+                    "shares": shares,
+                    "requested_price": price,
+                },
+            })
             order = self._call_with_retry("submit_order", self._trading.submit_order, request)
             now_iso = datetime.now(timezone.utc).isoformat()
             result = {
@@ -230,6 +278,12 @@ class AlpacaBrokerAPI:
                 "shares": shares,
                 "time": now_iso,
             }
+            update_order({
+                "client_order_id": result["client_order_id"],
+                "status": "submit_acknowledged",
+                "event_type": "submit_acknowledged",
+                "payload": result,
+            })
             log.info(
                 "ORDER SUBMITTED | %s %s %s | id=%s status=%s client_order_id=%s",
                 side.upper(),
@@ -243,6 +297,17 @@ class AlpacaBrokerAPI:
             self._write_log(result)
             return result
         except Exception as exc:
+            update_order({
+                "client_order_id": client_order_id,
+                "status": "reconciliation_pending",
+                "event_type": "submit_error",
+                "payload": {
+                    "ticker": ticker,
+                    "side": side.upper(),
+                    "shares": shares,
+                    "error": str(exc),
+                },
+            })
             log.error("ORDER FAILED | %s %s %s | %s", side.upper(), shares, ticker, exc)
             return {"status": "ERROR", "error": str(exc)}
 
@@ -383,6 +448,26 @@ class AlpacaBrokerAPI:
             log.warning("Could not fetch positions: %s", exc)
         return positions
 
+    def get_position_details(self) -> dict[str, dict]:
+        details: dict[str, dict] = {}
+        try:
+            for pos in self._call_with_retry("get_all_positions", self._trading.get_all_positions):
+                symbol = getattr(pos, "symbol", None)
+                qty = getattr(pos, "qty", None)
+                if not symbol or qty in (None, ""):
+                    continue
+                details[str(symbol)] = {
+                    "qty": float(qty),
+                    "avg_entry_price": float(getattr(pos, "avg_entry_price", 0.0) or 0.0),
+                    "market_value": float(getattr(pos, "market_value", 0.0) or 0.0),
+                    "unrealized_pl": float(getattr(pos, "unrealized_pl", 0.0) or 0.0),
+                    "unrealized_plpc": float(getattr(pos, "unrealized_plpc", 0.0) or 0.0),
+                    "side": str(getattr(pos, "side", "") or ""),
+                }
+        except Exception as exc:
+            log.warning("Could not fetch position details: %s", exc)
+        return details
+
     def reconcile_account_state(self) -> dict:
         try:
             account = self.get_account()
@@ -394,6 +479,7 @@ class AlpacaBrokerAPI:
                 "portfolio_value": account["portfolio_value"],
                 "status": account["status"],
                 "positions": positions,
+                "position_details": self.get_position_details(),
                 "as_of": datetime.now(timezone.utc).isoformat(),
             }
             self._last_snapshot = snapshot
@@ -421,9 +507,29 @@ class AlpacaBrokerAPI:
                     prices[ticker] = ask
                 elif bid > 0:
                     prices[ticker] = bid
+                timestamp = getattr(quote, "timestamp", None)
+                self._last_quotes_info[ticker] = {
+                    "price": prices.get(ticker),
+                    "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else (str(timestamp) if timestamp else None),
+                    "source": "alpaca_latest_quote",
+                }
         except Exception as exc:
             log.warning("Could not fetch prices: %s", exc)
         return prices
+
+    def get_latest_quotes_info(self, tickers: list[str]) -> dict[str, dict]:
+        self.get_latest_prices(tickers)
+        return {ticker: dict(self._last_quotes_info.get(ticker, {})) for ticker in tickers}
+
+    def find_order_by_client_order_id(self, client_order_id: str):
+        try:
+            return self._call_with_retry(
+                "get_order_by_client_id",
+                self._trading.get_order_by_client_id,
+                client_order_id,
+            )
+        except Exception:
+            return None
 
     def is_market_open(self) -> bool:
         try:
@@ -483,6 +589,8 @@ class AlpacaBrokerAPI:
 
 
 class BrokerAPIStub:
+    broker_name = "stub"
+
     def __init__(self, account_id: str = "PAPER_ACCOUNT_001"):
         self.account_id = account_id
         self.positions: dict[str, float] = {}
@@ -534,6 +642,19 @@ class BrokerAPIStub:
     def get_positions(self) -> dict:
         return dict(self.positions)
 
+    def get_position_details(self) -> dict[str, dict]:
+        return {
+            ticker: {
+                "qty": float(qty),
+                "avg_entry_price": 0.0,
+                "market_value": 0.0,
+                "unrealized_pl": 0.0,
+                "unrealized_plpc": 0.0,
+                "side": "long",
+            }
+            for ticker, qty in self.positions.items()
+        }
+
     def reconcile_account_state(self) -> dict:
         cash = self.get_cash()
         positions = self.get_positions()
@@ -545,6 +666,7 @@ class BrokerAPIStub:
             "portfolio_value": equity,
             "status": "ACTIVE",
             "positions": dict(positions),
+            "position_details": self.get_position_details(),
             "as_of": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -553,6 +675,12 @@ class BrokerAPIStub:
 
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:
         return {}
+
+    def get_latest_quotes_info(self, tickers: list[str]) -> dict[str, dict]:
+        return {}
+
+    def find_order_by_client_order_id(self, client_order_id: str):
+        return None
 
     def get_account(self) -> dict:
         snapshot = self.reconcile_account_state()

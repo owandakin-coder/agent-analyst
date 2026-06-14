@@ -6,12 +6,13 @@ ATZMA is an autonomous trading platform built around an RL decision engine, a pr
 
 - Static frontend on GitHub Pages
 - Backend API on Supabase Edge Functions
-- Control plane backed by GitHub Actions
+- Control plane and transitional execution bridge backed by GitHub Actions
 - Alpaca broker integration
 - Multi-agent decision engine with unanimous execution voting
 - Market regime detection with adaptive strategy modes
 - Explainable execution summaries stored per run
 - Per-user broker connections and isolated execution jobs
+- Durable `execution_requests` queue with lease-based worker claims
 - Guest `Locked` state with no live portfolio access
 - Health checks, launch checklist, and automated tests
 
@@ -22,7 +23,7 @@ ATZMA is an autonomous trading platform built around an RL decision engine, a pr
 - Local dashboard server: `dashboard_app/server.py`
 - Trading runtime: `main.py`, `live_trader.py`, `broker_api.py`, `risk_manager.py`
 - Decision layer: `multi_agent.py`, `regime_detector.py`, `decision_journal.py`
-- Per-user worker: `user_execution_worker.py`
+- Per-user worker: `user_execution_worker.py` (`--poll-once` / `--loop` for queue-backed execution)
 
 ## Decision Stack
 
@@ -61,6 +62,7 @@ Required secrets:
 - `GITHUB_TOKEN`
 - `GITHUB_REPOSITORY`
 - `ATZMA_BROKER_CREDENTIAL_KEY`
+- `ATZMA_WORKER_SHARED_TOKEN`
 
 Optional:
 
@@ -68,6 +70,7 @@ Optional:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - `DISCORD_WEBHOOK_URL`
+- `ATZMA_FAIL_CLOSED_CONTROL`
 
 ## Local Development
 
@@ -143,11 +146,12 @@ python -m pytest -q
 
 ## Production Notes
 
-- Keep GitHub Actions as the single automated executor
+- Prefer queue-backed workers; keep GitHub Actions only as a temporary bridge
 - Keep Supabase auth email confirmation enabled
 - Use Paper mode first
 - Only verified broker connections may access portfolio endpoints
 - Broker secrets are encrypted server-side and never returned to the client
+- Keep `ATZMA_FAIL_CLOSED_CONTROL=1` for all remote or live execution paths
 
 ## Contributing
 
