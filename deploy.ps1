@@ -1,4 +1,4 @@
-# QuantPulse - Full Cloud Deployment to Supabase
+# ATZMA - Supabase Control Plane Deployment
 # Run: powershell -ExecutionPolicy Bypass -File deploy.ps1
 #
 # Result after running:
@@ -12,7 +12,7 @@ $ENV_FILE    = Join-Path $SCRIPT_DIR ".env"
 $HTML_FILE   = Join-Path $SCRIPT_DIR "dashboard_app\index.html"
 
 Write-Host ""
-Write-Host "  QuantPulse Cloud Deployment" -ForegroundColor Cyan
+Write-Host "  ATZMA Supabase Deployment" -ForegroundColor Cyan
 Write-Host "  ===========================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -26,10 +26,9 @@ Get-Content $ENV_FILE | ForEach-Object {
 }
 $ALPACA_KEY     = $envVars["ALPACA_API_KEY"]
 $ALPACA_SECRET  = $envVars["ALPACA_SECRET_KEY"]
-$GITHUB_TOKEN   = $envVars["GITHUB_TOKEN"]
-$GITHUB_REPO    = if ($envVars["GITHUB_REPOSITORY"]) { $envVars["GITHUB_REPOSITORY"] } else { "owandakin-coder/agent-analyst" }
 $SUPABASE_TOKEN = $envVars["SUPABASE_ACCESS_TOKEN"]
 $BROKER_KEY     = $envVars["ATZMA_BROKER_CREDENTIAL_KEY"]
+$WORKER_TOKEN   = $envVars["ATZMA_WORKER_SHARED_TOKEN"]
 
 if (-not $ALPACA_KEY -or -not $ALPACA_SECRET) {
     Write-Host "ERROR: Missing Alpaca keys in .env" -ForegroundColor Red; exit 1
@@ -37,6 +36,10 @@ if (-not $ALPACA_KEY -or -not $ALPACA_SECRET) {
 if (-not $BROKER_KEY) {
     $BROKER_KEY = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
     Write-Host "  Generated ATZMA_BROKER_CREDENTIAL_KEY for this deploy." -ForegroundColor Yellow
+}
+if (-not $WORKER_TOKEN) {
+    $WORKER_TOKEN = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
+    Write-Host "  Generated ATZMA_WORKER_SHARED_TOKEN for this deploy." -ForegroundColor Yellow
 }
 Write-Host "  .env OK (key: $($ALPACA_KEY.Substring(0,8))...)" -ForegroundColor Green
 
@@ -61,12 +64,8 @@ if ($LASTEXITCODE -ne 0) { Write-Host "Link failed" -ForegroundColor Red; exit 1
 
 # Step 3: Push secrets
 Write-Host ""
-Write-Host "  [3/5] Uploading API secrets (keys stay server-side only)..." -ForegroundColor Yellow
-if ($GITHUB_TOKEN) {
-    npx supabase@latest secrets set ALPACA_API_KEY=$ALPACA_KEY ALPACA_SECRET_KEY=$ALPACA_SECRET GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_REPOSITORY=$GITHUB_REPO ATZMA_BROKER_CREDENTIAL_KEY=$BROKER_KEY
-} else {
-    npx supabase@latest secrets set ALPACA_API_KEY=$ALPACA_KEY ALPACA_SECRET_KEY=$ALPACA_SECRET GITHUB_REPOSITORY=$GITHUB_REPO ATZMA_BROKER_CREDENTIAL_KEY=$BROKER_KEY
-}
+Write-Host "  [3/5] Uploading server-side secrets..." -ForegroundColor Yellow
+npx supabase@latest secrets set ALPACA_API_KEY=$ALPACA_KEY ALPACA_SECRET_KEY=$ALPACA_SECRET ALPACA_BASE_URL=https://paper-api.alpaca.markets/v2 ATZMA_BROKER_CREDENTIAL_KEY=$BROKER_KEY ATZMA_WORKER_SHARED_TOKEN=$WORKER_TOKEN ATZMA_ALLOW_LEGACY_CONTROL_FALLBACK=0
 if ($LASTEXITCODE -ne 0) { Write-Host "Secrets failed" -ForegroundColor Red; exit 1 }
 Write-Host "  Secrets OK" -ForegroundColor Green
 
@@ -76,6 +75,9 @@ Write-Host "  [4/5] Deploying Edge Function 'api' (Alpaca proxy)..." -Foreground
 npx supabase@latest functions deploy api --no-verify-jwt
 if ($LASTEXITCODE -ne 0) { Write-Host "Function deploy failed" -ForegroundColor Red; exit 1 }
 Write-Host "  Edge Function OK" -ForegroundColor Green
+
+Write-Host "  Cleaning legacy GitHub dispatch secret..." -ForegroundColor Yellow
+npx supabase@latest secrets unset GITHUB_TOKEN 2>$null
 
 # Step 5: Upload HTML to Storage
 Write-Host ""
@@ -105,5 +107,7 @@ Write-Host ""
 Write-Host "  https://$PROJECT_REF.supabase.co/storage/v1/object/public/site/index.html" -ForegroundColor Green
 Write-Host ""
 Write-Host "  API always online at:" -ForegroundColor White
-Write-Host "  https://$PROJECT_REF.supabase.co/functions/v1/api/account" -ForegroundColor Cyan
+Write-Host "  https://$PROJECT_REF.supabase.co/functions/v1/api/health" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Next step: deploy render.yaml as a Render Background Worker." -ForegroundColor White
 Write-Host ""

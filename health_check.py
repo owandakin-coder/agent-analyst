@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -136,7 +137,7 @@ def check_env() -> bool:
             check(f"{key} (optional)", True)
         else:
             warn(f"{key} (optional)", "not set")
-    for key in ["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", "ATZMA_BROKER_CREDENTIAL_KEY"]:
+    for key in ["SUPABASE_ACCESS_TOKEN", "ATZMA_BROKER_CREDENTIAL_KEY", "ATZMA_WORKER_SHARED_TOKEN"]:
         value = os.getenv(key, "")
         if value:
             check(f"{key} (launch)", True)
@@ -188,56 +189,22 @@ def check_model() -> bool:
         return check("Model load", False, str(exc))
 
 
-def infer_github_repo() -> str:
-    from config_loader import CFG
-
-    if CFG.github_repo:
-        return CFG.github_repo
-    if os.getenv("GITHUB_REPOSITORY"):
-        return os.getenv("GITHUB_REPOSITORY", "")
+def check_worker_runtime() -> bool:
+    print("\n[7] Worker Runtime")
+    url = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api/control"
     try:
-        result = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        remote = result.stdout.strip()
-    except Exception:
-        return ""
-
-    if remote.endswith(".git"):
-        remote = remote[:-4]
-    if remote.startswith("git@github.com:"):
-        return remote.split("git@github.com:", 1)[1]
-    if "github.com/" in remote:
-        return remote.split("github.com/", 1)[1].strip("/")
-    return ""
-
-
-def check_github_actions() -> bool:
-    print("\n[7] GitHub")
-    repo = infer_github_repo()
-    if not repo:
-        warn("GitHub Actions check skipped", "repo not configured")
-        return True
-
-    url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=5"
-    try:
-        request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=10) as response:
             payload = json.loads(response.read())
-        runs = payload.get("workflow_runs", [])
-        if not runs:
-            warn("No workflow runs found", repo)
-            return True
-        run = runs[0]
-        status = run.get("conclusion") or run.get("status", "?")
-        date = str(run.get("created_at", ""))[:10]
-        return check(f"Last run: {run.get('name', 'workflow')}", status in ("success", None), f"{repo} · {date} · {status}")
+        executor_ok = payload.get("executor") == "worker_pool"
+        dispatch_ok = payload.get("can_dispatch") is False
+        return check(
+            "Remote control runtime",
+            executor_ok and dispatch_ok,
+            f"executor={payload.get('executor')} | can_dispatch={payload.get('can_dispatch')}",
+        )
     except Exception as exc:
-        warn("GitHub Actions check skipped", str(exc))
-        return True
+        return check("Remote control runtime", False, str(exc))
 
 
 def check_remote_app() -> bool:
@@ -276,7 +243,7 @@ def main(fast: bool = False) -> int:
         check_env(),
     ]
     if not fast:
-        results.extend([check_alpaca(), check_model(), check_github_actions(), check_remote_app()])
+        results.extend([check_alpaca(), check_model(), check_worker_runtime(), check_remote_app()])
 
     passed = sum(1 for result in results if result)
     total = len(results)

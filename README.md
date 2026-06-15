@@ -6,7 +6,7 @@ ATZMA is an autonomous trading platform built around an RL decision engine, a pr
 
 - Static frontend on GitHub Pages
 - Backend API on Supabase Edge Functions
-- Control plane and transitional execution bridge backed by GitHub Actions
+- Control plane backed by Supabase with a persistent worker execution pool
 - Alpaca broker integration
 - Multi-agent decision engine with unanimous execution voting
 - Market regime detection with adaptive strategy modes
@@ -59,8 +59,6 @@ Required secrets:
 
 - `ALPACA_API_KEY`
 - `ALPACA_SECRET_KEY`
-- `GITHUB_TOKEN`
-- `GITHUB_REPOSITORY`
 - `ATZMA_BROKER_CREDENTIAL_KEY`
 - `ATZMA_WORKER_SHARED_TOKEN`
 
@@ -146,12 +144,22 @@ python -m pytest -q
 
 ## Production Notes
 
-- Prefer queue-backed workers; keep GitHub Actions only as a temporary bridge
+- Production trading now runs through a persistent worker pool, not GitHub Actions
 - Keep Supabase auth email confirmation enabled
 - Use Paper mode first
 - Only verified broker connections may access portfolio endpoints
 - Broker secrets are encrypted server-side and never returned to the client
 - Keep `ATZMA_FAIL_CLOSED_CONTROL=1` for all remote or live execution paths
+
+## Render Worker
+
+ATZMA includes a ready-to-deploy Render blueprint in [render.yaml](C:/Users/Ea%20Arage/Downloads/agent%20analyst/render.yaml).
+
+Recommended worker start command:
+
+```powershell
+python user_execution_worker.py --loop
+```
 
 ## Contributing
 

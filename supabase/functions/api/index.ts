@@ -13,11 +13,7 @@ const ALPACA_SECRET = Deno.env.get("ALPACA_SECRET_KEY") ?? "";
 const ALPACA_BASE = "https://paper-api.alpaca.markets/v2";
 const BROKER_CREDENTIAL_KEY = Deno.env.get("ATZMA_BROKER_CREDENTIAL_KEY") ?? "";
 
-const GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
 const GITHUB_REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "owandakin-coder/agent-analyst";
-const GITHUB_BRANCH = Deno.env.get("ATZMA_GITHUB_BRANCH") ?? "main";
-const CONTROL_PATH = Deno.env.get("ATZMA_CONTROL_STATE_PATH") ?? "runtime/control_state.json";
-const TRADE_WORKFLOW = Deno.env.get("ATZMA_TRADE_WORKFLOW") ?? "trade.yml";
 const WORKER_SHARED_TOKEN = Deno.env.get("ATZMA_WORKER_SHARED_TOKEN") ?? "";
 const ALLOW_LEGACY_CONTROL_FALLBACK = (Deno.env.get("ATZMA_ALLOW_LEGACY_CONTROL_FALLBACK") ?? "").toLowerCase() === "1";
 
@@ -255,14 +251,6 @@ async function fetchYF(symbol: string): Promise<JsonMap> {
   }
 }
 
-async function githubRequest(path: string, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  headers.set("Accept", "application/vnd.github+json");
-  headers.set("User-Agent", "ATZMA-ControlPlane/1.0");
-  if (GITHUB_TOKEN) headers.set("Authorization", `Bearer ${GITHUB_TOKEN}`);
-  return fetchWithRetry(`https://api.github.com${path}`, { ...init, headers });
-}
-
 async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -332,7 +320,7 @@ async function loadControlState(): Promise<JsonMap> {
           _source: "control_state",
           updated_by: row.updated_by ?? null,
           command_version: row.command_version ?? 1,
-          can_dispatch: !!GITHUB_TOKEN,
+          can_dispatch: false,
         };
       }
     }
@@ -345,19 +333,12 @@ async function loadControlState(): Promise<JsonMap> {
     if (dbRes.ok) {
       const rows = await dbRes.json() as Array<{ event_payload?: JsonMap }>;
       const payload = rows[0]?.event_payload ?? {};
-      return { ...normalizeControlState(payload), _source: "supabase_db", can_dispatch: !!GITHUB_TOKEN };
+      return { ...normalizeControlState(payload), _source: "supabase_db", can_dispatch: false };
     }
   } catch {
-    // Fall back to GitHub-backed state for older deployments.
+    // Fall through to default control state for older deployments.
   }
-  const res = await githubRequest(`/repos/${GITHUB_REPO}/contents/${CONTROL_PATH}`);
-  if (res.status === 404) return { ...defaultControlState(), _source: "default", can_dispatch: !!GITHUB_TOKEN };
-  if (!res.ok) throw new Error(`GitHub control state returned ${res.status}`);
-  const payload = await res.json() as { content?: string };
-  const encoded = payload.content ?? "";
-  const decoded = encoded ? atob(encoded.replace(/\n/g, "")) : "{}";
-  const parsed = JSON.parse(decoded) as JsonMap;
-  return { ...normalizeControlState(parsed), _source: "github_repo", can_dispatch: !!GITHUB_TOKEN };
+  return { ...defaultControlState(), _source: "default", can_dispatch: false };
 }
 
 async function saveControlState(state: JsonMap, actor: string): Promise<JsonMap> {
@@ -374,7 +355,7 @@ async function saveControlState(state: JsonMap, actor: string): Promise<JsonMap>
       }),
     });
     if (controlRes.ok) {
-      const saved = { ...normalized, _source: "control_state", can_dispatch: !!GITHUB_TOKEN };
+      const saved = { ...normalized, _source: "control_state", can_dispatch: false };
       await appendControlEvent("control_state_updated", saved, null, null, Number(normalized.command_version ?? 1));
       return saved;
     }
@@ -393,63 +374,12 @@ async function saveControlState(state: JsonMap, actor: string): Promise<JsonMap>
       }),
     });
     if (res.ok) {
-      if (GITHUB_TOKEN) {
-        try {
-          const urlPath = `/repos/${GITHUB_REPO}/contents/${CONTROL_PATH}`;
-          const existing = await githubRequest(urlPath);
-          let sha: string | undefined;
-          if (existing.ok) {
-            const payload = await existing.json() as { sha?: string };
-            sha = payload.sha;
-          } else if (existing.status !== 404) {
-            throw new Error(`GitHub control state returned ${existing.status}`);
-          }
-          const body: JsonMap = {
-            message: `ATZMA control update by ${actor}`,
-            content: btoa(JSON.stringify(normalized, null, 2)),
-            branch: GITHUB_BRANCH,
-          };
-          if (sha) body.sha = sha;
-          await githubRequest(urlPath, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-        } catch {
-          // DB state is the source of truth; GitHub mirror is best effort only.
-        }
-      }
-      return { ...normalized, _source: "supabase_db", can_dispatch: !!GITHUB_TOKEN };
+      return { ...normalized, _source: "supabase_db", can_dispatch: false };
     }
   } catch {
-    // Fall through to GitHub-only persistence for older deployments.
+    // Fall through to explicit failure for older deployments.
   }
-
-  if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN secret is missing");
-  const urlPath = `/repos/${GITHUB_REPO}/contents/${CONTROL_PATH}`;
-  const existing = await githubRequest(urlPath);
-  let sha: string | undefined;
-  if (existing.ok) {
-    const payload = await existing.json() as { sha?: string };
-    sha = payload.sha;
-  } else if (existing.status !== 404) {
-    throw new Error(`GitHub control state returned ${existing.status}`);
-  }
-
-  const body: JsonMap = {
-    message: `ATZMA control update by ${actor}`,
-    content: btoa(JSON.stringify(normalized, null, 2)),
-    branch: GITHUB_BRANCH,
-  };
-  if (sha) body.sha = sha;
-
-  const res = await githubRequest(urlPath, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`GitHub control save returned ${res.status}`);
-  return { ...normalized, _source: "github_repo", can_dispatch: true };
+  throw new Error("Authoritative control state write failed");
 }
 
 async function applyControlAction(action: string, actor: string): Promise<JsonMap> {
@@ -486,25 +416,6 @@ async function applyControlAction(action: string, actor: string): Promise<JsonMa
   next.last_command_at = now;
   next.command_version = Number(next.command_version ?? 1) + 1;
   return saveControlState(next, actor);
-}
-
-async function dispatchTradeWorkflow(actor: string, inputs: JsonMap = {}) {
-  if (!GITHUB_TOKEN) throw new Error("GITHUB_TOKEN secret is missing");
-  const res = await githubRequest(`/repos/${GITHUB_REPO}/actions/workflows/${TRADE_WORKFLOW}/dispatches`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ref: GITHUB_BRANCH, inputs }),
-  });
-  if (!res.ok) throw new Error(`GitHub workflow dispatch returned ${res.status}`);
-  return {
-    status: "dispatched",
-    workflow: TRADE_WORKFLOW,
-    branch: GITHUB_BRANCH,
-    repo: GITHUB_REPO,
-    actor,
-    inputs,
-    dispatched_at: new Date().toISOString(),
-  };
 }
 
 async function authRequest(path: string, init: RequestInit = {}, useServiceRole = false): Promise<Response> {
@@ -580,7 +491,7 @@ async function ensureUserRows(user: JsonMap): Promise<void> {
   await restAdmin("/profiles?id=eq." + encodeURIComponent(id), {
     method: "PATCH",
     headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ email, display_name: displayName }),
+    body: JSON.stringify({ email, display_name: displayName, active_executor: "worker_pool" }),
   });
 
   const profileRes = await restAdmin(`/profiles?id=eq.${encodeURIComponent(id)}&select=id`);
@@ -589,7 +500,7 @@ async function ensureUserRows(user: JsonMap): Promise<void> {
     await restAdmin("/profiles", {
       method: "POST",
       headers: { "Prefer": "return=minimal" },
-      body: JSON.stringify({ id, email, display_name: displayName }),
+      body: JSON.stringify({ id, email, display_name: displayName, active_executor: "worker_pool" }),
     });
   }
 
@@ -611,6 +522,9 @@ async function fetchUserBundle(userId: string) {
   ]);
   const profile = ((await profileRes.json()) as JsonMap[])[0] ?? null;
   const preferences = ((await prefsRes.json()) as JsonMap[])[0] ?? null;
+  if (profile) {
+    profile.active_executor = "worker_pool";
+  }
   return { profile, preferences };
 }
 
@@ -1105,7 +1019,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
         system: "ATZMA",
         timestamp: new Date().toISOString(),
         github_repo: GITHUB_REPO,
-        control_plane: !!GITHUB_TOKEN,
+        control_plane: true,
+        executor: "worker_pool",
+        can_dispatch: false,
         broker_credentials_encryption: !!BROKER_CREDENTIAL_KEY,
       });
     }
@@ -1273,7 +1189,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         timezone: typeof body.timezone === "string" ? body.timezone : "Asia/Jerusalem",
         account_tier: typeof body.account_tier === "string" ? body.account_tier : "paper",
         trading_mode: typeof body.trading_mode === "string" ? body.trading_mode : "paper",
-        active_executor: typeof body.active_executor === "string" ? body.active_executor : "github_actions",
+        active_executor: typeof body.active_executor === "string" ? body.active_executor : "worker_pool",
       };
       const res = await restAdmin(`/profiles?id=eq.${encodeURIComponent(String(user.id))}`, {
         method: "PATCH",

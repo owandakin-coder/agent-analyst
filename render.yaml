@@ -1,0 +1,37 @@
+services:
+  - type: worker
+    name: atzma-worker
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python user_execution_worker.py --loop
+    envVars:
+      - key: ATZMA_REMOTE_API_BASE
+        value: https://sofowpweliticltlbxrj.supabase.co/functions/v1/api
+      - key: ATZMA_WORKER_POLL_SECONDS
+        value: "10"
+      - key: ATZMA_WORKER_LEASE_SECONDS
+        value: "90"
+      - key: ATZMA_RECONCILE_INTERVAL_SECONDS
+        value: "30"
+      - key: ATZMA_FAIL_CLOSED_CONTROL
+        value: "1"
+      - key: ATZMA_REQUIRE_FRESH_QUOTES
+        value: "1"
+      - key: ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK
+        value: "0"
+      - key: ATZMA_JSON_LOGS
+        value: "1"
+      - key: ATZMA_WORKER_SHARED_TOKEN
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_BASE_URL
+        value: https://paper-api.alpaca.markets/v2
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false

@@ -31,6 +31,7 @@ This is the minimum release checklist for launching ATZMA tomorrow without guess
 - Confirm no duplicate run is created from the same manual action
 - Confirm the latest job contains a readable decision summary
 - Confirm the summary mentions regime or agent reasoning, not only raw status
+- Confirm the persistent worker is online and claiming jobs
 
 ## 3.5. Multi-agent and regime checks
 
@@ -41,8 +42,8 @@ This is the minimum release checklist for launching ATZMA tomorrow without guess
 ## 4. Control plane
 
 - Confirm `Pause`, `Resume`, and `Emergency Stop` update correctly
-- Confirm `Run Once` is disabled when control dispatch is unavailable
-- Confirm GitHub Actions still runs from the shared control state
+- Confirm remote control state shows `executor = worker_pool`
+- Confirm `can_dispatch = false`
 
 ## 5. Environment and secrets
 
@@ -50,9 +51,9 @@ Required for launch:
 
 - `ALPACA_API_KEY`
 - `ALPACA_SECRET_KEY`
-- `GITHUB_TOKEN`
 - `SUPABASE_ACCESS_TOKEN`
 - `ATZMA_BROKER_CREDENTIAL_KEY`
+- `ATZMA_WORKER_SHARED_TOKEN`
 
 Recommended:
 
@@ -76,12 +77,13 @@ Go only if all are true:
 - Auth flow works end-to-end
 - Broker verify works with a real Paper account
 - Execution queue can create and finish a job
+- Persistent worker is running on Render
 - Multi-agent decisions produce readable explanations
 - Health check passes
 - Test suite passes
 - Guest users see only `Locked` state
 - `/health` returns `200`
-- Auth rate limiting is active
+- `/control` returns `executor=worker_pool`
 - Duplicate `Run Now` requests do not create extra queued jobs
 
 No-go if any of these fail:
