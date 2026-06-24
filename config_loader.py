@@ -171,6 +171,26 @@ class Config:
         return float(self._data["live"]["stop_loss_pct"])
 
     @property
+    def live_max_gross_exposure(self) -> float:
+        return float(self.get("live", "max_gross_exposure", default=0.65))
+
+    @property
+    def live_max_positions(self) -> int:
+        return int(self.get("live", "max_positions", default=8))
+
+    @property
+    def live_max_single_order_notional_pct(self) -> float:
+        return float(self.get("live", "max_single_order_notional_pct", default=0.04))
+
+    @property
+    def live_no_margin(self) -> bool:
+        return bool(self.get("live", "no_margin", default=True))
+
+    @property
+    def live_auto_deleverage(self) -> bool:
+        return bool(self.get("live", "auto_deleverage", default=True))
+
+    @property
     def live_price_min(self) -> float:
         return float(self._data["live"]["price_min"])
 

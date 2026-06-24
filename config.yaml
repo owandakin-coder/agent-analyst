@@ -60,11 +60,16 @@ costs:
 
 live:
   min_data_days: 200
-  buy_threshold: 0.05
+  buy_threshold: 0.08
   sell_threshold: -0.05
-  max_concentration: 0.30
-  cash_buffer_pct: 0.05
-  stop_loss_pct: 0.08
+  max_concentration: 0.08
+  max_gross_exposure: 0.65
+  max_positions: 8
+  max_single_order_notional_pct: 0.04
+  cash_buffer_pct: 0.30
+  stop_loss_pct: 0.06
+  no_margin: true
+  auto_deleverage: true
   price_min: 1.0
   price_max: 10000.0
   poll_seconds: 60

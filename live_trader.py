@@ -73,8 +73,13 @@ try:
     BUY_THRESHOLD = _CFG.live_buy_threshold
     SELL_THRESHOLD = _CFG.live_sell_threshold
     MAX_CONCENTRATION = _CFG.live_max_concentration
+    MAX_GROSS_EXPOSURE = _CFG.live_max_gross_exposure
+    MAX_POSITIONS = _CFG.live_max_positions
+    MAX_SINGLE_ORDER_NOTIONAL_PCT = _CFG.live_max_single_order_notional_pct
     CASH_BUFFER_PCT = _CFG.live_cash_buffer_pct
     STOP_LOSS_PCT = _CFG.live_stop_loss_pct
+    NO_MARGIN = _CFG.live_no_margin
+    AUTO_DELEVERAGE = _CFG.live_auto_deleverage
     PRICE_MIN = _CFG.live_price_min
     PRICE_MAX = _CFG.live_price_max
     DEFAULT_POLL_SECONDS = _CFG.live_poll_seconds
@@ -86,8 +91,13 @@ except Exception:
     BUY_THRESHOLD = 0.05
     SELL_THRESHOLD = -0.05
     MAX_CONCENTRATION = 0.30
+    MAX_GROSS_EXPOSURE = 0.65
+    MAX_POSITIONS = 8
+    MAX_SINGLE_ORDER_NOTIONAL_PCT = 0.04
     CASH_BUFFER_PCT = 0.05
     STOP_LOSS_PCT = 0.08
+    NO_MARGIN = True
+    AUTO_DELEVERAGE = True
     PRICE_MIN = 1.0
     PRICE_MAX = 10_000.0
     DEFAULT_POLL_SECONDS = 60
@@ -153,6 +163,60 @@ class LiveTrader:
         self._entry_prices:   dict[str, float] = {}
         self._trailing_highs: dict[str, float] = {}   # max price since entry
         self.stop_loss_pct: float = STOP_LOSS_PCT
+
+    def _portfolio_market_value(self, prices: dict[str, float], positions: dict[str, float]) -> float:
+        return float(sum(max(0.0, positions.get(t, 0.0)) * max(0.0, prices.get(t, 0.0)) for t in self.tickers))
+
+    def _active_positions_count(self, positions: dict[str, float]) -> int:
+        return sum(1 for qty in positions.values() if qty and qty > 0)
+
+    def _auto_deleverage_if_needed(
+        self,
+        prices: dict[str, float],
+        positions: dict[str, float],
+        cash: float,
+        net_worth_total: float,
+        order_events: list[dict],
+    ) -> tuple[float, dict[str, float]]:
+        if not AUTO_DELEVERAGE or net_worth_total <= 0:
+            return cash, positions
+
+        reserve_cash = net_worth_total * CASH_BUFFER_PCT
+        market_value = self._portfolio_market_value(prices, positions)
+        gross_exposure = market_value / net_worth_total if net_worth_total > 0 else 0.0
+        needs_deleverage = (NO_MARGIN and cash < reserve_cash) or gross_exposure > MAX_GROSS_EXPOSURE
+        if not needs_deleverage:
+            return cash, positions
+
+        details = self.broker.get_position_details() if hasattr(self.broker, "get_position_details") else {}
+        ranking: list[tuple[float, str, float, float]] = []
+        for ticker, held in positions.items():
+            price = prices.get(ticker, 0.0)
+            if held <= 0 or price <= 0:
+                continue
+            unrealized = float((details.get(ticker) or {}).get("unrealized_pl", 0.0))
+            ranking.append((unrealized, ticker, held, price))
+
+        ranking.sort(key=lambda item: item[0])
+        for _, ticker, held, price in ranking:
+            market_value = self._portfolio_market_value(prices, positions)
+            gross_exposure = market_value / net_worth_total if net_worth_total > 0 else 0.0
+            if cash >= reserve_cash and gross_exposure <= MAX_GROSS_EXPOSURE:
+                break
+            shares_to_sell = max(1, int(np.ceil(held * 0.25)))
+            log.warning(
+                "AUTO-DELEVERAGING %s: selling %s shares to restore cash/exposure limits.",
+                ticker,
+                shares_to_sell,
+            )
+            result = self.broker.sell(ticker, shares_to_sell, price)
+            order_events.append({"event_type": "auto_deleverage", **result})
+            if result.get("status") in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
+                continue
+            positions[ticker] = max(0.0, positions.get(ticker, 0.0) - shares_to_sell)
+            cash += shares_to_sell * price
+
+        return cash, positions
 
     # ──────────────────────────────────────────────────────────────────────────
     # לולאה ראשית
@@ -643,6 +707,9 @@ class LiveTrader:
             except Exception as exc:
                 log.warning(f"Could not refresh cash after sells: {exc}")
 
+        net_worth_total = cash + self._portfolio_market_value(prices, positions)
+        cash, positions = self._auto_deleverage_if_needed(prices, positions, cash, net_worth_total, order_events)
+
         # ── קניות אחר כך ─────────────────────────────────────────────────────
         max_concentration = MAX_CONCENTRATION
 
@@ -651,14 +718,24 @@ class LiveTrader:
         total_buy_signal = sum(float(action[i]) for i, _ in buy_actions) or 1.0
 
         # חישוב שווי תיק כולל (מזומן + פוזיציות)
-        net_worth_total = cash + sum(
-            positions.get(t, 0.0) * prices.get(t, 0.0) for t in self.tickers
+        net_worth_total = cash + self._portfolio_market_value(prices, positions)
+        reserve_cash = max(0.0, net_worth_total * CASH_BUFFER_PCT)
+        available_cash = max(0.0, cash - reserve_cash) if NO_MARGIN else max(0.0, cash)
+        remaining_gross_room = max(
+            0.0,
+            net_worth_total * MAX_GROSS_EXPOSURE - self._portfolio_market_value(prices, positions),
         )
+        if NO_MARGIN and available_cash < MIN_TRADE_VALUE:
+            log.info("Skipping buys: available cash after reserve is below minimum trade value.")
+            return order_events
 
         for i, ticker in buy_actions:
             act   = float(action[i])
             price = prices.get(ticker, 0.0)
             if price <= 0:
+                continue
+            if positions.get(ticker, 0.0) <= 0 and self._active_positions_count(positions) >= MAX_POSITIONS:
+                log.info("Skipping BUY %s: max active positions limit reached (%s).", ticker, MAX_POSITIONS)
                 continue
 
             # בדיקת ריכוזיות: שווי נוכחי + קנייה מתוכננת לא יעלו על 30%
@@ -672,10 +749,15 @@ class LiveTrader:
                 continue
 
             # חלוקת מזומן פרופורציונלית לעוצמת הסיגנל
-            budget = cash * (act / total_buy_signal) * (1 - CASH_BUFFER_PCT)
+            budget = available_cash * (act / total_buy_signal)
 
             # הגבל את התקציב כך שלא נחרוג מ-30%
-            budget = min(budget, max_allowed - current_value)
+            budget = min(
+                budget,
+                max_allowed - current_value,
+                net_worth_total * MAX_SINGLE_ORDER_NOTIONAL_PCT,
+                remaining_gross_room,
+            )
             if budget < MIN_TRADE_VALUE:
                 log.info(
                     f"Skipping BUY {ticker}: budget ${budget:.2f} below minimum ${MIN_TRADE_VALUE:.2f}"
@@ -702,7 +784,12 @@ class LiveTrader:
                         self._trailing_highs.get(ticker, price), price
                     )
                     positions[ticker] = total_shares
-                    cash = max(0.0, cash - shares_to_buy * price)
+                    cash = cash - shares_to_buy * price
+                    available_cash = max(0.0, cash - reserve_cash) if NO_MARGIN else max(0.0, cash)
+                    remaining_gross_room = max(
+                        0.0,
+                        net_worth_total * MAX_GROSS_EXPOSURE - self._portfolio_market_value(prices, positions),
+                    )
 
         return order_events
 

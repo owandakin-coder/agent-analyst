@@ -40,12 +40,16 @@ try:
     SUBMITTED_ORDERS_FILE = CFG.broker_submitted_orders_file
     DUPLICATE_WINDOW_DAYS = CFG.broker_duplicate_window_days
     RECENT_ORDERS_LIMIT = CFG.broker_recent_orders_limit
+    NO_MARGIN = CFG.live_no_margin
+    CASH_BUFFER_PCT = CFG.live_cash_buffer_pct
 except Exception:
     LOG_FILE = "paper_orders.log"
     TRADES_CSV = "trades_history.csv"
     SUBMITTED_ORDERS_FILE = "logs/submitted_orders.json"
     DUPLICATE_WINDOW_DAYS = 1
     RECENT_ORDERS_LIMIT = 100
+    NO_MARGIN = True
+    CASH_BUFFER_PCT = 0.30
 
 if os.getenv("ATZMA_LOAD_DOTENV", "").strip().lower() in {"1", "true", "yes"}:
     load_dotenv()
@@ -113,6 +117,29 @@ class AlpacaBrokerAPI:
 
     def buy(self, ticker: str, shares: float, price: float | None = None) -> dict:
         shares = max(1, int(shares))
+        snapshot = self.reconcile_account_state()
+        if NO_MARGIN:
+            price_for_check = float(price or 0.0)
+            if price_for_check <= 0:
+                latest = self.get_latest_prices([ticker]).get(ticker, 0.0)
+                price_for_check = float(latest or 0.0)
+            required_cash = shares * max(price_for_check, 0.0)
+            reserve_cash = max(0.0, float(snapshot.get("equity", 0.0)) * CASH_BUFFER_PCT)
+            available_cash = max(0.0, float(snapshot.get("cash", 0.0)) - reserve_cash)
+            if required_cash <= 0 or required_cash > available_cash:
+                log.warning(
+                    "BUY rejected by cash guard: %s %s requires $%.2f, available $%.2f",
+                    shares,
+                    ticker,
+                    required_cash,
+                    available_cash,
+                )
+                return {
+                    "status": "REJECTED",
+                    "reason": "insufficient_cash",
+                    "required_cash": required_cash,
+                    "available_cash": available_cash,
+                }
         order_info = {
             "side": "BUY",
             "ticker": ticker,
@@ -122,7 +149,7 @@ class AlpacaBrokerAPI:
         }
         if not self._request_approval(order_info):
             return self._log_rejected(order_info)
-        return self._submit_order(ticker, shares, "buy", price=price)
+        return self._submit_order(ticker, shares, "buy", price=price, account_snapshot=snapshot)
 
     def sell(self, ticker: str, shares: float, price: float | None = None) -> dict:
         shares = max(1, int(shares))
