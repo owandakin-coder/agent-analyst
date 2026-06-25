@@ -68,6 +68,31 @@ def test_stale_quotes_abort_execution(monkeypatch, multi_featured):
     assert executed["called"] is False
 
 
+def test_recent_observed_at_allows_execution_when_exchange_timestamp_is_old(monkeypatch, multi_featured):
+    trader = _make_trader(monkeypatch, multi_featured)
+    monkeypatch.setenv("ATZMA_REQUIRE_FRESH_QUOTES", "1")
+    monkeypatch.setattr("live_trader.load_control_state", lambda: {"trading_enabled": True, "emergency_stop": False})
+    monkeypatch.setattr("live_trader.can_trade", lambda state: (True, None))
+    monkeypatch.setattr(trader.broker, "get_latest_prices", lambda tickers: {ticker: 100.0 for ticker in tickers})
+    old = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    fresh = datetime.now(timezone.utc).isoformat()
+    monkeypatch.setattr(trader.broker, "get_latest_quotes_info", lambda tickers: {
+        ticker: {
+            "price": 100.0,
+            "timestamp": old,
+            "observed_at": fresh,
+            "source": "alpaca_latest_trade",
+        }
+        for ticker in tickers
+    })
+    monkeypatch.setattr(trader.broker, "reconcile_account_state", lambda: {"cash": 100_000.0, "equity": 100_000.0, "positions": {}, "position_details": {}})
+    executed = {"called": False}
+    monkeypatch.setattr(trader, "_execute_actions", lambda *args, **kwargs: executed.__setitem__("called", True) or [])
+
+    trader.run_once()
+    assert executed["called"] is True
+
+
 def test_control_plane_outage_fails_closed(monkeypatch, multi_featured):
     trader = _make_trader(monkeypatch, multi_featured)
     monkeypatch.setenv("ATZMA_FAIL_CLOSED_CONTROL", "1")

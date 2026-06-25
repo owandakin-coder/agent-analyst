@@ -22,6 +22,7 @@ try:
     from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestQuoteRequest
+    from alpaca.data.requests import StockLatestTradeRequest
     _ALPACA_AVAILABLE = True
 except ImportError:
     TradingClient = None
@@ -31,6 +32,7 @@ except ImportError:
     OrderSide = None
     QueryOrderStatus = None
     TimeInForce = None
+    StockLatestTradeRequest = None
     _ALPACA_AVAILABLE = False
 
 try:
@@ -519,6 +521,7 @@ class AlpacaBrokerAPI:
 
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:
         prices: dict[str, float] = {}
+        observed_at = datetime.now(timezone.utc).isoformat()
         try:
             request = StockLatestQuoteRequest(symbol_or_symbols=tickers)
             quotes = self._call_with_retry("get_stock_latest_quote", self._data.get_stock_latest_quote, request)
@@ -538,10 +541,34 @@ class AlpacaBrokerAPI:
                 self._last_quotes_info[ticker] = {
                     "price": prices.get(ticker),
                     "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else (str(timestamp) if timestamp else None),
+                    "observed_at": observed_at,
                     "source": "alpaca_latest_quote",
                 }
         except Exception as exc:
             log.warning("Could not fetch prices: %s", exc)
+        missing = [ticker for ticker in tickers if ticker not in prices]
+        if missing and StockLatestTradeRequest is not None:
+            try:
+                request = StockLatestTradeRequest(symbol_or_symbols=missing)
+                trades = self._call_with_retry("get_stock_latest_trade", self._data.get_stock_latest_trade, request)
+                observed_at = datetime.now(timezone.utc).isoformat()
+                for ticker in missing:
+                    trade = trades.get(ticker) if hasattr(trades, "get") else None
+                    if trade is None:
+                        continue
+                    trade_price = float(getattr(trade, "price", 0.0) or 0.0)
+                    if trade_price <= 0:
+                        continue
+                    prices[ticker] = trade_price
+                    timestamp = getattr(trade, "timestamp", None)
+                    self._last_quotes_info[ticker] = {
+                        "price": trade_price,
+                        "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else (str(timestamp) if timestamp else None),
+                        "observed_at": observed_at,
+                        "source": "alpaca_latest_trade",
+                    }
+            except Exception as exc:
+                log.warning("Could not fetch latest trades for missing prices: %s", exc)
         return prices
 
     def get_latest_quotes_info(self, tickers: list[str]) -> dict[str, dict]:

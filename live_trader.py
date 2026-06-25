@@ -547,17 +547,22 @@ class LiveTrader:
             if ticker not in prices:
                 return False
             info = quote_info.get(ticker) or {}
-            timestamp = info.get("timestamp")
-            if not timestamp:
-                return False
-            try:
-                quote_time = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
-            except Exception:
-                return False
-            if quote_time.tzinfo is None:
-                quote_time = quote_time.replace(tzinfo=timezone.utc)
-            age = (now - quote_time.astimezone(timezone.utc)).total_seconds()
-            if age < 0 or age > max_age:
+            candidates = [info.get("observed_at"), info.get("timestamp")]
+            fresh = False
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                try:
+                    quote_time = datetime.fromisoformat(str(candidate).replace("Z", "+00:00"))
+                except Exception:
+                    continue
+                if quote_time.tzinfo is None:
+                    quote_time = quote_time.replace(tzinfo=timezone.utc)
+                age = (now - quote_time.astimezone(timezone.utc)).total_seconds()
+                if 0 <= age <= max_age:
+                    fresh = True
+                    break
+            if not fresh:
                 return False
         return True
 
