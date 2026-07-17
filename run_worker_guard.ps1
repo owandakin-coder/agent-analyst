@@ -2,10 +2,10 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 $logsDir = Join-Path $root "logs"
-$guardLog = Join-Path $logsDir "realtime_guard.log"
-$loopLog = Join-Path $logsDir "realtime_loop.log"
-$loopErr = Join-Path $logsDir "realtime_loop.err"
-$bootstrapLog = Join-Path $logsDir "realtime_guard.bootstrap.log"
+$guardLog = Join-Path $logsDir "worker_guard.log"
+$loopLog = Join-Path $logsDir "worker_loop.log"
+$loopErr = Join-Path $logsDir "worker_loop.err"
+$bootstrapLog = Join-Path $logsDir "worker_guard.bootstrap.log"
 $pythonExe = "C:\Users\Ea Arage\AppData\Local\Python\pythoncore-3.14-64\python.exe"
 
 if (-not (Test-Path $pythonExe)) {
@@ -20,9 +20,6 @@ Get-Content .env | ForEach-Object {
   }
 }
 
-if (-not $env:ATZMA_FAIL_CLOSED_CONTROL) { $env:ATZMA_FAIL_CLOSED_CONTROL = "1" }
-if (-not $env:ATZMA_REQUIRE_FRESH_QUOTES) { $env:ATZMA_REQUIRE_FRESH_QUOTES = "1" }
-if (-not $env:ATZMA_MAX_QUOTE_AGE_SECONDS) { $env:ATZMA_MAX_QUOTE_AGE_SECONDS = "120" }
 if (-not $env:ATZMA_ENV) { $env:ATZMA_ENV = "production" }
 $env:PYTHONUNBUFFERED = "1"
 
@@ -31,10 +28,10 @@ Add-Content -Path $bootstrapLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
 while ($true) {
   $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-  Add-Content -Path $guardLog -Value "$stamp START main.py --mode live_paper --auto-approve"
+  Add-Content -Path $guardLog -Value "$stamp START user_execution_worker.py --loop"
   try {
     $proc = Start-Process -FilePath $pythonExe `
-      -ArgumentList @("main.py", "--mode", "live_paper", "--auto-approve") `
+      -ArgumentList @("user_execution_worker.py", "--loop") `
       -WorkingDirectory $root `
       -NoNewWindow `
       -RedirectStandardOutput $loopLog `

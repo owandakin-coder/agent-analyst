@@ -36,6 +36,10 @@ def warn(label: str, detail: str = ""):
     print(message)
 
 
+def remote_api_base() -> str:
+    return os.getenv("ATZMA_REMOTE_API_BASE", "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api").rstrip("/")
+
+
 def check_config() -> bool:
     print("\n[1] Config")
     try:
@@ -137,12 +141,17 @@ def check_env() -> bool:
             check(f"{key} (optional)", True)
         else:
             warn(f"{key} (optional)", "not set")
-    for key in ["SUPABASE_ACCESS_TOKEN", "ATZMA_BROKER_CREDENTIAL_KEY", "ATZMA_WORKER_SHARED_TOKEN"]:
+    for key in ["SUPABASE_ACCESS_TOKEN", "ATZMA_WORKER_SHARED_TOKEN"]:
         value = os.getenv(key, "")
         if value:
             check(f"{key} (launch)", True)
         else:
             warn(f"{key} (launch)", "not set")
+    broker_key = os.getenv("ATZMA_BROKER_CREDENTIAL_KEY", "")
+    if broker_key:
+        check("ATZMA_BROKER_CREDENTIAL_KEY (local optional)", True)
+    else:
+        warn("ATZMA_BROKER_CREDENTIAL_KEY (local optional)", "not set locally; remote edge secret must be enabled")
     return ok
 
 
@@ -191,25 +200,35 @@ def check_model() -> bool:
 
 def check_worker_runtime() -> bool:
     print("\n[7] Worker Runtime")
-    url = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api/control"
+    base = remote_api_base()
+    url = f"{base}/control"
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=10) as response:
             payload = json.loads(response.read())
         executor_ok = payload.get("executor") == "worker_pool"
         dispatch_ok = payload.get("can_dispatch") is False
-        return check(
+        ok = check(
             "Remote control runtime",
             executor_ok and dispatch_ok,
             f"executor={payload.get('executor')} | can_dispatch={payload.get('can_dispatch')}",
         )
+        health_request = urllib.request.Request(f"{base}/health", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(health_request, timeout=10) as response:
+            health_payload = json.loads(response.read())
+        encryption_ok = check(
+            "Broker credential encryption",
+            health_payload.get("broker_credentials_encryption") is True,
+            f"enabled={health_payload.get('broker_credentials_encryption')}",
+        )
+        return ok and encryption_ok
     except Exception as exc:
         return check("Remote control runtime", False, str(exc))
 
 
 def check_remote_app() -> bool:
     print("\n[8] Remote App")
-    base = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api"
+    base = remote_api_base()
     checks = [
         ("Health endpoint", f"{base}/health", 200),
         ("Control endpoint", f"{base}/control", 200),

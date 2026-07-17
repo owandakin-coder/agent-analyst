@@ -7,6 +7,7 @@ def test_default_control_state_allows_trading(monkeypatch, tmp_path):
     monkeypatch.setattr(cp, "LOCAL_CONTROL_STATE_FILE", tmp_path / "control_state.local.json")
     monkeypatch.setenv("GITHUB_REPOSITORY", "")
     monkeypatch.setenv("GITHUB_TOKEN", "")
+    monkeypatch.setenv("ATZMA_ENV", "test")
     monkeypatch.setenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "1")
     monkeypatch.setenv("ATZMA_FAIL_CLOSED_CONTROL", "0")
 
@@ -21,6 +22,7 @@ def test_pause_resume_stop_cycle_uses_local_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(cp, "LOCAL_CONTROL_STATE_FILE", tmp_path / "control_state.local.json")
     monkeypatch.setenv("GITHUB_REPOSITORY", "")
     monkeypatch.setenv("GITHUB_TOKEN", "")
+    monkeypatch.setenv("ATZMA_ENV", "test")
     monkeypatch.setenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "1")
     monkeypatch.setenv("ATZMA_FAIL_CLOSED_CONTROL", "0")
 
@@ -43,6 +45,7 @@ def test_local_control_state_persists(monkeypatch, tmp_path):
     monkeypatch.setattr(cp, "LOCAL_CONTROL_STATE_FILE", state_file)
     monkeypatch.setenv("GITHUB_REPOSITORY", "")
     monkeypatch.setenv("GITHUB_TOKEN", "")
+    monkeypatch.setenv("ATZMA_ENV", "test")
     monkeypatch.setenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "1")
     monkeypatch.setenv("ATZMA_FAIL_CLOSED_CONTROL", "0")
 
@@ -52,3 +55,16 @@ def test_local_control_state_persists(monkeypatch, tmp_path):
     loaded = cp.load_control_state(prefer_remote=False)
     assert loaded["updated_by"] == "persist"
     assert loaded["status"] == "paused"
+
+
+def test_local_control_state_disabled_in_production(monkeypatch, tmp_path):
+    monkeypatch.setattr(cp, "LOCAL_CONTROL_STATE_FILE", tmp_path / "control_state.local.json")
+    monkeypatch.setenv("ATZMA_ENV", "production")
+    monkeypatch.setenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "1")
+
+    try:
+        cp.load_control_state(prefer_remote=False)
+    except RuntimeError as exc:
+        assert "disabled" in str(exc).lower()
+    else:
+        raise AssertionError("Expected RuntimeError when local fallback is used in production")

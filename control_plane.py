@@ -95,7 +95,14 @@ def control_api_url() -> str:
 
 
 def allow_local_control_fallback() -> bool:
-    return os.getenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+    enabled = os.getenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "0").strip().lower() in {"1", "true", "yes"}
+    env_name = os.getenv("ATZMA_ENV", "production").strip().lower()
+    return enabled and env_name in {"dev", "development", "test"}
+
+
+def _require_local_fallback_allowed() -> None:
+    if not allow_local_control_fallback():
+        raise RuntimeError("Local control fallback is disabled outside development/test mode")
 
 
 def default_control_state() -> dict:
@@ -201,6 +208,7 @@ def load_remote_control_state() -> dict:
 
 
 def load_local_control_state() -> dict:
+    _require_local_fallback_allowed()
     state_file = local_control_state_file()
     if state_file.exists():
         with open(state_file, encoding="utf-8") as handle:
@@ -220,10 +228,13 @@ def load_control_state(prefer_remote: bool = True) -> dict:
         except Exception:
             if not allow_local_control_fallback():
                 raise
+    else:
+        _require_local_fallback_allowed()
     return load_local_control_state()
 
 
 def save_local_control_state(state: dict) -> dict:
+    _require_local_fallback_allowed()
     state_file = local_control_state_file()
     state_file.parent.mkdir(parents=True, exist_ok=True)
     normalized = normalize_control_state(state)
