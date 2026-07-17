@@ -24,6 +24,11 @@ class _DummyDataManager:
     def load_all(self, force_download=True):
         raise AssertionError("load_all should be patched in the test")
 
+    def _compute_features(self, raw, ticker):
+        from data_manager import DataManager
+        dm = DataManager.__new__(DataManager)
+        return dm._compute_features(raw, ticker)
+
 
 def _make_trader(monkeypatch, multi_featured):
     from broker_api import BrokerAPIStub
@@ -48,6 +53,25 @@ def _make_trader(monkeypatch, multi_featured):
     monkeypatch.setattr(trader, "_send_daily_summary", lambda *args, **kwargs: None)
     monkeypatch.setattr("live_trader.write_last_decision", lambda payload: None)
     return trader
+
+
+def _build_trader():
+    from broker_api import BrokerAPIStub
+    from live_trader import LiveTrader
+    from risk_manager import RiskManager
+
+    broker = BrokerAPIStub()
+    broker.set_cash(100_000.0)
+    risk_manager = RiskManager(initial_capital=100_000.0)
+    return LiveTrader(
+        model=_DummyModel(),
+        broker=broker,
+        data_manager=_DummyDataManager(),
+        risk_manager=risk_manager,
+        vec_norm=_DummyVecNorm(),
+        tickers=["AAPL", "MSFT", "GOOGL"],
+        initial_capital=100_000.0,
+    )
 
 
 def test_stale_quotes_abort_execution(monkeypatch, multi_featured):
@@ -137,3 +161,39 @@ def test_daily_loss_breach_halts_execution(monkeypatch, multi_featured):
 
     assert trader.run_once() is None
     assert executed["called"] is False
+
+
+def test_fetch_fresh_data_falls_back_to_broker_bars(monkeypatch, raw_ohlcv):
+    trader = _build_trader()
+    monkeypatch.setattr(trader.data_manager, "load_all", lambda force_download=True: (_ for _ in ()).throw(ValueError("yf down")))
+    monkeypatch.setattr(
+        trader.broker,
+        "get_historical_bars",
+        lambda tickers, start, end: {ticker: raw_ohlcv.copy() for ticker in tickers},
+        raising=False,
+    )
+
+    data = trader._fetch_fresh_data()
+
+    assert set(data.keys()) == {"AAPL", "MSFT", "GOOGL"}
+    assert all("close" in df.columns for df in data.values())
+    assert all(len(df) >= 30 for df in data.values())
+
+
+def test_detect_regime_uses_existing_spy_data(monkeypatch, featured_df):
+    trader = _build_trader()
+    spy_df = featured_df.copy()
+    spy_df["close"] = np.linspace(100, 140, len(spy_df))
+
+    called = {"downloaded": False}
+
+    def fail_download(*args, **kwargs):
+        called["downloaded"] = True
+        raise AssertionError("yfinance should not be called when SPY is already present")
+
+    monkeypatch.setitem(__import__("sys").modules, "yfinance", type("YF", (), {"download": staticmethod(fail_download)}))
+
+    signal = trader._detect_regime({"SPY": spy_df})
+
+    assert signal is not None
+    assert called["downloaded"] is False

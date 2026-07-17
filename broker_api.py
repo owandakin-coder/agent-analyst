@@ -21,8 +21,9 @@ try:
     from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
     from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
     from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockLatestQuoteRequest
+    from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
     from alpaca.data.requests import StockLatestTradeRequest
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
     _ALPACA_AVAILABLE = True
 except ImportError:
     TradingClient = None
@@ -32,7 +33,10 @@ except ImportError:
     OrderSide = None
     QueryOrderStatus = None
     TimeInForce = None
+    StockBarsRequest = None
     StockLatestTradeRequest = None
+    TimeFrame = None
+    TimeFrameUnit = None
     _ALPACA_AVAILABLE = False
 
 try:
@@ -574,6 +578,57 @@ class AlpacaBrokerAPI:
     def get_latest_quotes_info(self, tickers: list[str]) -> dict[str, dict]:
         self.get_latest_prices(tickers)
         return {ticker: dict(self._last_quotes_info.get(ticker, {})) for ticker in tickers}
+
+    def get_historical_bars(
+        self,
+        tickers: list[str],
+        *,
+        start: str,
+        end: str,
+        timeframe=None,
+        limit: int | None = None,
+    ):
+        import pandas as pd
+
+        if not tickers:
+            return {}
+        if timeframe is None:
+            timeframe = TimeFrame(1, TimeFrameUnit.Day) if TimeFrame and TimeFrameUnit else "1Day"
+
+        request = StockBarsRequest(
+            symbol_or_symbols=tickers,
+            timeframe=timeframe,
+            start=start,
+            end=end,
+            limit=limit,
+            adjustment="raw",
+            feed="iex" if self.paper else None,
+        )
+        barset = self._call_with_retry("get_stock_bars", self._data.get_stock_bars, request)
+        raw_map = getattr(barset, "data", None) or {}
+        frames = {}
+        for ticker in tickers:
+            ticker_bars = raw_map.get(ticker) or []
+            if not ticker_bars:
+                continue
+            rows = []
+            for bar in ticker_bars:
+                rows.append({
+                    "timestamp": getattr(bar, "timestamp", None),
+                    "Open": float(getattr(bar, "open", 0.0) or 0.0),
+                    "High": float(getattr(bar, "high", 0.0) or 0.0),
+                    "Low": float(getattr(bar, "low", 0.0) or 0.0),
+                    "Close": float(getattr(bar, "close", 0.0) or 0.0),
+                    "Volume": float(getattr(bar, "volume", 0.0) or 0.0),
+                })
+            frame = pd.DataFrame(rows)
+            if frame.empty:
+                continue
+            frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
+            frame = frame.set_index("timestamp").sort_index()
+            frame.index = frame.index.tz_convert(None)
+            frames[ticker] = frame[["Open", "High", "Low", "Close", "Volume"]]
+        return frames
 
     def find_order_by_client_order_id(self, client_order_id: str):
         try:

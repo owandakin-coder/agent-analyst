@@ -500,9 +500,41 @@ class LiveTrader:
         # עדכון טמפורלי של DataManager
         self.data_manager.start = start
         self.data_manager.end   = end
+        try:
+            data = self.data_manager.load_all(force_download=True)
+        except Exception as exc:
+            log.warning("Primary market data fetch failed: %s. Trying broker bars fallback.", exc)
+            data = self._fetch_broker_feature_data(start=start, end=end, tickers=self.tickers)
+            if not data:
+                raise
+            return data
 
-        data = self.data_manager.load_all(force_download=True)
+        missing = [
+            ticker for ticker in self.tickers
+            if ticker not in data or data[ticker] is None or len(data[ticker]) < WINDOW_SIZE
+        ]
+        if missing:
+            log.warning("Market data missing/incomplete for %s. Backfilling from broker bars.", missing)
+            fallback = self._fetch_broker_feature_data(start=start, end=end, tickers=missing)
+            data.update(fallback)
         return data
+
+    def _fetch_broker_feature_data(self, *, start: str, end: str, tickers: list[str]) -> dict[str, pd.DataFrame]:
+        get_bars = getattr(self.broker, "get_historical_bars", None)
+        compute_features = getattr(self.data_manager, "_compute_features", None)
+        if not callable(get_bars) or not callable(compute_features):
+            return {}
+
+        frames = get_bars(tickers, start=start, end=end)
+        featured: dict[str, pd.DataFrame] = {}
+        for ticker, raw in frames.items():
+            if raw is None or raw.empty:
+                continue
+            try:
+                featured[ticker] = compute_features(raw.copy(), ticker)
+            except Exception as exc:
+                log.warning("Broker bar feature build failed for %s: %s", ticker, exc)
+        return featured
 
     def validate_prices(
         self,
@@ -921,33 +953,25 @@ class LiveTrader:
 
     def _detect_regime(self, fresh_data: dict[str, "pd.DataFrame"]):
         """
-        Downloads SPY data and runs RegimeDetector.
+        Uses SPY from the current market snapshot when available and only
+        falls back to a direct download if needed.
         Returns RegimeSignal or None on failure.
-
-        Handles both yfinance column formats:
-        - Simple:      Open, High, Low, Close, Volume
-        - Multi-level: (Open, SPY), (Close, SPY), ...  [newer yfinance]
         """
         try:
+            spy_df = fresh_data.get("SPY")
+            if spy_df is not None and not spy_df.empty and "close" in spy_df.columns:
+                return self._regime_detector.detect(spy_df.reset_index(drop=True))
+
             import yfinance as yf
             spy_raw = yf.download("SPY", period="300d", progress=False, auto_adjust=True)
             if spy_raw.empty:
-                log.warning("SPY data empty — skipping regime detection.")
+                log.warning("SPY data empty - skipping regime detection.")
                 return None
-
-            # Flatten multi-level columns: ('Close', 'SPY') → 'close'
             if isinstance(spy_raw.columns, pd.MultiIndex):
                 spy_raw.columns = [col[0].lower() for col in spy_raw.columns]
             else:
                 spy_raw.columns = [c.lower() for c in spy_raw.columns]
-
-            spy_df = spy_raw.reset_index()
-            # Ensure date column is named 'date'
-            date_col = [c for c in spy_df.columns if "date" in c.lower() or c.lower() == "index"]
-            if date_col and date_col[0] != "date":
-                spy_df = spy_df.rename(columns={date_col[0]: "date"})
-
-            return self._regime_detector.detect(spy_df)
+            return self._regime_detector.detect(spy_raw.reset_index(drop=True))
         except Exception as exc:
             log.warning(f"Regime detection failed: {exc}")
             return None
