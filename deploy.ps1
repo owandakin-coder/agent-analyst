@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $PROJECT_REF = "sofowpweliticltlbxrj"
 $SCRIPT_DIR  = $PSScriptRoot
 $ENV_FILE    = Join-Path $SCRIPT_DIR ".env"
-$HTML_FILE   = Join-Path $SCRIPT_DIR "dashboard_app\index.html"
+$HTML_FILE   = Join-Path $SCRIPT_DIR "index.html"
 
 Write-Host ""
 Write-Host "  ATZMA Supabase Deployment" -ForegroundColor Cyan
@@ -99,7 +99,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "  Storage upload failed. Upload manually:" -ForegroundColor Red
     Write-Host "  https://supabase.com/dashboard/project/$PROJECT_REF/storage/buckets" -ForegroundColor Yellow
-    Write-Host "  Replace site/index.html with dashboard_app\\index.html" -ForegroundColor Yellow
+    Write-Host "  Replace site/index.html with index.html" -ForegroundColor Yellow
     exit 1
 }
 Write-Host "  Storage OK" -ForegroundColor Green

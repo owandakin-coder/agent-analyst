@@ -432,6 +432,45 @@ body.booting #app {
   color:var(--g2);
   line-height:1.45;
 }
+.workspace-banner {
+  margin:14px 0 12px;
+  padding:14px 14px 12px;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,0.06);
+  background:linear-gradient(135deg, rgba(10,132,255,0.12), rgba(52,199,89,0.08)), rgba(18,20,24,0.92);
+  box-shadow:0 10px 30px rgba(0,0,0,0.18);
+}
+.workspace-banner-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+.workspace-banner-title { font-size:14px; font-weight:700; letter-spacing:-0.2px; }
+.workspace-banner-copy { margin-top:5px; font-size:11.5px; color:var(--g2); line-height:1.5; }
+.workspace-banner-pill {
+  padding:5px 9px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:0.4px;
+  text-transform:uppercase;
+  white-space:nowrap;
+  background:rgba(255,255,255,0.06);
+  color:var(--g2);
+}
+.workspace-banner-actions { display:flex; gap:10px; margin-top:12px; }
+.workspace-banner-btn {
+  border:none;
+  border-radius:12px;
+  padding:11px 14px;
+  font:inherit;
+  font-size:12px;
+  font-weight:800;
+  cursor:pointer;
+}
+.workspace-banner-btn.primary { background:linear-gradient(135deg, #2d8cff, #34c759); color:#06111b; }
+.workspace-banner-btn.secondary { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:var(--white); }
 .detail-card {
   background:var(--c2);
   border-radius:18px;
@@ -588,48 +627,6 @@ body.booting #app {
   overflow:hidden;
   margin-bottom:12px;
 }
-.workspace-banner {
-  margin:0 0 12px;
-  padding:15px 16px;
-  border-radius:20px;
-  border:1px solid rgba(255,255,255,0.06);
-  background:
-    radial-gradient(circle at top right, rgba(52,199,89,0.10), transparent 34%),
-    linear-gradient(180deg, rgba(20,24,32,0.98), rgba(13,16,22,0.94));
-  box-shadow:0 14px 36px rgba(0,0,0,0.22);
-}
-.workspace-banner-head {
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:12px;
-}
-.workspace-banner-title { font-size:14px; font-weight:700; letter-spacing:-0.2px; }
-.workspace-banner-copy { margin-top:5px; font-size:11.5px; color:var(--g2); line-height:1.5; }
-.workspace-banner-pill {
-  flex-shrink:0;
-  padding:7px 10px;
-  border-radius:999px;
-  background:rgba(255,255,255,0.06);
-  color:var(--g2);
-  border:1px solid rgba(255,255,255,0.08);
-  font-size:10px;
-  font-weight:800;
-  letter-spacing:0.7px;
-  text-transform:uppercase;
-}
-.workspace-banner-actions { display:flex; gap:10px; margin-top:12px; }
-.workspace-banner-btn {
-  flex:1;
-  min-height:44px;
-  border-radius:14px;
-  border:none;
-  font-size:12px;
-  font-weight:700;
-  letter-spacing:0.1px;
-}
-.workspace-banner-btn.primary { background:linear-gradient(135deg, #2d8cff, #34c759); color:#06111b; }
-.workspace-banner-btn.secondary { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:var(--white); }
 .status-row {
   display:flex;
   align-items:center;
@@ -2425,7 +2422,6 @@ function applyBrokerConnectionUI(connection) {
     document.getElementById('broker-trading-mode').value = 'paper';
     document.getElementById('broker-base-url').value = 'https://paper-api.alpaca.markets';
     document.getElementById('broker-enabled').checked = true;
-    updateWorkspaceBanner();
     return;
   }
   const verified = connection.last_verified_status === 'verified';
@@ -2447,7 +2443,6 @@ function applyBrokerConnectionUI(connection) {
   document.getElementById('broker-trading-mode').value = connection.trading_mode || 'paper';
   document.getElementById('broker-base-url').value = connection.base_url || 'https://paper-api.alpaca.markets';
   document.getElementById('broker-enabled').checked = connection.enabled !== false;
-  updateWorkspaceBanner();
 }
 
 function renderExecutionJobs(jobs) {
@@ -2458,20 +2453,22 @@ function renderExecutionJobs(jobs) {
     setText('last-decision-main', latest.result.regime || 'Decision');
     setText('last-decision-sub', latest.result.decision_summary);
   }
-  setText('execution-sub', latest ? ((latest.status || 'queued').toUpperCase() + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at || new Date().toISOString())) : 'No personal runs yet');
+  setText('execution-sub', latest ? (formatExecutionStatus(latest.status) + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at || new Date().toISOString())) : 'No personal runs yet');
   const root = document.getElementById('execution-jobs-list');
   if (!root) return;
   if (!currentExecutionJobs.length) {
     root.innerHTML = '<div class="profile-row"><span class="profile-key">Queue</span><span class="profile-val">No jobs yet</span></div>';
+    updateWorkspaceBanner();
     return;
   }
   root.innerHTML = currentExecutionJobs.map(job => {
-    const status = String(job.status || 'queued').toUpperCase();
+    const status = formatExecutionStatus(job.status);
     const color = job.status === 'succeeded' ? 'var(--green)' : job.status === 'failed' ? 'var(--red)' : job.status === 'running' ? 'var(--blue)' : 'var(--orange)';
     const when = fmtOrderTime(job.requested_at || job.created_at || new Date().toISOString());
     const detail = esc(job.error_text || (((job.requested_mode || 'paper') + '').toUpperCase() + ' · ' + when));
     return `<div class="profile-row"><div><div style="font-size:13px;font-weight:700;">${esc(job.job_type || 'trade_once')}</div><div style="font-size:11px;color:var(--g3);margin-top:3px;">${detail}</div></div><span class="profile-val" style="color:${color};text-transform:uppercase;">${esc(status)}</span></div>`;
   }).join('');
+  updateWorkspaceBanner();
 }
 
 function hasOpenExecutionJob() {
@@ -2626,7 +2623,6 @@ function handleSyncStatusTap() {
 async function refreshMemberWorkspace() {
   if (!authSession?.access_token) {
     applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
-    updateWorkspaceBanner();
     return;
   }
   try {
@@ -2639,7 +2635,6 @@ async function refreshMemberWorkspace() {
       console.warn('refreshMemberWorkspace jobs:', jobsError.message);
     }
     renderExecutionJobs(jobsPayload.jobs || []);
-    updateWorkspaceBanner();
     if (hasVerifiedBrokerConnection()) {
       fetchAlpacaData();
       loadAlpacaTrades();
@@ -2649,7 +2644,6 @@ async function refreshMemberWorkspace() {
   } catch (e) {
     console.warn('refreshMemberWorkspace:', e.message);
     applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
-    updateWorkspaceBanner();
   }
 }
 
