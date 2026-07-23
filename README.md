@@ -150,6 +150,7 @@ python -m pytest -q
 - Only verified broker connections may access portfolio endpoints
 - Broker secrets are encrypted server-side and never returned to the client
 - Keep `ATZMA_FAIL_CLOSED_CONTROL=1` for all remote or live execution paths
+- Monthly retrains are gated by `promote_model.py`: a new model only replaces the live one if it backtests at least as well on Sharpe, max drawdown, and annualized return; otherwise the previous model is kept and an operator alert is sent
 
 ## Render Worker
 

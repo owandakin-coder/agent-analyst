@@ -5,12 +5,15 @@ name: Monthly Retrain
 # Also available via manual trigger (workflow_dispatch).
 #
 # What it does:
-#   1. Downloads fresh historical data
-#   2. Runs Optuna hyperparameter search (10 trials)
-#   3. Trains the final base model (500k steps)
-#   4. Trains ensemble (3 seeds × 500k steps)
-#   5. Commits updated model files back to the repository
-#   6. Sends Telegram notification with training results
+#   1. Snapshots the current production model for comparison
+#   2. Downloads fresh historical data
+#   3. Runs Optuna hyperparameter search (10 trials)
+#   4. Trains the final base model (500k steps)
+#   5. Trains ensemble (3 seeds × 500k steps)
+#   6. Backtests the candidate against the snapshot and reverts it if it
+#      regresses on Sharpe / drawdown / return (see promote_model.py)
+#   7. Commits updated model files back to the repository
+#   8. Sends Telegram notification with training results
 #
 # Total estimated runtime: ~45 minutes (GitHub Actions free tier)
 # ──────────────────────────────────────────────────────────────
@@ -49,7 +52,20 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 4. Train base model ───────────────────────────────────
+      # ── 4. Snapshot current production model ───────────────────
+      # Taken BEFORE training overwrites final_model.zip, so promote_model.py
+      # has something to compare the new candidate against.
+      - name: Snapshot current production model
+        run: |
+          if [ -f models/final_model.zip ]; then
+            cp models/final_model.zip models/previous_model.zip
+            cp models/vec_normalize.pkl models/previous_vec_normalize.pkl
+            echo "Snapshotted existing production model for comparison."
+          else
+            echo "No existing production model — first deploy, nothing to snapshot."
+          fi
+
+      # ── 5. Train base model ───────────────────────────────────
       - name: Train base model (Optuna + 500k steps)
         env:
           ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
@@ -61,7 +77,7 @@ jobs:
           python -u main.py --mode train --optuna-trials $TRIALS 2>&1 | tee train_base.log
           echo "Base model training complete."
 
-      # ── 5. Train ensemble ─────────────────────────────────────
+      # ── 6. Train ensemble ─────────────────────────────────────
       - name: Train ensemble (3 seeds × 500k steps)
         env:
           ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
@@ -71,12 +87,39 @@ jobs:
           python -u main.py --mode train_ensemble 2>&1 | tee train_ensemble.log
           echo "Ensemble training complete."
 
-      # ── 6. Show model files ───────────────────────────────────
+      # ── 7. Gate promotion of the new model ─────────────────────
+      # Backtests the freshly trained final_model.zip against the snapshot
+      # taken in step 4 on the held-out test period. If it regresses beyond
+      # tolerance on Sharpe / drawdown / return, final_model.zip and
+      # vec_normalize.pkl are reverted in place so the commit step below
+      # ends up with no change to the production model — a bad retrain
+      # never reaches live trading unattended.
+      - name: Evaluate candidate vs. current production model
+        id: promote
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python -u promote_model.py \
+            --previous models/previous_model.zip \
+            --previous-norm models/previous_vec_normalize.pkl
+
+      - name: Report promotion outcome
+        run: |
+          if [ "${{ steps.promote.outcome }}" = "success" ]; then
+            echo "Candidate model promoted to production."
+          else
+            echo "Candidate model REJECTED — production model reverted to the previous snapshot."
+          fi
+
+      # ── 8. Show model files ───────────────────────────────────
       - name: List trained models
         run: |
           ls -lh models/ || echo "models/ directory not found"
 
-      # ── 7. Commit models back to repo ─────────────────────────
+      # ── 9. Commit models back to repo ─────────────────────────
       - name: Commit updated models
         run: |
           git config user.name  "github-actions[bot]"
@@ -101,7 +144,7 @@ jobs:
             echo "Models committed and pushed."
           fi
 
-      # ── 8. Upload training logs ───────────────────────────────
+      # ── 10. Upload training logs ──────────────────────────────
       - name: Upload training logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,7 +156,7 @@ jobs:
             agent_analyst.log
           retention-days: 60
 
-      # ── 9. Telegram notification ──────────────────────────────
+      # ── 11. Telegram notification ─────────────────────────────
       - name: Notify via Telegram
         if: always()
         env:

@@ -81,20 +81,28 @@ npx supabase@latest secrets unset GITHUB_TOKEN 2>$null
 
 # Step 5: Upload HTML to Storage
 Write-Host ""
-Write-Host "  [5/5] Creating public Storage bucket and uploading dashboard..." -ForegroundColor Yellow
+Write-Host "  [5/5] Uploading dashboard to existing Storage bucket..." -ForegroundColor Yellow
 
-npx supabase@latest storage create-bucket site --public 2>$null
-Start-Sleep -Seconds 1
+$storagePath = "ss:///site/index.html"
+$bucketCheck = npx supabase@latest storage ls --experimental "ss:///site/" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "  Storage bucket 'site' is missing or unreachable." -ForegroundColor Red
+    Write-Host "  Create a public bucket named 'site' once in the Supabase dashboard, then rerun deploy.ps1." -ForegroundColor Yellow
+    Write-Host "  https://supabase.com/dashboard/project/$PROJECT_REF/storage/buckets" -ForegroundColor Yellow
+    exit 1
+}
 
-npx supabase@latest storage cp --experimental $HTML_FILE ss://site/index.html
+npx supabase@latest storage rm --experimental $storagePath 2>$null
+npx supabase@latest storage cp --experimental $HTML_FILE $storagePath
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "  Storage upload failed. Upload manually:" -ForegroundColor Red
     Write-Host "  https://supabase.com/dashboard/project/$PROJECT_REF/storage/buckets" -ForegroundColor Yellow
-    Write-Host "  Create bucket 'site' (public) and upload dashboard_app\index.html" -ForegroundColor Yellow
-} else {
-    Write-Host "  Storage OK" -ForegroundColor Green
+    Write-Host "  Replace site/index.html with dashboard_app\\index.html" -ForegroundColor Yellow
+    exit 1
 }
+Write-Host "  Storage OK" -ForegroundColor Green
 
 # Done
 Write-Host ""

@@ -2903,6 +2903,15 @@ function applyPortfolioOnboardingState(message = 'Connect and verify your person
   setDataStatus('LOCKED');
   updateControlSurface();
   renderHomeAudit();
+  refreshReturnsBarChart();
+  refreshAllocation();
+  if (eqChart) {
+    eqChart.data.labels = [];
+    eqChart.data.datasets[0].data = [];
+    eqChart.update('none');
+    setText('cm-ret', '—');
+    setText('cm-dd', '—');
+  }
 }
 
 // Smooth number counter
@@ -3229,6 +3238,8 @@ async function fetchAlpacaData() {
     renderPositionsPage();
     updateHeroUI();
     renderHomeAudit();
+    refreshReturnsBarChart();
+    refreshAllocation();
 
     const t = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
     setDataStatus('LIVE', t);
@@ -3452,35 +3463,99 @@ function renderPositionsPage() {
 }
 
 // ════════════════════════════════════════════════════════
-// CHARTS
+// CHARTS — real Alpaca portfolio history + real positions.
+// Previously this whole page rendered Math.random() filler data, which
+// meant guests (who should see zero live portfolio numbers, per the
+// Locked-state design) and signed-in users alike saw a fabricated but
+// realistic-looking equity curve, per-asset returns, and sector mix.
 // ════════════════════════════════════════════════════════
 let eqChart = null, barChart2 = null, chartsInited = false;
 
-const TF_DATA = {
-  '1W':{ labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
-         vals:[121200,122400,121800,123500,124100,123900,portBase] },
-  '1M':{ labels:Array.from({length:30},(_,i)=>`D${i+1}`),
-         vals:Array.from({length:30},(_,i)=>118000+i*228+(Math.random()-0.4)*700) },
-  '3M':{ labels:Array.from({length:12},(_,i)=>`W${i+1}`),
-         vals:Array.from({length:12},(_,i)=>112000+i*1050+(Math.random()-0.4)*900) },
-  '6M':{ labels:['Jan','Feb','Mar','Apr','May','Jun'],
-         vals:[104000,108500,106200,112800,119000,portBase] },
-  '1Y':{ labels:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-         vals:[100000,103200,101500,107000,110500,113000,109000,116000,119000,121500,123000,portBase] },
+const TF_PARAMS = {
+  '1W': { period: '1W', timeframe: '1H' },
+  '1M': { period: '1M', timeframe: '1D' },
+  '3M': { period: '3M', timeframe: '1D' },
+  '6M': { period: '6M', timeframe: '1D' },
+  '1Y': { period: '1A', timeframe: '1D' },
 };
 
-function setTF(el, tf) {
+async function fetchEquityHistory(tf) {
+  if (!authSession?.access_token || !hasVerifiedBrokerConnection()) return null;
+  const { period, timeframe } = TF_PARAMS[tf] || TF_PARAMS['1M'];
+  try {
+    const data = await apiJSON(`/history?period=${period}&timeframe=${timeframe}`, {
+      cache: 'no-store', headers: getAuthHeaders(),
+    });
+    const equity = Array.isArray(data?.equity) ? data.equity : [];
+    if (!equity.length) return null;
+    const timestamps = Array.isArray(data?.timestamps) ? data.timestamps : [];
+    const labels = timestamps.length === equity.length
+      ? timestamps.map(ts => new Date(ts * 1000).toLocaleDateString())
+      : equity.map((_, i) => `${i + 1}`);
+    return { labels, vals: equity };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function setTF(el, tf) {
   document.querySelectorAll('#tf-pills .pill').forEach(p=>p.classList.remove('active'));
   el.classList.add('active');
   if (!eqChart) return;
-  const d = TF_DATA[tf];
+  const d = await fetchEquityHistory(tf);
+  if (!d) {
+    eqChart.data.labels = [];
+    eqChart.data.datasets[0].data = [];
+    eqChart.update('none');
+    document.getElementById('cm-ret').textContent = '—';
+    document.getElementById('cm-dd').textContent = '—';
+    return;
+  }
   eqChart.data.labels = d.labels;
   eqChart.data.datasets[0].data = d.vals;
   eqChart.update('active');
-  // update meta
-  const ret = ((portBase - d.vals[0]) / d.vals[0] * 100).toFixed(1);
+  // update meta from the real equity curve
+  const first = d.vals[0];
+  const last  = d.vals[d.vals.length - 1];
+  const ret = first ? ((last - first) / first * 100).toFixed(1) : '0.0';
   document.getElementById('cm-ret').textContent = (ret>0?'+':'')+ret+'%';
   document.getElementById('cm-ret').style.color = ret>0?'var(--green)':'var(--red)';
+  let peak = -Infinity, maxDD = 0;
+  d.vals.forEach(v => { peak = Math.max(peak, v); if (peak > 0) maxDD = Math.max(maxDD, (peak - v) / peak); });
+  document.getElementById('cm-dd').textContent = '−' + (maxDD * 100).toFixed(1) + '%';
+}
+
+function refreshReturnsBarChart() {
+  if (!barChart2) return;
+  barChart2.data.labels = STOCKS.map(s => s.t);
+  barChart2.data.datasets[0].data = STOCKS.map(s => Math.round((s.unrealized_plpc || 0) * 1000) / 10);
+  barChart2.update('active');
+}
+
+function refreshAllocation() {
+  const card = document.getElementById('alloc-card');
+  if (!card) return;
+  const colors = ['#34c759','#0a84ff','#ff9f0a','#bf5af2','#ff375f','#64d2ff','#aeaeb2'];
+  const totalValue = STOCKS.reduce((sum, s) => sum + (s.market_value || 0), 0);
+  if (!STOCKS.length || totalValue <= 0) {
+    card.innerHTML = '<p style="text-align:center;color:var(--g3);padding:12px;font-size:12px">No open positions.</p>';
+    return;
+  }
+  const rows = STOCKS
+    .map(s => ({ name: s.t, pct: (s.market_value || 0) / totalValue * 100 }))
+    .sort((a, b) => b.pct - a.pct)
+    .map((a, i) => ({ ...a, col: colors[i % colors.length] }));
+  card.innerHTML = rows.map(a => `
+    <div class="sector-row">
+      <div class="sector-hdr">
+        <span style="color:var(--g2);font-size:12px">${esc(a.name)}</span>
+        <span style="color:${a.col};font-size:12px;font-weight:700">${a.pct.toFixed(1)}%</span>
+      </div>
+      <div class="bar-bg"><div class="bar-fg" style="width:0%;background:${a.col}" data-w="${a.pct.toFixed(1)}%"></div></div>
+    </div>`).join('');
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    card.querySelectorAll('.bar-fg').forEach(b=>{ b.style.width=b.dataset.w; });
+  }));
 }
 
 function initCharts() {
@@ -3490,16 +3565,15 @@ function initCharts() {
   Chart.defaults.color = '#636366';
   Chart.defaults.font.family = "'Inter', sans-serif";
 
-  // Equity
+  // Equity — starts empty, populated below via setTF() with real /history data
   const ctx1 = document.getElementById('eq-chart').getContext('2d');
   const grad1 = ctx1.createLinearGradient(0,0,0,210);
   grad1.addColorStop(0,'rgba(52,199,89,0.22)');
   grad1.addColorStop(1,'rgba(52,199,89,0)');
-  const d0 = TF_DATA['1W'];
   eqChart = new Chart(ctx1, {
     type:'line',
-    data:{ labels:d0.labels, datasets:[{
-      data:d0.vals, borderColor:'#34c759', borderWidth:2.5,
+    data:{ labels:[], datasets:[{
+      data:[], borderColor:'#34c759', borderWidth:2.5,
       backgroundColor:grad1, fill:true, tension:0.45,
       pointRadius:0, pointHoverRadius:6,
       pointHoverBackgroundColor:'#34c759', pointHoverBorderColor:'#000', pointHoverBorderWidth:2,
@@ -3522,14 +3596,14 @@ function initCharts() {
     }
   });
 
-  // Bar chart
+  // Bar chart — real per-position unrealized P/L%, populated below via refreshReturnsBarChart()
   const ctx2 = document.getElementById('bar-chart').getContext('2d');
   barChart2 = new Chart(ctx2, {
     type:'bar',
     data:{
-      labels:['AAPL','NVDA','MSFT','JPM','META','SPY'],
+      labels:[],
       datasets:[{
-        data:[18.4,42.1,-3.2,12.8,-8.6,6.3],
+        data:[],
         backgroundColor:d=>d.raw>=0?'rgba(52,199,89,0.75)':'rgba(255,59,48,0.75)',
         borderRadius:6, borderSkipped:false,
         hoverBackgroundColor:d=>d.raw>=0?'#34c759':'#ff3b30',
@@ -3549,26 +3623,12 @@ function initCharts() {
     }
   });
 
-  // Allocation bars
-  const alloc = [
-    { name:'Technology', pct:52, col:'#34c759' },
-    { name:'Financials',  pct:18, col:'#0a84ff' },
-    { name:'Comm. Svcs',  pct:12, col:'#ff9f0a' },
-    { name:'Cash',         pct:10, col:'#aeaeb2' },
-    { name:'Healthcare',   pct:8,  col:'#bf5af2' },
-  ];
-  document.getElementById('alloc-card').innerHTML = alloc.map(a=>`
-    <div class="sector-row">
-      <div class="sector-hdr">
-        <span style="color:var(--g2);font-size:12px">${a.name}</span>
-        <span style="color:${a.col};font-size:12px;font-weight:700">${a.pct}%</span>
-      </div>
-      <div class="bar-bg"><div class="bar-fg" style="width:0%;background:${a.col}" data-w="${a.pct}%"></div></div>
-    </div>`).join('');
-  // Animate bars
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    document.querySelectorAll('.bar-fg').forEach(b=>{ b.style.width=b.dataset.w; });
-  }));
+  // Allocation — real per-symbol weight from open positions (replaces a
+  // hardcoded fake sector breakdown that had no relationship to holdings)
+  refreshReturnsBarChart();
+  refreshAllocation();
+  const defaultPill = document.querySelector('#tf-pills .pill.active') || document.querySelector('#tf-pills .pill');
+  if (defaultPill) setTF(defaultPill, '1W');
 }
 
 // ════════════════════════════════════════════════════════
