@@ -1509,7 +1509,7 @@ select.m-input { appearance:none; cursor:pointer; }
       <div class="s-sec">
         <div class="s-sec-lbl">Trading Engine</div>
         <div class="s-item" onclick="openRiskSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(255,159,10,.12)">⚖️</div><div><div class="s-txt-main">Risk Level</div><div class="s-txt-sub" id="risk-sub">Max drawdown threshold: 15%</div></div></div><span class="s-r" id="risk-val">Normal ›</span></div>
-        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🤖</div><div><div class="s-txt-main">Auto-Trade</div><div class="s-txt-sub">PPO agent · GitHub Actions daily</div></div></div><label class="tog"><input type="checkbox" id="tog-autotrade" checked onchange="togSetting(this,'auto_trade')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
+        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🤖</div><div><div class="s-txt-main">Auto-Trade</div><div class="s-txt-sub">PPO agent · isolated worker execution</div></div></div><label class="tog"><input type="checkbox" id="tog-autotrade" checked onchange="togSetting(this,'auto_trade')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
         <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(255,59,48,.12)">🛑</div><div><div class="s-txt-main">Trailing Stop-Loss</div><div class="s-txt-sub">8% from peak · per ticker</div></div></div><label class="tog"><input type="checkbox" id="tog-stoploss" checked onchange="togSetting(this,'stop_loss')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
         <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(191,90,242,.12)">🎲</div><div><div class="s-txt-main">Kelly Criterion</div><div class="s-txt-sub">Fractional 0.25× sizing</div></div></div><label class="tog"><input type="checkbox" id="tog-kelly" checked onchange="togSetting(this,'kelly')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
         <div class="s-item" onclick="openRegimeInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">📡</div><div><div class="s-txt-main">Regime Detector</div><div class="s-txt-sub">Bull · Sideways · Bear mode</div></div></div><span class="s-r" id="regime-badge" style="color:var(--green);font-size:12px">BULL ›</span></div>
@@ -1782,7 +1782,7 @@ select.m-input { appearance:none; cursor:pointer; }
     <div class="profile-row"><span class="profile-key">Regime-Aware</span><span class="profile-val" style="color:var(--green)">Yes ✓</span></div>
     <div class="profile-row"><span class="profile-key">Last Retrain</span><span class="profile-val" id="model-retrain-date">Loading…</span></div>
     <div class="profile-row"><span class="profile-key">Next Retrain</span><span class="profile-val" id="model-next-retrain">Monthly</span></div>
-    <div class="profile-row"><span class="profile-key">GitHub Actions</span><span class="profile-val"><a href="https://github.com/owandakin-coder/agent-analyst/actions" target="_blank" style="color:var(--blue)">View runs →</a></span></div>
+    <div class="profile-row"><span class="profile-key">Execution Service</span><span class="profile-val">Supabase control + worker pool</span></div>
   </div>
 </div>
 
@@ -1791,7 +1791,7 @@ select.m-input { appearance:none; cursor:pointer; }
   <div class="sheet-box" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
     <div class="sheet-title">📅 Retrain History</div>
-    <div id="retrain-list"><div style="color:var(--g3);font-size:13px;text-align:center;padding:20px 0;">Loading from GitHub Actions…</div></div>
+    <div id="retrain-list"><div style="color:var(--g3);font-size:13px;text-align:center;padding:20px 0;">Loading retrain history…</div></div>
   </div>
 </div>
 
@@ -3030,14 +3030,14 @@ function applyBackendControlState(payload) {
     : 'Trading control is active.');
   controlState.sync = 'Synced';
   controlState.syncSub = 'Control plane updated ' + fmtOrderTime(payload.updated_at || new Date().toISOString());
-  controlState.executor = payload.executor_label || 'GitHub Actions';
+  controlState.executor = payload.executor_label || 'Worker Pool';
   controlState.canDispatch = !!payload.can_dispatch;
-  controlState.executorSub = payload._source === 'github_repo'
-    ? 'Shared state stored in GitHub for scheduled runs.'
-    : 'Using local fallback control state.';
-  setText('control-note', payload._source === 'github_repo'
-    ? 'Control state is shared with GitHub Actions through the repository control file.'
-    : 'Control state is using a local fallback. Add GitHub token support for shared remote control.');
+  controlState.executorSub = payload._source === 'remote'
+    ? 'Remote execution control is synchronized with the live worker pool.'
+    : 'Remote control state is unavailable. Trading controls are read-only until sync returns.';
+  setText('control-note', payload._source === 'remote'
+    ? 'Your workspace is synced with the live execution service.'
+    : 'Control plane sync is degraded. New actions stay blocked until the remote state returns.');
   updateControlSurface();
   renderHomeAudit();
 }
@@ -3079,14 +3079,14 @@ async function runControlAction(action) {
         renderExecutionJobs([payload.job, ...currentExecutionJobs.filter(job => String(job.id || '') !== String(payload.job.id || ''))]);
       }
       controlState.lastDecision = 'Manual Run Requested';
-      controlState.lastDecisionSub = 'GitHub workflow dispatch accepted for a single paper cycle.';
-      setText('control-note', 'Run Once was dispatched to the primary GitHub workflow.');
+      controlState.lastDecisionSub = 'A personal execution request was accepted for one isolated paper cycle.';
+      setText('control-note', 'Run Once was queued for the live worker pool.');
       try {
         await refreshMemberWorkspace();
       } catch (workspaceError) {
         console.warn('runControlAction workspace:', workspaceError.message);
       }
-      toast('Run Once dispatched');
+      toast('Run queued');
       updateControlSurface();
       renderHomeAudit();
       return;
@@ -3116,7 +3116,7 @@ async function runControlAction(action) {
 // Update portfolio every 2.2s
 let lastPort = portBase;
 setInterval(() => {
-  if (controlState.sync !== 'Degraded') return;
+  return;
   const delta = (Math.random() - 0.46) * 18;
   portBase += delta;
   const chg = portBase - portOpen;
@@ -3151,7 +3151,7 @@ setInterval(() => {
 
 // Update stock prices every 1.8s
 setInterval(() => {
-  if (controlState.sync !== 'Degraded') return;
+  return;
   STOCKS.forEach(s => {
     s.price += (Math.random() - 0.5) * s.vol;
     if (s.price < s.base * 0.85) s.price = s.base * 0.85;
@@ -3162,7 +3162,7 @@ setInterval(() => {
 
 // Trade counter
 setInterval(() => {
-  if (controlState.sync !== 'Degraded') return;
+  return;
   if (Math.random() < 0.18) {
     trades++;
     const el = document.getElementById('k-tr');
@@ -4137,8 +4137,8 @@ async function fetchRetrainData() {
     const lastRetrain = retrainData.find(r => r.name && r.name.toLowerCase().includes('retrain'));
     const lastDaily   = retrainData.find(r => r.name && r.name.toLowerCase().includes('daily'));
     if (lastDaily) {
-      controlState.executor = 'GitHub Actions';
-      controlState.executorSub = 'Last scheduled run ' + lastDaily.created_at.slice(0,10) + ' · ' + (lastDaily.conclusion || lastDaily.status || 'running');
+      controlState.executor = 'Worker Pool';
+      controlState.executorSub = 'Last automation check ' + lastDaily.created_at.slice(0,10) + ' · ' + (lastDaily.conclusion || lastDaily.status || 'running');
       updateControlSurface();
     }
     if (lastRetrain) {
