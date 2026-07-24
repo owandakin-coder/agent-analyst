@@ -104,6 +104,7 @@ def step_train(aligned_data: dict[str, pd.DataFrame], n_optuna_trials: int = 15)
 
     meta = {
         "best_params":  pipeline.best_params,
+        "best_validation_summary": pipeline.best_validation_summary,
         "tickers":      TICKERS,
         "train_period": (CFG.train_start, CFG.train_end),
         "val_period":   (CFG.val_start, CFG.val_end),

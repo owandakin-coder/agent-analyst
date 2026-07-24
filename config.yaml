@@ -42,6 +42,19 @@ training:
   ensemble_seeds: [0, 42, 123]
   ensemble_timesteps: 500000
   window_size: 30
+  eval_start_offsets: [0, 21, 42]
+  eval_min_rows: 126
+  validation_score_weights:
+    annualized_return: 100.0
+    sharpe: 5.0
+    max_drawdown: 100.0
+    calmar: 2.0
+  transformer:
+    d_model: 128
+    nhead: 4
+    num_layers: 2
+    dropout: 0.10
+  policy_head: [64, 64]
 
 risk:
   drawdown_reduce: 0.10

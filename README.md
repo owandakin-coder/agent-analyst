@@ -160,8 +160,24 @@ ATZMA includes a ready-to-deploy Render blueprint in [render.yaml](C:/Users/Ea%2
 Recommended worker start command:
 
 ```powershell
-python user_execution_worker.py --loop
+python worker_entry.py
 ```
+
+Required Render secrets:
+
+- `ATZMA_WORKER_SHARED_TOKEN`
+- `ATZMA_REMOTE_API_BASE`
+- `ALPACA_API_KEY`
+- `ALPACA_SECRET_KEY`
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` if alerts are enabled
+
+What the Render worker does:
+
+- Loads `models/final_model.zip`
+- Loads `models/vec_normalize.pkl`
+- Polls the durable execution queue from Supabase
+- Reconciles open broker orders every 30 seconds
+- Runs continuously without depending on your local computer
 
 ## Contributing
 

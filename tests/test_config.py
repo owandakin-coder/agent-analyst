@@ -55,6 +55,19 @@ class TestConfigValues:
         seeds = CFG.ensemble_seeds
         assert len(seeds) == len(set(seeds)), "Ensemble seeds must be unique"
 
+    def test_eval_offsets_not_empty(self):
+        offsets = CFG.get("training", "eval_start_offsets", default=[])
+        assert offsets, "training.eval_start_offsets must not be empty"
+        assert offsets[0] == 0, "First validation offset should start at 0"
+
+    def test_transformer_config_valid(self):
+        d_model = CFG.get("training", "transformer", "d_model", default=128)
+        nhead = CFG.get("training", "transformer", "nhead", default=4)
+        dropout = CFG.get("training", "transformer", "dropout", default=0.1)
+        assert d_model > 0 and nhead > 0
+        assert d_model % nhead == 0, "Transformer d_model must divide cleanly by nhead"
+        assert 0.0 <= dropout < 1.0
+
     def test_wf_windows_positive(self):
         assert CFG.wf_n_windows >= 1
 

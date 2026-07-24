@@ -6,18 +6,16 @@ training_pipeline.py
 """
 
 import os
+import json
 import warnings
 import numpy as np
 import pandas as pd
 import optuna
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from stable_baselines3.common.callbacks import (
-    EvalCallback,
-    StopTrainingOnRewardThreshold,
-)
 from trading_env import TradingEnvironment
 from transformer_policy import TransformerExtractor
+import benchmark
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -36,6 +34,21 @@ try:
     TEST_END        = _CFG.test_end
     MODEL_DIR       = _CFG.model_dir
     LOG_DIR         = _CFG.logs_dir
+    EVAL_START_OFFSETS = [int(v) for v in _CFG.get("training", "eval_start_offsets", default=[0, 21, 42])]
+    EVAL_MIN_ROWS = int(_CFG.get("training", "eval_min_rows", default=126))
+    VALIDATION_SCORE_WEIGHTS = {
+        "annualized_return": float(_CFG.get("training", "validation_score_weights", "annualized_return", default=100.0)),
+        "sharpe": float(_CFG.get("training", "validation_score_weights", "sharpe", default=5.0)),
+        "max_drawdown": float(_CFG.get("training", "validation_score_weights", "max_drawdown", default=100.0)),
+        "calmar": float(_CFG.get("training", "validation_score_weights", "calmar", default=2.0)),
+    }
+    TRANSFORMER_CONFIG = {
+        "d_model": int(_CFG.get("training", "transformer", "d_model", default=128)),
+        "nhead": int(_CFG.get("training", "transformer", "nhead", default=4)),
+        "num_layers": int(_CFG.get("training", "transformer", "num_layers", default=2)),
+        "dropout": float(_CFG.get("training", "transformer", "dropout", default=0.1)),
+    }
+    POLICY_HEAD_ARCH = list(_CFG.get("training", "policy_head", default=[64, 64]))
 except Exception:
     ENSEMBLE_SEEDS  = [0, 42, 123]
     ENSEMBLE_STEPS  = 500_000
@@ -48,6 +61,45 @@ except Exception:
     TEST_END        = "2024-12-31"
     MODEL_DIR       = "models"
     LOG_DIR         = "logs"
+    EVAL_START_OFFSETS = [0, 21, 42]
+    EVAL_MIN_ROWS = 126
+    VALIDATION_SCORE_WEIGHTS = {
+        "annualized_return": 100.0,
+        "sharpe": 5.0,
+        "max_drawdown": 100.0,
+        "calmar": 2.0,
+    }
+    TRANSFORMER_CONFIG = {
+        "d_model": 128,
+        "nhead": 4,
+        "num_layers": 2,
+        "dropout": 0.1,
+    }
+    POLICY_HEAD_ARCH = [64, 64]
+
+
+def _annualized_return_from_equity(equity: np.ndarray, periods_per_year: int = 252) -> float:
+    if len(equity) < 2 or equity[0] <= 0:
+        return 0.0
+    total_return = float((equity[-1] - equity[0]) / equity[0])
+    n_years = (len(equity) - 1) / periods_per_year
+    if n_years <= 0:
+        return 0.0
+    return float((1 + total_return) ** (1 / n_years) - 1)
+
+
+def score_validation_metrics(metrics: dict, weights: dict | None = None) -> float:
+    cfg = weights or VALIDATION_SCORE_WEIGHTS
+    annualized_return = float(metrics.get("annualized_return", 0.0))
+    sharpe = float(metrics.get("sharpe", 0.0))
+    max_drawdown = float(metrics.get("max_drawdown", 0.0))
+    calmar = float(metrics.get("calmar", 0.0))
+    return (
+        annualized_return * cfg.get("annualized_return", 100.0)
+        + sharpe * cfg.get("sharpe", 5.0)
+        + calmar * cfg.get("calmar", 2.0)
+        - max_drawdown * cfg.get("max_drawdown", 100.0)
+    )
 
 
 class TrainingPipeline:
@@ -61,6 +113,7 @@ class TrainingPipeline:
     def __init__(self, aligned_data: dict[str, pd.DataFrame], n_optuna_trials: int = 15):
         self.aligned_data    = aligned_data
         self.n_optuna_trials = n_optuna_trials
+        self.window_size     = int(_CFG.window_size) if "_CFG" in globals() else 30
         os.makedirs(MODEL_DIR, exist_ok=True)
         os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -68,8 +121,10 @@ class TrainingPipeline:
         self.train_data = self._slice_data(TRAIN_START, TRAIN_END)
         self.val_data   = self._slice_data(VAL_START,   VAL_END)
         self.test_data  = self._slice_data(TEST_START,  TEST_END)
+        self.validation_slices = self._build_validation_slices(self.val_data)
 
         self.best_params: dict = {}
+        self.best_validation_summary: dict = {}
         self.model: PPO | None = None
         self.vec_env = None
         self.vec_norm = None
@@ -110,9 +165,22 @@ class TrainingPipeline:
 
     def _optuna_search(self) -> dict:
         """Searches for best hyperparameters on the validation set."""
-        study = optuna.create_study(direction="maximize")
+        study = optuna.create_study(
+            direction="maximize",
+            pruner=optuna.pruners.MedianPruner(
+                n_startup_trials=max(2, min(5, self.n_optuna_trials or 2))
+            ),
+        )
         study.optimize(self._optuna_objective, n_trials=self.n_optuna_trials)
         self._cleanup_trial_models(self.n_optuna_trials)
+        if study.best_trial:
+            self.best_validation_summary = {
+                "score": float(study.best_trial.value),
+                "params": study.best_trial.params,
+                "user_attrs": dict(study.best_trial.user_attrs),
+            }
+            with open(os.path.join(MODEL_DIR, "best_validation_summary.json"), "w", encoding="utf-8") as handle:
+                json.dump(self.best_validation_summary, handle, indent=2)
         return study.best_params
 
     def _cleanup_trial_models(self, n_trials: int = 0):
@@ -128,7 +196,7 @@ class TrainingPipeline:
         print(f"[Pipeline] Cleaned up {removed} trial model file(s).")
 
     def _optuna_objective(self, trial: optuna.Trial) -> float:
-        """Single Optuna trial: train briefly, evaluate on validation (avg of 3 seeds)."""
+        """Single Optuna trial: train briefly, evaluate on multiple validation slices."""
         params = {
             "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True),
             "n_steps":       trial.suggest_categorical("n_steps", [512, 1024, 2048]),
@@ -147,12 +215,23 @@ class TrainingPipeline:
             model_name=f"trial_{trial.number}",
         )
 
-        # Evaluate on validation set — average 3 seeds to reduce noise
-        rewards = [
-            self._evaluate(model, self.val_data, vec_norm, seed=s)
-            for s in [0, 42, 123]
-        ]
-        return float(np.mean(rewards))
+        slice_metrics: list[dict] = []
+        for idx, (label, val_slice) in enumerate(self.validation_slices):
+            metrics = self._evaluate_metrics(model, val_slice, vec_norm)
+            metrics["slice"] = label
+            slice_metrics.append(metrics)
+            running_score = float(np.mean([m["validation_score"] for m in slice_metrics]))
+            trial.report(running_score, step=idx)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+        avg_score = float(np.mean([m["validation_score"] for m in slice_metrics]))
+        trial.set_user_attr("validation_windows", [m["slice"] for m in slice_metrics])
+        trial.set_user_attr("avg_validation_score", avg_score)
+        trial.set_user_attr("avg_sharpe", float(np.mean([m["sharpe"] for m in slice_metrics])))
+        trial.set_user_attr("avg_max_drawdown", float(np.mean([m["max_drawdown"] for m in slice_metrics])))
+        trial.set_user_attr("avg_annualized_return", float(np.mean([m["annualized_return"] for m in slice_metrics])))
+        return avg_score
 
     # ──────────────────────────────────────────────────────────────────────────
     # אימון
@@ -202,12 +281,11 @@ class TrainingPipeline:
         )
 
         # Transformer feature extractor + small MLP head
+        transformer_cfg = dict(TRANSFORMER_CONFIG)
         policy_kwargs = dict(
             features_extractor_class=TransformerExtractor,
-            features_extractor_kwargs=dict(
-                d_model=128, nhead=4, num_layers=2, dropout=0.1
-            ),
-            net_arch=[64, 64],
+            features_extractor_kwargs=transformer_cfg,
+            net_arch=list(POLICY_HEAD_ARCH),
         )
 
         # verbose=1 for final model, 0 for Optuna trials (keep output clean)
@@ -215,7 +293,8 @@ class TrainingPipeline:
         verbosity = 1 if is_final else 0
 
         # Extract seed from params if present, else default 0
-        seed = params.pop("seed", 0)
+        model_params = dict(params)
+        seed = model_params.pop("seed", 0)
 
         model = PPO(
             "MlpPolicy",
@@ -224,7 +303,7 @@ class TrainingPipeline:
             seed=seed,
             tensorboard_log=LOG_DIR,
             policy_kwargs=policy_kwargs,
-            **params,
+            **model_params,
         )
         model.learn(total_timesteps=total_timesteps, progress_bar=is_final)
         model.save(os.path.join(MODEL_DIR, model_name))
@@ -279,9 +358,8 @@ class TrainingPipeline:
     # הערכה
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _evaluate(self, model: PPO, data: dict, vec_norm: VecNormalize,
-                  seed: int = 0) -> float:
-        """Runs one full episode and returns cumulative reward."""
+    def _evaluate_metrics(self, model: PPO, data: dict, vec_norm: VecNormalize) -> dict:
+        """Runs one full episode and returns risk-aware validation metrics."""
         eval_env_fn = lambda: TradingEnvironment(data)
         eval_vec    = DummyVecEnv([eval_env_fn])
         eval_norm   = VecNormalize(eval_vec, norm_obs=True, norm_reward=False,
@@ -290,18 +368,25 @@ class TrainingPipeline:
         eval_norm.obs_rms  = vec_norm.obs_rms
         eval_norm.ret_rms  = vec_norm.ret_rms
 
-        np.random.seed(seed)
         obs = eval_norm.reset()
         done = False
         total_reward = 0.0
+        equity_curve = [100_000.0]
         while not done:
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, dones, _ = eval_norm.step(action)
+            obs, reward, dones, infos = eval_norm.step(action)
             done = dones[0]
             total_reward += float(reward[0])
+            net_worth = float((infos or [{}])[0].get("net_worth", equity_curve[-1]))
+            equity_curve.append(net_worth)
 
         eval_norm.close()
-        return total_reward
+        equity = np.asarray(equity_curve, dtype=float)
+        metrics = benchmark.compute_metrics(equity, "validation")
+        metrics["annualized_return"] = _annualized_return_from_equity(equity)
+        metrics["validation_reward"] = float(total_reward)
+        metrics["validation_score"] = score_validation_metrics(metrics)
+        return metrics
 
     # ──────────────────────────────────────────────────────────────────────────
     # עזר
@@ -314,3 +399,19 @@ class TrainingPipeline:
             mask = (df.index >= start) & (df.index <= end)
             sliced[ticker] = df[mask].copy()
         return sliced
+
+    def _build_validation_slices(self, data: dict[str, pd.DataFrame]) -> list[tuple[str, dict[str, pd.DataFrame]]]:
+        """Builds overlapping validation slices to reduce single-window overfitting."""
+        if not data:
+            return []
+
+        min_rows = max(self.window_size + 30, EVAL_MIN_ROWS)
+        base_len = min(len(df) for df in data.values()) if data else 0
+        slices: list[tuple[str, dict[str, pd.DataFrame]]] = []
+        for offset in EVAL_START_OFFSETS:
+            if base_len - offset < min_rows:
+                continue
+            sliced = {ticker: df.iloc[offset:].copy() for ticker, df in data.items()}
+            slices.append((f"offset_{offset}", sliced))
+
+        return slices or [("full_validation", data)]
