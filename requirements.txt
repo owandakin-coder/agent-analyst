@@ -16,3 +16,5 @@ tensorboard>=2.16.0
 # --- Alpaca live trading ---
 alpaca-py>=0.20.0
 python-dotenv>=1.0.0
+# --- Used by walk_forward_eval.py, imported by promote_model.py during retrain.yml ---
+python-dateutil>=2.8.2
