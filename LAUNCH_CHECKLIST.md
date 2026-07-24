@@ -17,10 +17,13 @@ This is the minimum release checklist for launching ATZMA tomorrow without guess
 ## 2. Broker onboarding
 
 - Open `More -> Broker Connection`
+- Confirm the help copy explains where `API Key` and `Secret Key` come from
+- Confirm the default Paper URL is `https://paper-api.alpaca.markets`
 - Save a Paper Alpaca connection
 - Click `Verify`
 - Confirm the connection status becomes `Verified`
 - Confirm `account / positions / orders` appear only after verification
+- Confirm invalid or mismatched keys return a clear user-facing message
 
 ## 3. Execution flow
 
@@ -60,6 +63,12 @@ Recommended:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - `DISCORD_WEBHOOK_URL`
+
+## 5.5. Legal and trust surface
+
+- Confirm `terms.html` opens from the auth screen
+- Confirm `privacy.html` opens from the auth screen
+- Confirm the product clearly states that users should start in Paper mode
 
 ## 6. Validation commands
 

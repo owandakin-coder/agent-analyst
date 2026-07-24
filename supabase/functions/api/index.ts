@@ -841,9 +841,12 @@ function sanitizeBrokerInput(body: JsonMap, existing?: BrokerConnectionRow | nul
 function sanitizeBrokerError(error: unknown): string {
   const text = String(error || "").toLowerCase();
   if (text.includes("unauthorized") || text.includes("forbidden") || text.includes("revoked")) {
-    return "Broker disconnected";
+    return "Alpaca rejected these keys. Confirm Paper vs Live mode and use a matching API Key + Secret Key pair.";
   }
-  return "Broker disconnected";
+  if (text.includes("timeout") || text.includes("network") || text.includes("fetch")) {
+    return "Alpaca could not be reached right now. Try again in a minute.";
+  }
+  return "Broker verification failed. Review your Alpaca credentials and try again.";
 }
 
 function sanitizeExecutionRequest(request: ExecutionRequestRow | JsonMap | null | undefined): JsonMap | null {
@@ -1329,8 +1332,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         row = saveRows[0] ?? row;
       }
 
-      if (!row) return json({ error: "Broker connection not found" }, 404);
-      if (!apiKey || !secretKey) return json({ error: "API key and secret key are required" }, 400);
+      if (!row) return json({ error: "Save your broker connection first, then verify it." }, 404);
+      if (!apiKey || !secretKey) return json({ error: "Enter both the Alpaca API Key and Secret Key before verification." }, 400);
       try {
         const account = await verifyAlpacaCredentials(apiKey, secretKey, row.base_url);
         const res = await restAdmin(`/broker_connections?id=eq.${encodeURIComponent(row.id)}`, {
@@ -1381,7 +1384,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const user = await requireUser(req);
       const broker = await fetchBrokerConnection(String(user.id));
       if (!broker?.enabled || !broker.api_key_encrypted || !broker.secret_key_encrypted) {
-        return json({ error: "Verified broker connection is required" }, 400);
+        return json({ error: "Verify your Alpaca broker connection before requesting a run." }, 400);
       }
       const existingJob = await findOpenTradeRequest(String(user.id));
       if (existingJob) {
@@ -1439,7 +1442,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         await audit(String(user.id), "run_once_dispatch", { request_id: job?.id ?? null });
         return json({ ...result, job: sanitizeExecutionRequest(job) }, 202);
       }
-      return json({ error: "Verified broker connection is required" }, 400);
+      return json({ error: "Verify your Alpaca broker connection before changing live controls." }, 400);
     }
 
     if (path === "/worker/execution/claim-next" && req.method === "POST") {

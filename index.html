@@ -1194,6 +1194,12 @@ select.m-input { appearance:none; cursor:pointer; }
       <button id="auth-switch-btn" class="auth-secondary" onclick="toggleAuthMode()">Need an account?</button>
     </div>
     <div class="auth-meta" id="auth-meta">Sign in to activate your personal trading workspace. Portfolio data appears only after your own broker connection is verified.</div>
+    <div style="margin-top:10px;text-align:center;font-size:11px;color:var(--g3);line-height:1.5;">
+      By continuing you agree to the
+      <a href="terms.html" target="_blank" style="color:var(--blue);text-decoration:none;">Terms</a>
+      and
+      <a href="privacy.html" target="_blank" style="color:var(--blue);text-decoration:none;">Privacy Policy</a>.
+    </div>
   </div>
 </div>
 
@@ -1706,6 +1712,14 @@ select.m-input { appearance:none; cursor:pointer; }
     <input class="m-input" type="password" id="broker-api-key" placeholder="Leave blank to keep current key">
     <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Secret Key</label>
     <input class="m-input" type="password" id="broker-secret-key" placeholder="Leave blank to keep current secret">
+    <div style="margin-top:10px;padding:12px;border-radius:14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);font-size:11.5px;color:var(--g2);line-height:1.55;">
+      <strong style="display:block;color:var(--white);margin-bottom:6px;">Where do these keys come from?</strong>
+      1. Open your Alpaca Paper dashboard.<br>
+      2. Go to <strong>API Keys</strong>.<br>
+      3. Copy the <strong>API Key</strong> and the <strong>Secret Key</strong>.<br>
+      4. Use <strong>https://paper-api.alpaca.markets</strong> for Paper mode.<br><br>
+      Alpaca usually shows the full Secret Key only when it is first generated. If you cannot see it anymore, generate a fresh key pair in Alpaca and paste both values here.
+    </div>
     <label style="display:flex;align-items:center;gap:10px;margin:12px 0 0;font-size:12px;color:var(--g2);">
       <input type="checkbox" id="broker-enabled" checked>
       Allow isolated trading jobs for this workspace
@@ -2066,6 +2080,29 @@ function humanizeAuthError(message) {
     };
   }
   return { error: text, showResend: false, status: '' };
+}
+
+function humanizeBrokerError(message) {
+  const text = String(message || '');
+  if (/api key and secret key are required|enter both the alpaca api key/i.test(text)) {
+    return 'Enter both the Alpaca API Key and Secret Key.';
+  }
+  if (/save your broker connection first/i.test(text) || /broker connection not found/i.test(text)) {
+    return 'Save the broker details first, then press Verify.';
+  }
+  if (/alpaca rejected these keys/i.test(text) || /broker disconnected/i.test(text) || /forbidden|unauthorized/i.test(text)) {
+    return 'Alpaca rejected the credentials. Check that you are using the correct Paper or Live keys, or generate a fresh key pair.';
+  }
+  if (/could not be reached|network|timeout|fetch/i.test(text)) {
+    return 'Could not reach Alpaca right now. Try again in a minute.';
+  }
+  if (/verify your alpaca broker connection before requesting a run/i.test(text) || /verified broker connection is required/i.test(text)) {
+    return 'Verify your Alpaca Paper connection before running trades.';
+  }
+  if (/missing authorization header|unauthorized|jwt|token|expired/i.test(text)) {
+    return 'Your secure session expired. Sign in again and retry.';
+  }
+  return text;
 }
 
 function shouldFallbackToDirectAuth(message) {
@@ -2702,7 +2739,7 @@ async function saveBrokerConnection(options = {}) {
     if (!silent) toast('Broker connection saved');
     return payload.connection || null;
   } catch (e) {
-    errorEl.textContent = e.message;
+    errorEl.textContent = humanizeBrokerError(e.message);
     if (!silent) toast('Broker save failed');
     throw e;
   }
@@ -2741,7 +2778,7 @@ async function verifyBrokerConnection() {
     }
     toast('Broker verified');
   } catch (e) {
-    errorEl.textContent = e.message;
+    errorEl.textContent = humanizeBrokerError(e.message);
     toast('Broker verify failed');
   }
 }
@@ -2773,7 +2810,7 @@ async function requestPersonalRun() {
     await refreshMemberWorkspace();
     toast('Personal run queued');
   } catch (e) {
-    errorEl.textContent = e.message;
+    errorEl.textContent = humanizeBrokerError(e.message);
     toast('Run request failed');
   }
 }

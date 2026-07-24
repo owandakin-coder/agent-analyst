@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ATZMA Privacy Policy</title>
+  <style>
+    :root {
+      --bg:#070b12;
+      --panel:#101723;
+      --text:#f5f7fb;
+      --muted:#9ba7ba;
+      --line:rgba(255,255,255,0.08);
+      --blue:#4da3ff;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      font-family:Inter,system-ui,sans-serif;
+      background:radial-gradient(circle at top, rgba(77,163,255,0.12), transparent 30%), var(--bg);
+      color:var(--text);
+      line-height:1.6;
+    }
+    .wrap { max-width:860px; margin:0 auto; padding:40px 20px 80px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:24px; padding:28px; box-shadow:0 20px 60px rgba(0,0,0,0.28); }
+    h1,h2 { margin:0 0 12px; }
+    h1 { font-size:32px; }
+    h2 { font-size:18px; margin-top:26px; }
+    p, li { color:var(--muted); }
+    a { color:var(--blue); text-decoration:none; }
+    .pill { display:inline-block; padding:6px 10px; border-radius:999px; background:rgba(77,163,255,0.12); color:var(--blue); font-size:12px; font-weight:700; letter-spacing:0.3px; text-transform:uppercase; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="pill">ATZMA Privacy</div>
+      <h1>Privacy Policy</h1>
+      <p>Last updated: July 23, 2026</p>
+      <p>ATZMA is designed to keep each member’s broker connection and workspace isolated from every other member.</p>
+
+      <h2>1. Data We Store</h2>
+      <ul>
+        <li>Account profile details such as email and display name.</li>
+        <li>User preferences and control settings.</li>
+        <li>Broker connection metadata and masked credential references.</li>
+        <li>Execution requests, decision summaries, audit events, and system health records.</li>
+      </ul>
+
+      <h2>2. Broker Credentials</h2>
+      <p>Broker API credentials are intended to remain server-side. They are stored in encrypted form and are not returned to the frontend in plaintext.</p>
+
+      <h2>3. How Data Is Used</h2>
+      <ul>
+        <li>To authenticate the user and protect access to private workspace data.</li>
+        <li>To verify broker connectivity and support isolated execution requests.</li>
+        <li>To provide auditability, troubleshooting, and operational safety controls.</li>
+      </ul>
+
+      <h2>4. Third-Party Services</h2>
+      <p>ATZMA relies on third-party providers such as Supabase, Alpaca, GitHub Pages, and optional notification providers. Those services may process operational metadata necessary to deliver the platform.</p>
+
+      <h2>5. Security Posture</h2>
+      <p>ATZMA uses authenticated access controls, encrypted broker credential storage, and server-side execution boundaries to reduce exposure. No online system can guarantee perfect security.</p>
+
+      <h2>6. Data Retention</h2>
+      <p>Operational records such as execution logs, audit trails, and health events may be retained for safety, incident review, compliance preparation, and service improvement.</p>
+
+      <h2>7. User Control</h2>
+      <p>Users may disconnect a broker, stop using the service, or request account deletion subject to applicable technical and legal retention needs.</p>
+
+      <h2>8. Contact</h2>
+      <p>Questions about privacy handling should be directed through the operator’s support channel before enabling live trading.</p>
+
+      <p><a href="index.html">Back to ATZMA</a></p>
+    </div>
+  </div>
+</body>
+</html>

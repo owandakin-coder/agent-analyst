@@ -15,6 +15,7 @@ ATZMA is an autonomous trading platform built around an RL decision engine, a pr
 - Durable `execution_requests` queue with lease-based worker claims
 - Guest `Locked` state with no live portfolio access
 - Health checks, launch checklist, and automated tests
+- Launch-facing legal pages: `terms.html`, `privacy.html`
 
 ## Core Architecture
 
@@ -172,3 +173,8 @@ python user_execution_worker.py --loop
 ## Launch Readiness
 
 See `LAUNCH_CHECKLIST.md` before every production launch.
+
+Legal pages available for the public site:
+
+- `terms.html`
+- `privacy.html`
