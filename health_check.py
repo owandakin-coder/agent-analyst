@@ -40,6 +40,18 @@ def remote_api_base() -> str:
     return os.getenv("ATZMA_REMOTE_API_BASE", "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api").rstrip("/")
 
 
+def classify_broker_error(exc: Exception) -> tuple[str, bool]:
+    text = str(exc).strip()
+    lower = text.lower()
+    if "unauthorized" in lower or "forbidden" in lower or "403" in lower or "401" in lower:
+        return "broker credentials rejected by Alpaca", False
+    if "timeout" in lower:
+        return "broker request timed out", False
+    if "missing environment variables" in lower:
+        return "broker credentials missing locally", True
+    return text or exc.__class__.__name__, False
+
+
 def check_config() -> bool:
     print("\n[1] Config")
     try:
@@ -108,6 +120,9 @@ def check_files() -> bool:
         "training_pipeline.py",
         "config.yaml",
         "config_loader.py",
+        "worker_entry.py",
+        "render.yaml",
+        "runtime.txt",
     ]
     ok = True
     for filename in required:
@@ -123,6 +138,12 @@ def check_files() -> bool:
     else:
         warn("submitted_orders.json missing", "will be created on first order")
 
+    app_index = Path("dashboard_app/index.html")
+    root_index = Path("index.html")
+    if app_index.exists() and root_index.exists():
+        sync_ok = app_index.read_bytes() == root_index.read_bytes()
+        ok &= check("frontend build synced", sync_ok, "index.html == dashboard_app/index.html" if sync_ok else "root and dashboard_app HTML differ")
+
     return ok
 
 
@@ -130,7 +151,7 @@ def check_env() -> bool:
     print("\n[4] Environment")
     from dotenv import load_dotenv
 
-    load_dotenv()
+    load_dotenv(".env")
     ok = True
     for key in ["ALPACA_API_KEY", "ALPACA_SECRET_KEY"]:
         value = os.getenv(key, "")
@@ -171,7 +192,11 @@ def check_alpaca() -> bool:
         warn("Broker check skipped", "credentials not set")
         return True
     except Exception as exc:
-        return check("Broker connection", False, str(exc))
+        detail, is_warning = classify_broker_error(exc)
+        if is_warning:
+            warn("Broker check skipped", detail)
+            return True
+        return check("Broker connection", False, detail)
 
 
 def check_model() -> bool:

@@ -65,7 +65,7 @@ if ($LASTEXITCODE -ne 0) { Write-Host "Link failed" -ForegroundColor Red; exit 1
 # Step 3: Push secrets
 Write-Host ""
 Write-Host "  [3/5] Uploading server-side secrets..." -ForegroundColor Yellow
-npx supabase@latest secrets set ALPACA_API_KEY=$ALPACA_KEY ALPACA_SECRET_KEY=$ALPACA_SECRET ALPACA_BASE_URL=https://paper-api.alpaca.markets/v2 ATZMA_BROKER_CREDENTIAL_KEY=$BROKER_KEY ATZMA_WORKER_SHARED_TOKEN=$WORKER_TOKEN ATZMA_ALLOW_LEGACY_CONTROL_FALLBACK=0
+npx supabase@latest secrets set ALPACA_API_KEY=$ALPACA_KEY ALPACA_SECRET_KEY=$ALPACA_SECRET ALPACA_BASE_URL=https://paper-api.alpaca.markets ATZMA_BROKER_CREDENTIAL_KEY=$BROKER_KEY ATZMA_WORKER_SHARED_TOKEN=$WORKER_TOKEN ATZMA_ALLOW_LEGACY_CONTROL_FALLBACK=0
 if ($LASTEXITCODE -ne 0) { Write-Host "Secrets failed" -ForegroundColor Red; exit 1 }
 Write-Host "  Secrets OK" -ForegroundColor Green
 
