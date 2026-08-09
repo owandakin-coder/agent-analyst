@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 import logging
 import os
+import pickle
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
@@ -85,6 +86,7 @@ try:
     DEFAULT_POLL_SECONDS = _CFG.live_poll_seconds
     MARKET_OPEN_BUFFER_MINUTES = _CFG.live_market_open_buffer_minutes
     MIN_TRADE_VALUE = _CFG.min_trade_value
+    MODEL_DIR = _CFG.model_dir
 except Exception:
     WINDOW_SIZE = 30
     MIN_DATA_DAYS = 200
@@ -103,6 +105,31 @@ except Exception:
     DEFAULT_POLL_SECONDS = 60
     MARKET_OPEN_BUFFER_MINUTES = 5
     MIN_TRADE_VALUE = 500.0
+    MODEL_DIR = "models"
+
+
+def _resolve_model_version() -> str:
+    """Identifies which trained model is actually running a cycle.
+
+    An explicit ATZMA_MODEL_VERSION env var always wins (lets an operator
+    pin/label a specific deploy). Otherwise fall back to the trained_at
+    timestamp main.py stamps into training_meta.pkl at training time, so
+    decision snapshots stop saying "unknown" for every single cycle.
+    """
+    override = os.getenv("ATZMA_MODEL_VERSION", "").strip()
+    if override:
+        return override
+    meta_path = os.path.join(MODEL_DIR, "training_meta.pkl")
+    try:
+        with open(meta_path, "rb") as f:
+            meta = pickle.load(f)
+        trained_at = meta.get("trained_at")
+        if trained_at:
+            return str(trained_at)
+    except Exception:
+        pass
+    return "unknown"
+
 
 FEATURE_COLS   = [    # פיצ'רים שהמודל ראה באימון – חייב להתאים ל-DataManager
     "returns", "log_returns",
@@ -145,6 +172,7 @@ class LiveTrader:
 
         # Detect ensemble mode (EnsembleAgent has its own normalisation)
         self._is_ensemble = hasattr(model, "members")
+        self._model_version = _resolve_model_version()
 
         # Regime detection + alternative data
         self._regime_detector = RegimeDetector()
@@ -434,7 +462,7 @@ class LiveTrader:
         broker_orders = self._execute_actions(action, current_prices, cash, positions)
         self.last_cycle_result = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "model_version": os.getenv("ATZMA_MODEL_VERSION", "unknown"),
+            "model_version": self._model_version,
             "strategy_version": os.getenv("ATZMA_STRATEGY_VERSION", "default"),
             "regime": decision_bundle.regime,
             "strategy_mode": decision_bundle.strategy_mode,

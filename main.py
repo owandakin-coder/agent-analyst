@@ -24,6 +24,7 @@ import sys
 import pickle
 import argparse
 import warnings
+from datetime import datetime, timezone
 
 # ── UTF-8 לטרמינל Windows ──────────────────────────────────────────────────
 if sys.stdout and getattr(sys.stdout, "encoding", None) and sys.stdout.encoding.lower() != "utf-8":
@@ -109,6 +110,7 @@ def step_train(aligned_data: dict[str, pd.DataFrame], n_optuna_trials: int = 15)
         "train_period": (CFG.train_start, CFG.train_end),
         "val_period":   (CFG.val_start, CFG.val_end),
         "test_period":  (CFG.test_start, CFG.test_end),
+        "trained_at":   datetime.now(timezone.utc).isoformat(),
     }
     with open(os.path.join(MODEL_DIR, "training_meta.pkl"), "wb") as f:
         pickle.dump(meta, f)
