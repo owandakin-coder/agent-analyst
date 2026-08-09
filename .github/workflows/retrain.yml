@@ -15,7 +15,15 @@ name: Monthly Retrain
 #   7. Commits updated model files back to the repository
 #   8. Sends Telegram notification with training results
 #
-# Total estimated runtime: ~45 minutes (GitHub Actions free tier)
+# Runtime note: the original 45-minute estimate was wrong in practice.
+# Both real scheduled runs so far (2026-06-01, 2026-07-01) were cancelled
+# by the job timeout ~118 minutes in, still inside "Train base model" —
+# on GitHub's shared CPU-only runners, Optuna (10 trials) + the transformer
+# policy + 500k final steps + a 3-seed ensemble needs far more than 45
+# minutes. timeout-minutes below is raised to 350 (just under GitHub's
+# 360-minute hard ceiling for hosted runners) so a full run has a real
+# chance to finish. If it still times out, the fix is to cut scope
+# (fewer optuna trials / timesteps), not to raise this further.
 # ──────────────────────────────────────────────────────────────
 on:
   schedule:
@@ -30,7 +38,7 @@ on:
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 120   # 2 hours max
+    timeout-minutes: 350   # was 120 — both real runs got cancelled mid-training at that limit
 
     steps:
       # ── 1. Checkout ───────────────────────────────────────────
