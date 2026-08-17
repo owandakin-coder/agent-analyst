@@ -65,6 +65,20 @@ class TestBrokerConnection:
 
         assert b.base_url == custom_url
 
+    def test_paper_flag_cannot_be_overridden_to_live_url(self, monkeypatch):
+        """paper=True + ALPACA_BASE_URL=live API → נכפה חזרה ל-paper, לא הולך Live בטעות."""
+        monkeypatch.setenv("ALPACA_API_KEY",    "key")
+        monkeypatch.setenv("ALPACA_SECRET_KEY", "secret")
+        monkeypatch.setenv("ALPACA_BASE_URL",   "https://api.alpaca.markets")
+
+        with patch("broker_api.TradingClient"), \
+             patch("broker_api.StockHistoricalDataClient"):
+            from broker_api import AlpacaBrokerAPI
+            b = AlpacaBrokerAPI(paper=True, auto_approve=True)
+
+        assert "paper-api" in b.base_url
+        assert b.base_url != "https://api.alpaca.markets"
+
     def test_trading_client_called_with_paper_flag(self, monkeypatch):
         """TradingClient נקרא עם paper=True."""
         monkeypatch.setenv("ALPACA_API_KEY",    "k")

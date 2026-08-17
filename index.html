@@ -1704,8 +1704,9 @@ select.m-input { appearance:none; cursor:pointer; }
     <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Trading Mode</label>
     <select class="m-input" id="broker-trading-mode">
       <option value="paper">Paper</option>
-      <option value="live">Live</option>
+      <option value="live" disabled>Live (not available yet)</option>
     </select>
+    <p style="font-size:11px;color:var(--g3);margin:4px 0 0;line-height:1.4;">ATZMA currently supports Paper trading only.</p>
     <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">Base URL</label>
     <input class="m-input" type="text" id="broker-base-url" placeholder="https://paper-api.alpaca.markets">
     <label style="font-size:11px;color:var(--g3);margin:8px 0 4px;display:block;">API Key</label>

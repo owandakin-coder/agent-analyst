@@ -327,6 +327,17 @@ def step_live_real(model, vec_norm, auto_approve: bool):
     print("  All losses are your sole responsibility.")
     print("!" * 60 + "\n")
 
+    # Product decision: no live (real-money) trading until this has been
+    # reviewed by a securities/fintech attorney. Same named gate as the
+    # Supabase API's ATZMA_LIVE_TRADING_ENABLED — both must be explicitly
+    # flipped before real money can move anywhere in this system.
+    if os.getenv("ATZMA_LIVE_TRADING_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
+        print(
+            "[LIVE] Live trading is disabled (ATZMA_LIVE_TRADING_ENABLED is not set).\n"
+            "  ATZMA currently supports Paper trading only. Exiting."
+        )
+        sys.exit(1)
+
     # ── חובה auto_approve=True ל-live ────────────────────────────────────
     if not auto_approve:
         print(

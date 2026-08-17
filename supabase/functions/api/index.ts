@@ -17,6 +17,13 @@ const GITHUB_REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "owandakin-coder/agent-
 const WORKER_SHARED_TOKEN = Deno.env.get("ATZMA_WORKER_SHARED_TOKEN") ?? "";
 const ALLOW_LEGACY_CONTROL_FALLBACK = (Deno.env.get("ATZMA_ALLOW_LEGACY_CONTROL_FALLBACK") ?? "").toLowerCase() === "1";
 
+// Product decision: ATZMA does not offer live (real-money) trading until
+// this has been reviewed by a securities/fintech attorney. This is the
+// single authoritative gate — client input is never trusted for it, since
+// the dashboard toggle can always be bypassed by calling the API directly.
+// Flip ATZMA_LIVE_TRADING_ENABLED=1 only after that review.
+const LIVE_TRADING_ENABLED = (Deno.env.get("ATZMA_LIVE_TRADING_ENABLED") ?? "").toLowerCase() === "1";
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
@@ -812,7 +819,8 @@ function serializeBrokerConnection(row: BrokerConnectionRow | null, decryptedApi
 }
 
 function sanitizeBrokerInput(body: JsonMap, existing?: BrokerConnectionRow | null) {
-  const tradingMode = typeof body.trading_mode === "string" && body.trading_mode.toLowerCase() === "live" ? "live" : "paper";
+  const requestedLive = typeof body.trading_mode === "string" && body.trading_mode.toLowerCase() === "live";
+  const tradingMode = requestedLive && LIVE_TRADING_ENABLED ? "live" : "paper";
   const fallbackBaseUrl = existing?.base_url ?? (tradingMode === "live" ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets");
   let baseUrl = fallbackBaseUrl;
   if (typeof body.base_url === "string" && body.base_url.trim()) {

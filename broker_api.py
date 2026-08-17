@@ -72,7 +72,17 @@ class AlpacaBrokerAPI:
     def __init__(self, paper: bool = True, auto_approve: bool = False):
         self.api_key = os.getenv("ALPACA_API_KEY", "")
         self.secret_key = os.getenv("ALPACA_SECRET_KEY", "")
-        self.base_url = os.getenv("ALPACA_BASE_URL", "") or (PAPER_BASE_URL if paper else LIVE_BASE_URL)
+        env_base_url = os.getenv("ALPACA_BASE_URL", "").strip()
+        base_url = env_base_url or (PAPER_BASE_URL if paper else LIVE_BASE_URL)
+        if paper and base_url.rstrip("/") == LIVE_BASE_URL:
+            # A paper-intent session must never reach Alpaca's live endpoint,
+            # even via a stray/misconfigured ALPACA_BASE_URL — this is the
+            # last line of defense against accidental real-money execution.
+            log.warning(
+                "ALPACA_BASE_URL pointed at the live API while paper=True — forcing paper URL."
+            )
+            base_url = PAPER_BASE_URL
+        self.base_url = base_url
         self.paper = paper
         self.auto_approve = auto_approve
 
