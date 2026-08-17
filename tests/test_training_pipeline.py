@@ -1,7 +1,26 @@
 import numpy as np
 import pandas as pd
 
-from training_pipeline import TrainingPipeline, score_validation_metrics
+from training_pipeline import TrainingPipeline, score_validation_metrics, _env_int_override
+
+
+class TestEnvIntOverride:
+
+    def test_returns_default_when_unset(self, monkeypatch):
+        monkeypatch.delenv("ATZMA_TEST_STEPS", raising=False)
+        assert _env_int_override("ATZMA_TEST_STEPS", 500_000) == 500_000
+
+    def test_uses_env_value_when_set(self, monkeypatch):
+        monkeypatch.setenv("ATZMA_TEST_STEPS", "10000")
+        assert _env_int_override("ATZMA_TEST_STEPS", 500_000) == 10_000
+
+    def test_falls_back_on_non_numeric_value(self, monkeypatch):
+        monkeypatch.setenv("ATZMA_TEST_STEPS", "not-a-number")
+        assert _env_int_override("ATZMA_TEST_STEPS", 500_000) == 500_000
+
+    def test_falls_back_on_non_positive_value(self, monkeypatch):
+        monkeypatch.setenv("ATZMA_TEST_STEPS", "0")
+        assert _env_int_override("ATZMA_TEST_STEPS", 500_000) == 500_000
 
 
 def test_score_validation_metrics_rewards_better_risk_return_profile():

@@ -78,6 +78,30 @@ except Exception:
     POLICY_HEAD_ARCH = [64, 64]
 
 
+def _env_int_override(env_var: str, default: int) -> int:
+    """Lets a scheduled/cloud run scope step counts down without editing config.yaml.
+
+    config.yaml stays the full-quality source of truth for local/manual
+    training. .github/workflows/retrain.yml sets these two env vars to a
+    reduced budget because the unscoped run (10 trials x 50k steps, before
+    even reaching the final model or ensemble) never finished inside
+    GitHub's 350-minute hosted-runner ceiling — see retrain.yml for the
+    real run history that led to this.
+    """
+    raw = os.getenv(env_var, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+TRIAL_TIMESTEPS = _env_int_override("ATZMA_TRIAL_TIMESTEPS", TRIAL_TIMESTEPS)
+ENSEMBLE_STEPS = _env_int_override("ATZMA_ENSEMBLE_TIMESTEPS", ENSEMBLE_STEPS)
+
+
 def _annualized_return_from_equity(equity: np.ndarray, periods_per_year: int = 252) -> float:
     if len(equity) < 2 or equity[0] <= 0:
         return 0.0

@@ -7,23 +7,29 @@ name: Monthly Retrain
 # What it does:
 #   1. Snapshots the current production model for comparison
 #   2. Downloads fresh historical data
-#   3. Runs Optuna hyperparameter search (10 trials)
-#   4. Trains the final base model (500k steps)
-#   5. Trains ensemble (3 seeds × 500k steps)
+#   3. Runs Optuna hyperparameter search (4 trials, scoped down — see below)
+#   4. Trains the final base model (100k steps, scoped down)
+#   5. Trains ensemble (3 seeds × 100k steps, scoped down)
 #   6. Backtests the candidate against the snapshot and reverts it if it
 #      regresses on Sharpe / drawdown / return (see promote_model.py)
 #   7. Commits updated model files back to the repository
 #   8. Sends Telegram notification with training results
 #
-# Runtime note: the original 45-minute estimate was wrong in practice.
-# Both real scheduled runs so far (2026-06-01, 2026-07-01) were cancelled
-# by the job timeout ~118 minutes in, still inside "Train base model" —
-# on GitHub's shared CPU-only runners, Optuna (10 trials) + the transformer
-# policy + 500k final steps + a 3-seed ensemble needs far more than 45
-# minutes. timeout-minutes below is raised to 350 (just under GitHub's
-# 360-minute hard ceiling for hosted runners) so a full run has a real
-# chance to finish. If it still times out, the fix is to cut scope
-# (fewer optuna trials / timesteps), not to raise this further.
+# Runtime note: 4 real runs in a row failed before this scope cut existed.
+# 2026-06-01 and 2026-07-01 were cancelled at the (then) 120-minute limit.
+# Raising timeout-minutes to 350 (2026-08-09 fix) did NOT solve it: the next
+# real run (workflow_dispatch, same day) used the full 350 minutes and was
+# STILL cancelled, with the training log showing it hadn't even finished the
+# original 10-trial x 50k-step Optuna phase — before touching the 500k-step
+# final model or the 500k x 3 ensemble. The bottleneck is compute, not the
+# timeout: a transformer-policy PPO agent on GitHub's shared CPU-only
+# runners is too slow for the original budget at any timeout GitHub allows
+# (360 min hard ceiling). ATZMA_TRIAL_TIMESTEPS / ATZMA_ENSEMBLE_TIMESTEPS
+# below cut the step budget to ~18% of the original (config.yaml itself is
+# untouched, so local/manual training keeps full quality — see
+# training_pipeline.py's _env_int_override). If a run still doesn't finish
+# in 350 minutes, cut these further or move training off GitHub Actions
+# entirely (self-hosted runner / GPU).
 # ──────────────────────────────────────────────────────────────
 on:
   schedule:
@@ -33,7 +39,7 @@ on:
       optuna_trials:
         description: 'Number of Optuna trials'
         required: false
-        default: '10'
+        default: '4'
 
 jobs:
   retrain:
@@ -74,23 +80,27 @@ jobs:
           fi
 
       # ── 5. Train base model ───────────────────────────────────
-      - name: Train base model (Optuna + 500k steps)
+      - name: Train base model (Optuna + 100k steps, scoped for CI compute)
         env:
           ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
           ALPACA_BASE_URL:    https://paper-api.alpaca.markets
+          ATZMA_TRIAL_TIMESTEPS:    "10000"
+          ATZMA_ENSEMBLE_TIMESTEPS: "100000"
         run: |
-          TRIALS=${{ github.event.inputs.optuna_trials || '10' }}
+          TRIALS=${{ github.event.inputs.optuna_trials || '4' }}
           echo "Running Optuna with $TRIALS trials..."
           python -u main.py --mode train --optuna-trials $TRIALS 2>&1 | tee train_base.log
           echo "Base model training complete."
 
       # ── 6. Train ensemble ─────────────────────────────────────
-      - name: Train ensemble (3 seeds × 500k steps)
+      - name: Train ensemble (3 seeds × 100k steps, scoped for CI compute)
         env:
           ALPACA_API_KEY:     ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY:  ${{ secrets.ALPACA_SECRET_KEY }}
           ALPACA_BASE_URL:    https://paper-api.alpaca.markets
+          ATZMA_TRIAL_TIMESTEPS:    "10000"
+          ATZMA_ENSEMBLE_TIMESTEPS: "100000"
         run: |
           python -u main.py --mode train_ensemble 2>&1 | tee train_ensemble.log
           echo "Ensemble training complete."
