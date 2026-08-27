@@ -21,12 +21,18 @@ from __future__ import annotations
 import argparse
 import os
 import pickle
+import sys
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# Windows terminals often default stdout to a non-UTF-8 codepage (e.g. cp1255),
+# which crashes on the box-drawing characters used in the banners below.
+if sys.stdout and getattr(sys.stdout, "encoding", None) and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 try:
     import matplotlib

@@ -34,6 +34,11 @@ from pathlib import Path
 
 import numpy as np
 
+# Windows terminals often default stdout to a non-UTF-8 codepage (e.g. cp1255),
+# which crashes on the emoji used in the alerts/prints below.
+if sys.stdout and getattr(sys.stdout, "encoding", None) and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from config_loader import CFG
 
 MODEL_DIR = Path(CFG.model_dir)
