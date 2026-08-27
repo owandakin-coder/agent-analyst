@@ -89,8 +89,18 @@ def evaluate_window(
     all_data: dict[str, pd.DataFrame],
     timesteps: int = 100_000,
     seed: int = 42,
+    model_params: dict | None = None,
+    use_transformer_policy: bool = False,
 ) -> dict:
-    """מאמן ומעריך על חלון אחד. מחזיר מדדים."""
+    """מאמן ומעריך על חלון אחד. מחזיר מדדים.
+
+    By default trains a plain MlpPolicy with fixed hyperparameters — fast,
+    but not the architecture live trading actually uses. Pass
+    use_transformer_policy=True (and optionally model_params from
+    models/training_meta.pkl's best_params) to match the production
+    training_pipeline.py setup, so this evaluates whether the *deployed*
+    architecture generalizes across windows, not just a cheap proxy.
+    """
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
     from trading_env import TradingEnvironment
@@ -120,11 +130,28 @@ def evaluate_window(
     train_env = DummyVecEnv([lambda: TradingEnvironment(train_data)])
     norm_env  = VecNormalize(train_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
 
+    ppo_kwargs = dict(model_params or {})
+    ppo_kwargs.setdefault("learning_rate", 3e-4)
+    ppo_kwargs.setdefault("n_steps", 2048)
+    ppo_kwargs.setdefault("batch_size", 64)
+    ppo_kwargs.setdefault("n_epochs", 10)
+    ppo_kwargs.setdefault("gamma", 0.99)
+
+    policy_kwargs = None
+    if use_transformer_policy:
+        from transformer_policy import TransformerExtractor
+        from training_pipeline import TRANSFORMER_CONFIG, POLICY_HEAD_ARCH
+        policy_kwargs = dict(
+            features_extractor_class=TransformerExtractor,
+            features_extractor_kwargs=dict(TRANSFORMER_CONFIG),
+            net_arch=list(POLICY_HEAD_ARCH),
+        )
+
     model = PPO(
         "MlpPolicy", norm_env,
-        learning_rate=3e-4, n_steps=2048,
-        batch_size=64, n_epochs=10,
-        gamma=0.99, verbose=0, seed=seed,
+        verbose=0, seed=seed,
+        policy_kwargs=policy_kwargs,
+        **ppo_kwargs,
     )
     model.learn(total_timesteps=timesteps)
     norm_env.training    = False
@@ -205,12 +232,17 @@ def evaluate_window(
 # Full walk-forward run
 # ══════════════════════════════════════════════════════════════════
 
-def run_walk_forward(timesteps: int = 100_000) -> list[dict]:
+def run_walk_forward(
+    timesteps: int = 100_000,
+    use_transformer_policy: bool = False,
+    model_params: dict | None = None,
+) -> list[dict]:
     """מריץ את כל חלונות ה-Walk-Forward."""
 
     print("\n" + "═" * 55)
     print("  WALK-FORWARD EVALUATION")
-    print(f"  {CFG.wf_n_windows} windows · {timesteps:,} steps each")
+    policy_label = "transformer (production)" if use_transformer_policy else "MLP (fast proxy)"
+    print(f"  {CFG.wf_n_windows} windows · {timesteps:,} steps each · {policy_label}")
     print("═" * 55)
 
     # טעינת נתונים
@@ -235,7 +267,10 @@ def run_walk_forward(timesteps: int = 100_000) -> list[dict]:
     # הרצת כל חלון
     results = []
     for window in windows:
-        res = evaluate_window(window, all_data, timesteps=timesteps)
+        res = evaluate_window(
+            window, all_data, timesteps=timesteps,
+            model_params=model_params, use_transformer_policy=use_transformer_policy,
+        )
         results.append(res)
 
     # ── סיכום ─────────────────────────────────────────────────────
@@ -384,10 +419,28 @@ def parse_args():
                    help="50K steps per window (quick test)")
     p.add_argument("--steps", type=int, default=None,
                    help="Custom timesteps per window")
+    p.add_argument("--production-policy", action="store_true",
+                   help="Use the transformer policy + tuned hyperparameters from "
+                        "models/training_meta.pkl (matches the deployed model's "
+                        "architecture) instead of the fast plain-MLP proxy")
     return p.parse_args()
+
+
+def _load_production_params() -> dict | None:
+    meta_path = os.path.join(CFG.model_dir, "training_meta.pkl")
+    if not os.path.exists(meta_path):
+        print(f"[WalkForward] No {meta_path} found — using default PPO hyperparameters.")
+        return None
+    with open(meta_path, "rb") as f:
+        meta = pickle.load(f)
+    best_params = meta.get("best_params")
+    if best_params:
+        print(f"[WalkForward] Loaded tuned hyperparameters from {meta_path}: {best_params}")
+    return best_params or None
 
 
 if __name__ == "__main__":
     args    = parse_args()
     steps   = args.steps or (CFG.trial_timesteps if args.fast else CFG.timesteps // 4)
-    run_walk_forward(timesteps=steps)
+    params  = _load_production_params() if args.production_policy else None
+    run_walk_forward(timesteps=steps, use_transformer_policy=args.production_policy, model_params=params)
