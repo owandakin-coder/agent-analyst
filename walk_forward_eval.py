@@ -125,7 +125,12 @@ def evaluate_window(
     norm_env.norm_reward = False
 
     # ── הערכה ─────────────────────────────────────────────────────
-    test_env_raw = DummyVecEnv([lambda: TradingEnvironment(test_data)])
+    # max_drawdown_stop=1.0: don't let the training-time hard episode-stop
+    # (CFG.drawdown_halt) truncate the *reported* test-window performance.
+    # Live trading never uses that hard stop — only RiskManager.scale_action()
+    # below does, and it can reduce/halt/recover, so this window's numbers
+    # should reflect that instead of a premature cutoff at the worst point.
+    test_env_raw = DummyVecEnv([lambda: TradingEnvironment(test_data, max_drawdown_stop=1.0)])
     test_env     = VecNormalize(test_env_raw, norm_obs=True, norm_reward=False,
                                 clip_obs=10.0, training=False)
     test_env.obs_rms = norm_env.obs_rms

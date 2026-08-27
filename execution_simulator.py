@@ -56,12 +56,24 @@ class ExecutionSimulator:
         """מריץ סימולציה מלאה ומחשב מדדים."""
         print("\n[Simulator] Running Paper Trading on test data ...")
 
+        # TradingEnvironment's default max_drawdown_stop ends the RL *episode*
+        # the moment drawdown crosses CFG.drawdown_halt — a training-time
+        # technique (punish the policy for reaching that state, don't waste
+        # rollout steps recovering from it). live_trader.py never uses this
+        # hard stop for real trading; it relies solely on RiskManager, whose
+        # scale_action() call below already reduces/halts exposure and can
+        # recover once drawdown improves. Disabling the env-level hard stop
+        # here makes this backtest reflect what live/paper trading would
+        # actually do, instead of silently truncating the run at the worst
+        # point in a drawdown and reporting that as the final outcome.
+        no_hard_stop = 1.0
+
         # בניית סביבה – inner env לגישה ל-net_worth ול-window_size
-        inner_env = TradingEnvironment(self.test_data)
+        inner_env = TradingEnvironment(self.test_data, max_drawdown_stop=no_hard_stop)
         common_idx = inner_env._get_common_index()
         window_size = inner_env.window_size
 
-        env_vec = DummyVecEnv([lambda: TradingEnvironment(self.test_data)])
+        env_vec = DummyVecEnv([lambda: TradingEnvironment(self.test_data, max_drawdown_stop=no_hard_stop)])
         env_norm = VecNormalize(env_vec, norm_obs=True, norm_reward=False,
                                 clip_obs=10.0, training=False)
         env_norm.obs_rms = self.vec_norm.obs_rms

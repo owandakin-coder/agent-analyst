@@ -96,7 +96,12 @@ def backtest_equity_curve(model, vec_norm_stats, test_data: dict) -> np.ndarray:
     from trading_env import TradingEnvironment
     from risk_manager import RiskManager
 
-    vec_env = DummyVecEnv([lambda: TradingEnvironment(test_data)])
+    # max_drawdown_stop=1.0: this gate must compare full-period performance,
+    # not whichever candidate happens to survive longer before hitting the
+    # training-time hard stop. RiskManager.scale_action() below is the real,
+    # live-matching risk control (reduce/halt/recover) — see
+    # execution_simulator.py for the full reasoning.
+    vec_env = DummyVecEnv([lambda: TradingEnvironment(test_data, max_drawdown_stop=1.0)])
     norm_env = VecNormalize(vec_env, norm_obs=True, norm_reward=False, clip_obs=10.0, training=False)
     norm_env.obs_rms = vec_norm_stats.obs_rms
     norm_env.ret_rms = vec_norm_stats.ret_rms
