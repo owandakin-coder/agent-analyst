@@ -19,6 +19,7 @@ walk_forward_eval.py
 from __future__ import annotations
 
 import argparse
+import gc
 import os
 import pickle
 import sys
@@ -156,6 +157,7 @@ def evaluate_window(
     model.learn(total_timesteps=timesteps)
     norm_env.training    = False
     norm_env.norm_reward = False
+    norm_env.close()
 
     # ── הערכה ─────────────────────────────────────────────────────
     # max_drawdown_stop=1.0: don't let the training-time hard episode-stop
@@ -225,6 +227,14 @@ def evaluate_window(
     print(f"  Return: {total_return:+.1%} | SPY: {spy_return:+.1%} | "
           f"Alpha: {result['alpha']:+.1%} | Sharpe: {sharpe:.2f} | "
           f"Calmar: {calmar:.2f} | MaxDD: {max_dd:.1%}")
+
+    # Each window trains a fresh PPO model (potentially with a large
+    # transformer policy). On a memory-constrained machine, several windows
+    # in one long-running process can exhaust RAM if PyTorch/gym objects
+    # aren't released promptly — force it instead of waiting on the GC.
+    del model, norm_env, test_env
+    gc.collect()
+
     return result
 
 
