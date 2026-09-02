@@ -359,6 +359,7 @@ class LiveTrader:
 
         positions = snapshot["positions"]
         cash      = snapshot["cash"]
+        self._hydrate_entry_state_from_broker(positions, snapshot, current_prices)
         net_worth = cash + sum(
             positions.get(t, 0.0) * current_prices.get(t, 0.0)
             for t in self.tickers
@@ -857,6 +858,43 @@ class LiveTrader:
                     )
 
         return order_events
+
+    def _hydrate_entry_state_from_broker(
+        self,
+        positions: dict[str, float],
+        snapshot: dict,
+        current_prices: dict[str, float],
+    ) -> None:
+        """Recovers trailing-stop tracking for positions this process didn't open itself.
+
+        _entry_prices/_trailing_highs are in-memory only (see class docstring
+        risk: a worker crash/redeploy resets them to {}). Without this, a
+        held position survives the restart but `_execute_actions`'s trailing
+        stop loop silently skips it forever (`entry <= 0` guard), leaving it
+        unprotected until it happens to be bought again. The broker's own
+        avg_entry_price is authoritative for cost basis; the true historical
+        high-water mark isn't recoverable, so seed it at max(entry, current
+        price) — conservative (may trigger a stop slightly earlier than a
+        mark that saw the real peak, never later).
+        """
+        position_details = snapshot.get("position_details") or {}
+        for ticker, held in positions.items():
+            if held <= 0 or ticker in self._entry_prices:
+                continue
+            avg_entry = float((position_details.get(ticker) or {}).get("avg_entry_price", 0.0) or 0.0)
+            if avg_entry <= 0:
+                avg_entry = current_prices.get(ticker, 0.0)
+                if avg_entry <= 0:
+                    continue
+                log.warning(
+                    "No broker avg_entry_price for existing position %s; "
+                    "seeding trailing-stop entry at current price as a fallback.",
+                    ticker,
+                )
+            else:
+                log.info("Recovered entry price for %s from broker: $%.2f", ticker, avg_entry)
+            self._entry_prices[ticker] = avg_entry
+            self._trailing_highs[ticker] = max(avg_entry, current_prices.get(ticker, avg_entry))
 
     def _reconcile_snapshot(self) -> dict | None:
         try:

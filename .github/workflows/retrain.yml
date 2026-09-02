@@ -52,6 +52,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Full history, not the default shallow clone — the commit step
+          # rebases onto origin/main before pushing (see below), which
+          # needs real ancestor history to work.
+          fetch-depth: 0
 
       # ── 2. Python + pip cache ─────────────────────────────────
       - name: Set up Python 3.11
@@ -158,8 +162,28 @@ jobs:
           else
             MONTH=$(date '+%Y-%m')
             git commit -m "chore: monthly retrain ${MONTH} [skip ci]"
-            git push
-            echo "Models committed and pushed."
+
+            # Training can run for hours, so main has likely moved since
+            # checkout (e.g. an unrelated push landed meanwhile) — a plain
+            # `git push` here fails as a non-fast-forward. Rebase this one
+            # commit onto the latest main and retry instead of losing the
+            # whole run's output.
+            pushed=false
+            for attempt in 1 2 3 4 5; do
+              if git push; then
+                pushed=true
+                break
+              fi
+              echo "Push rejected (attempt ${attempt}/5) — rebasing onto latest main and retrying."
+              git fetch origin main
+              git rebase origin/main
+            done
+            if [ "$pushed" = true ]; then
+              echo "Models committed and pushed."
+            else
+              echo "::error::Could not push updated models after 5 attempts."
+              exit 1
+            fi
           fi
 
       # ── 10. Upload training logs ──────────────────────────────
