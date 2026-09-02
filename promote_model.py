@@ -18,7 +18,14 @@ This module backtests the freshly trained candidate against the model it
 would replace, on the same held-out test period used everywhere else
 (CFG.test_start .. CFG.test_end), and only allows promotion if the
 candidate does not regress beyond a small tolerance on Sharpe, max
-drawdown, or annualized return.
+drawdown, or annualized return — and does not badly lag a trivial SPY
+buy-and-hold over the same window. That second check exists because
+"doesn't regress vs. the previous model" alone lets mediocrity persist
+indefinitely if the very first deployed model was never actually good:
+each retrain only has to hold its own against a baseline that might
+itself be bad. Comparing against SPY catches a model that's actively
+losing money while the market just sits there, which "beat the last
+model" alone would miss.
 
 Usage (wired into retrain.yml around the existing training steps):
     python promote_model.py --previous models/previous_model.zip \
@@ -51,31 +58,47 @@ SHARPE_TOLERANCE = 0.10
 DRAWDOWN_TOLERANCE_PP = 0.03
 RETURN_TOLERANCE_PP = 0.05
 
+# Deliberately loose: a risk-managed strategy can legitimately lag a raw,
+# unmanaged index by a lot in absolute return while being far better on a
+# risk-adjusted basis. This tolerance exists only to catch the pathological
+# case — a model that loses real money while the market does nothing bad —
+# not to demand the model beat a naive benchmark on every run.
+SPY_UNDERPERFORMANCE_TOLERANCE_PP = 0.20
 
-def should_promote(candidate: dict, previous: dict | None) -> tuple[bool, str]:
+
+def should_promote(candidate: dict, previous: dict | None, spy: dict | None = None) -> tuple[bool, str]:
     """Pure decision function so the policy is unit-testable without a GPU or market data."""
-    if previous is None:
-        return True, "no existing production model to compare against — promoting first candidate"
-
     reasons = []
-    if candidate["sharpe"] < previous["sharpe"] - SHARPE_TOLERANCE:
-        reasons.append(
-            f"sharpe {candidate['sharpe']:.2f} < production {previous['sharpe']:.2f} - {SHARPE_TOLERANCE}"
-        )
-    if candidate["max_drawdown"] > previous["max_drawdown"] + DRAWDOWN_TOLERANCE_PP:
-        reasons.append(
-            f"max_drawdown {candidate['max_drawdown']:.1%} > production "
-            f"{previous['max_drawdown']:.1%} + {DRAWDOWN_TOLERANCE_PP:.0%}"
-        )
-    if candidate["annualized_return"] < previous["annualized_return"] - RETURN_TOLERANCE_PP:
-        reasons.append(
-            f"annualized_return {candidate['annualized_return']:+.1%} < production "
-            f"{previous['annualized_return']:+.1%} - {RETURN_TOLERANCE_PP:.0%}"
-        )
+
+    if previous is not None:
+        if candidate["sharpe"] < previous["sharpe"] - SHARPE_TOLERANCE:
+            reasons.append(
+                f"sharpe {candidate['sharpe']:.2f} < production {previous['sharpe']:.2f} - {SHARPE_TOLERANCE}"
+            )
+        if candidate["max_drawdown"] > previous["max_drawdown"] + DRAWDOWN_TOLERANCE_PP:
+            reasons.append(
+                f"max_drawdown {candidate['max_drawdown']:.1%} > production "
+                f"{previous['max_drawdown']:.1%} + {DRAWDOWN_TOLERANCE_PP:.0%}"
+            )
+        if candidate["annualized_return"] < previous["annualized_return"] - RETURN_TOLERANCE_PP:
+            reasons.append(
+                f"annualized_return {candidate['annualized_return']:+.1%} < production "
+                f"{previous['annualized_return']:+.1%} - {RETURN_TOLERANCE_PP:.0%}"
+            )
+
+    if spy is not None:
+        if candidate["annualized_return"] < spy["annualized_return"] - SPY_UNDERPERFORMANCE_TOLERANCE_PP:
+            reasons.append(
+                f"annualized_return {candidate['annualized_return']:+.1%} is more than "
+                f"{SPY_UNDERPERFORMANCE_TOLERANCE_PP:.0%} below SPY buy-and-hold "
+                f"({spy['annualized_return']:+.1%}) over the same window"
+            )
 
     if reasons:
         return False, "; ".join(reasons)
-    return True, "candidate meets or exceeds production on sharpe, drawdown and return"
+    if previous is None:
+        return True, "no existing production model to compare against — promoting first candidate"
+    return True, "candidate meets or exceeds production on sharpe, drawdown and return, and isn't badly lagging SPY"
 
 
 def _load_test_data() -> dict:
@@ -140,6 +163,17 @@ def metrics_from_equity(equity: np.ndarray) -> dict:
     return metrics
 
 
+def compute_spy_baseline(test_data: dict) -> dict | None:
+    """SPY buy-and-hold over the same window, as the 'did nothing' baseline."""
+    from benchmark import spy_buy_hold
+
+    try:
+        equity = spy_buy_hold(test_data, CFG.initial_capital)
+    except (ValueError, KeyError):
+        return None
+    return metrics_from_equity(np.asarray(equity, dtype=float))
+
+
 def evaluate_model_metrics(model_path: Path, vec_norm_path: Path, test_data: dict) -> dict:
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
@@ -160,7 +194,7 @@ def run_gate(
     candidate_norm: Path,
     previous_model: Path,
     previous_norm: Path,
-) -> tuple[bool, str, dict, dict | None]:
+) -> tuple[bool, str, dict, dict | None, dict | None]:
     test_data = _load_test_data()
 
     candidate_metrics = evaluate_model_metrics(candidate_model, candidate_norm, test_data)
@@ -169,8 +203,10 @@ def run_gate(
     if previous_model.exists() and previous_norm.exists():
         previous_metrics = evaluate_model_metrics(previous_model, previous_norm, test_data)
 
-    promote_ok, reason = should_promote(candidate_metrics, previous_metrics)
-    return promote_ok, reason, candidate_metrics, previous_metrics
+    spy_metrics = compute_spy_baseline(test_data)
+
+    promote_ok, reason = should_promote(candidate_metrics, previous_metrics, spy_metrics)
+    return promote_ok, reason, candidate_metrics, previous_metrics, spy_metrics
 
 
 def _fmt(metrics: dict) -> str:
@@ -200,13 +236,15 @@ def main() -> int:
 
     from notifications import send_operator_alert
 
-    promote_ok, reason, candidate_metrics, previous_metrics = run_gate(
+    promote_ok, reason, candidate_metrics, previous_metrics, spy_metrics = run_gate(
         candidate_model, candidate_norm, previous_model, previous_norm
     )
 
     print(f"[Promote] Candidate: {_fmt(candidate_metrics)}")
     if previous_metrics:
         print(f"[Promote] Previous : {_fmt(previous_metrics)}")
+    if spy_metrics:
+        print(f"[Promote] SPY B&H  : {_fmt(spy_metrics)}")
 
     if promote_ok:
         print(f"[Promote] PROMOTED — {reason}")

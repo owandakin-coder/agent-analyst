@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from promote_model import should_promote, backtest_equity_curve, metrics_from_equity
+from promote_model import should_promote, backtest_equity_curve, metrics_from_equity, compute_spy_baseline
 
 
 def _metrics(sharpe=1.0, max_drawdown=0.10, annualized_return=0.15):
@@ -76,6 +76,46 @@ class TestShouldPromote:
         assert "sharpe" in reason and "max_drawdown" in reason and "annualized_return" in reason
 
 
+class TestSpyBaselineGate:
+
+    def test_badly_lagging_spy_rejected_even_if_better_than_previous(self):
+        """A model that beats a bad previous model but loses money while
+        the market does fine must still be rejected — this is exactly the
+        'previous model was already mediocre' loophole the baseline closes."""
+        previous = _metrics(sharpe=-1.0, max_drawdown=0.30, annualized_return=-0.30)
+        candidate = _metrics(sharpe=-0.5, max_drawdown=0.20, annualized_return=-0.20)
+        spy = _metrics(sharpe=1.0, max_drawdown=0.10, annualized_return=0.15)
+
+        # Beats the (bad) previous model on every metric...
+        promote_vs_previous_only, _ = should_promote(candidate, previous)
+        assert promote_vs_previous_only is True
+
+        # ...but still loses badly against SPY over the same window.
+        promote, reason = should_promote(candidate, previous, spy)
+        assert promote is False
+        assert "SPY" in reason
+
+    def test_within_spy_tolerance_accepted(self):
+        spy = _metrics(annualized_return=0.15)
+        candidate = _metrics(annualized_return=0.00)  # 15pp behind, within the 20pp tolerance
+        promote, _ = should_promote(candidate, None, spy)
+        assert promote is True
+
+    def test_first_deployment_still_checked_against_spy(self):
+        """No previous model to compare against must not mean 'anything goes' —
+        a terrible first model should still fail the SPY sanity check."""
+        spy = _metrics(annualized_return=0.15)
+        candidate = _metrics(annualized_return=-0.20)
+        promote, reason = should_promote(candidate, None, spy)
+        assert promote is False
+        assert "SPY" in reason
+
+    def test_no_spy_data_available_skips_the_check(self):
+        candidate = _metrics(annualized_return=-0.50)
+        promote, _ = should_promote(candidate, None, spy=None)
+        assert promote is True
+
+
 class TestBacktestIntegration:
 
     def test_backtest_and_metrics_run_end_to_end(self, tiny_model_and_norm):
@@ -90,3 +130,17 @@ class TestBacktestIntegration:
         for key in ("sharpe", "max_drawdown", "annualized_return", "total_return", "final_value"):
             assert key in metrics
         assert np.isfinite(metrics["sharpe"])
+
+    def test_compute_spy_baseline_runs_end_to_end(self, tiny_model_and_norm):
+        _, _, raw_data, _ = tiny_model_and_norm
+        spy_data = {"SPY": raw_data["AAPL"]}
+
+        metrics = compute_spy_baseline(spy_data)
+
+        assert metrics is not None
+        for key in ("sharpe", "max_drawdown", "annualized_return"):
+            assert key in metrics
+
+    def test_compute_spy_baseline_returns_none_without_spy(self, tiny_model_and_norm):
+        _, _, raw_data, _ = tiny_model_and_norm
+        assert compute_spy_baseline(raw_data) is None
