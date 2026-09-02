@@ -1908,6 +1908,12 @@ select.m-input { appearance:none; cursor:pointer; }
   loop();
 })();
 
+// Declared here (not down in the CHARTS section) because fetchAlpacaData()
+// below calls refreshReturnsBarChart()/refreshAllocation() immediately at
+// script load — a `let` further down would still be in its temporal dead
+// zone at that point and throw ReferenceError before the page ever renders.
+let eqChart = null, barChart2 = null, chartsInited = false;
+
 // ════════════════════════════════════════════════════════
 // LIVE DATA ENGINE
 // ════════════════════════════════════════════════════════
@@ -3501,7 +3507,6 @@ function renderPositionsPage() {
 // Locked-state design) and signed-in users alike saw a fabricated but
 // realistic-looking equity curve, per-asset returns, and sector mix.
 // ════════════════════════════════════════════════════════
-let eqChart = null, barChart2 = null, chartsInited = false;
 
 const TF_PARAMS = {
   '1W': { period: '1W', timeframe: '1H' },
