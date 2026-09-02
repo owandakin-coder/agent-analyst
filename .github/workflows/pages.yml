@@ -1,0 +1,53 @@
+name: Deploy static site to GitHub Pages
+
+# Publishes the public static frontend (index.html + assets it references)
+# to GitHub Pages via the standard Actions-based deploy flow. Settings ->
+# Pages -> Source is "GitHub Actions", but had no workflow wired up to it,
+# which is why the site was 404ing despite Settings showing it enabled.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'logo.png'
+      - 'privacy.html'
+      - 'terms.html'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stage static site files
+        run: |
+          mkdir -p _site
+          cp index.html logo.png privacy.html terms.html _site/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
