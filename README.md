@@ -40,10 +40,16 @@ Each live trading cycle now flows through:
    - The trained model still proposes a raw action vector
 
 3. `MultiAgentDecisionEngine`
-   - `Trend Agent` validates direction with MA / MACD structure
-   - `Entry Agent` validates timing with RSI / Bollinger context
-   - `Defense Agent` can veto new risk or force defense
-   - Orders only proceed on unanimous agreement
+   - The RL action is thresholded into a proposed direction (BUY/SELL/HOLD) first
+   - `Trend Agent`, `Entry Agent`, and `Defense Agent` each check that proposed
+     direction against MA/MACD structure, RSI/Bollinger context, and risk
+     posture respectively — each can only confirm it or veto it to HOLD, not
+     originate a different direction (e.g. Trend Agent can't vote SELL when
+     the RL proposed BUY)
+   - "Unanimous" means none of the three vetoed — it's a proposer-plus-veto
+     design, not four independent opinions being polled; the practical
+     effect is the same (any one agent can block a trade), but don't read
+     "unanimous" as more independent confirmation than that
 
 4. `Explainability`
    - The final decision bundle is persisted
