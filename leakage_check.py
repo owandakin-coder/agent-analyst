@@ -5,10 +5,11 @@ leakage_check.py
 
 בדיקות:
   1. Train/Test overlap  — האם יש תאריכים משותפים?
-  2. Feature lookahead   — האם פיצ'רים משתמשים בנתוני עתיד?
-  3. Target leakage      — האם ה-reward מחשב מחיר עתידי שנחשף במצב?
-  4. Normalization leak  — האם ה-VecNormalize חושב stats על נתוני הטסט?
-  5. Stationarity        — האם ה-features stationarity-aware?
+  2. Feature lookahead   — מחשב features פעמיים (מלא + חתוך) ומשווה ערכים היסטוריים
+  3. Normalization leak  — obs_rms.count מול תקציב האימון הידוע (sanity check חלקי)
+  3.5. Target leakage    — האם ה-reward/net_worth תלויים בנתונים עתידיים? (differential test)
+  4. Temporal consistency — סדר כרונולוגי, פערים חריגים
+  5. Distribution shift  — KS-test בין התפלגות train ל-test
 
 שימוש:
     python leakage_check.py           # הרצת כל הבדיקות
@@ -75,26 +76,53 @@ def check_train_test_overlap(all_data: dict[str, pd.DataFrame]) -> bool:
 
 def check_feature_lookahead(all_data: dict[str, pd.DataFrame], verbose: bool = False) -> bool:
     """
-    בודק שהפיצ'רים לא משתמשים בנתוני עתיד.
-    כל פיצ'ר צריך להיות ניתן לחישוב עם נתוני עבר בלבד.
+    בודק אמיתי (לא רק אוטוקורלציה): מחשב features פעמיים על אותו OHLCV —
+    פעם אחת מלא, פעם אחת חתוך אחרי נקודת בדיקה — ומוודא שהערך ההיסטורי
+    זהה בשני המקרים. אם פיצ'ר תלוי בנתונים עתידיים, קיצוץ העתיד ישנה
+    את הערך שלו בעבר; אם לא, הוא לא ישתנה כלל.
+
+    (הגרסה הקודמת מדדה רק אוטוקורלציה טבעית של מחירים — לא leakage אמיתי.)
     """
+    from data_manager import DataManager
+
+    dm = DataManager.__new__(DataManager)
     ok = True
+    raw_cols = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
 
     for ticker, df in list(all_data.items())[:3]:  # בדוק דוגמה
-        for col in df.columns:
-            # Forward-fill לאחר dropna מרמז על בעיה פוטנציאלית
-            if df[col].isna().any():
-                if verbose:
-                    check_warn(f"Feature {col} ({ticker})",
-                               f"{df[col].isna().sum()} NaN values — may indicate ffill issue")
+        if len(df) < 300 or not set(raw_cols).issubset(df.columns):
+            continue
 
-            # בדיקה: האם עמודה כלשהי תלויה ב-shift שלילי (look-ahead)?
-            # זה לא ניתן לזיהוי אוטומטי מלא, אבל בודקים שינויים חריגים
-            if len(df) > 1:
-                corr_with_future = abs(df[col].corr(df[col].shift(-1)))
-                if corr_with_future > 0.999 and verbose:
-                    check_warn(f"Feature {col} ({ticker})",
-                               f"suspiciously high correlation with future value ({corr_with_future:.4f})")
+        raw_like = df[list(raw_cols)].rename(columns=raw_cols)
+        cutoff = len(raw_like) - 60
+        check_at = cutoff - 30  # מרווח בטוח לפני נקודת החיתוך (מיקום ב-raw)
+        check_date = raw_like.index[check_at]
+
+        full_features = dm._compute_features(raw_like, ticker)
+        truncated_features = dm._compute_features(raw_like.iloc[:cutoff], ticker)
+
+        # Rolling-window warmup drops a different number of leading rows in
+        # each computation, so the same *date* lands at a different row
+        # position in full_features vs truncated_features — look up by the
+        # shared date index, not by position.
+        if check_date not in full_features.index or check_date not in truncated_features.index:
+            continue
+        row_full = full_features.loc[check_date]
+        row_trunc = truncated_features.loc[check_date]
+        common_cols = [c for c in full_features.columns if c in truncated_features.columns]
+
+        for col in common_cols:
+            a, b = row_full[col], row_trunc[col]
+            if pd.isna(a) and pd.isna(b):
+                continue
+            if pd.isna(a) or pd.isna(b) or abs(float(a) - float(b)) > 1e-9:
+                check_fail(
+                    f"Look-ahead in feature '{col}' ({ticker})",
+                    f"value at {check_date.date()} changed after removing future rows "
+                    f"({a!r} with full data vs {b!r} truncated) — this feature depends "
+                    "on data that wouldn't exist yet at that point in time.",
+                )
+                ok = False
 
     # בדיקת עמודות ספציפיות המוכרות כבעייתיות
     suspicious = ["future_return", "next_close", "forward", "lead_"]
@@ -107,7 +135,7 @@ def check_feature_lookahead(all_data: dict[str, pd.DataFrame], verbose: bool = F
                     ok = False
 
     if ok:
-        check_passed("Feature Lookahead — no obvious forward-looking features detected")
+        check_passed("Feature Lookahead — recomputing on truncated data reproduces identical historical values")
     return ok
 
 
@@ -117,8 +145,14 @@ def check_feature_lookahead(all_data: dict[str, pd.DataFrame], verbose: bool = F
 
 def check_normalization_leak() -> bool:
     """
-    בודק שה-VecNormalize לא חושב stats על נתוני הטסט.
-    כלל: VecNormalize.training=True רק בזמן אימון, False בזמן evaluation.
+    בדיקה חלקית אמיתית: VecNormalize.obs_rms.count אמור להיות קרוב לתקציב
+    הצעדים שבו אומן המודל (CFG.ensemble_timesteps). PPO מעדכן את ה-normalizer
+    פעם אחת לכל env.step() בזמן אימון; מונה גדול משמעותית מהתקציב הידוע הוא
+    הסימן הנצפה של נתונים נוספים (למשל תקופת הטסט) שעברו דרכו במצב training.
+
+    זה *לא* הוכחה מוחלטת — אי אפשר לדעת מהקובץ עצמו אילו תאריכים ספציפית
+    נראו. זה sanity check על גודל המדגם, לא אימות מלא. (הגרסה הקודמת של
+    הבדיקה הזו לא בדקה שום דבר בפועל — תמיד החזירה True.)
     """
     norm_path = Path(CFG.model_dir) / "vec_normalize.pkl"
 
@@ -131,20 +165,97 @@ def check_normalization_leak() -> bool:
         with open(norm_path, "rb") as f:
             vec_norm = pickle.load(f)
 
-        # בדיקה שה-norm אומן רק על train data
-        # לא ניתן לדעת בוודאות, אבל בודקים שה-stats סבירים
-        if hasattr(vec_norm, "obs_rms") and vec_norm.obs_rms is not None:
-            mean_abs = np.abs(vec_norm.obs_rms.mean).mean()
-            std_mean = vec_norm.obs_rms.var.mean() ** 0.5
-            if verbose_global:
-                print(f"    obs_rms: mean_abs={mean_abs:.3f}, std={std_mean:.3f}")
+        if not hasattr(vec_norm, "obs_rms") or vec_norm.obs_rms is None:
+            check_warn("Normalization", "Loaded file has no obs_rms — cannot verify")
+            return True
 
-        check_passed("Normalization — VecNormalize loaded successfully")
+        count = float(vec_norm.obs_rms.count)
+        expected_budget = float(CFG.ensemble_timesteps)
+        if verbose_global:
+            print(f"    obs_rms.count={count:,.0f} | expected training budget={expected_budget:,.0f}")
+
+        if count > expected_budget * 1.5:
+            check_warn(
+                "Normalization",
+                f"obs_rms.count={count:,.0f} is >1.5x the configured training budget "
+                f"({expected_budget:,.0f} steps) — more data than expected passed "
+                "through VecNormalize in training mode. Cannot confirm from this file "
+                "alone whether that included the test period; worth checking manually.",
+            )
+            return False
+
+        check_passed(
+            f"Normalization — obs_rms.count ({count:,.0f}) is consistent with the "
+            f"declared training budget ({expected_budget:,.0f} steps)"
+        )
         return True
 
     except Exception as e:
         check_warn("Normalization", f"Could not verify: {e}")
         return True
+
+
+# ══════════════════════════════════════════════════════════════════
+# 3.5. Target Leakage (reward function)
+# ══════════════════════════════════════════════════════════════════
+
+def check_target_leakage(all_data: dict[str, pd.DataFrame], verbose: bool = False) -> bool:
+    """
+    בדיקה אמיתית שהייתה מתועדת ב-docstring המקורי אבל מעולם לא מומשה:
+    האם ה-reward של TradingEnvironment בצעד t תלוי בנתונים אחרי t?
+
+    שיטה: מריצים את אותה סדרת פעולות דטרמיניסטית פעמיים על אותם נתונים —
+    פעם אחת עם הדאטה המלא, פעם אחת עם דאטה חתוך זמן קצר אחרי נקודת בדיקה.
+    אם ה-reward/net_worth בצעדים שלפני החיתוך זהים בשני המקרים, אין leakage
+    של נתוני עתיד ל-reward. אם הם שונים — ה-reward "ראה" משהו שלא היה אמור.
+    """
+    from trading_env import TradingEnvironment
+
+    ok = True
+    ticker_sample = {t: df for t, df in list(all_data.items())[:3]}
+    if len(ticker_sample) < 1:
+        check_warn("Target Leakage", "No data available — skipped")
+        return True
+
+    min_len = min(len(df) for df in ticker_sample.values())
+    if min_len < 300:
+        check_warn("Target Leakage", "Not enough rows to run the truncation test — skipped")
+        return True
+
+    cutoff = min_len - 60
+    truncated = {t: df.iloc[:cutoff].copy() for t, df in ticker_sample.items()}
+
+    env_full = TradingEnvironment(ticker_sample, max_drawdown_stop=1.0)
+    env_trunc = TradingEnvironment(truncated, max_drawdown_stop=1.0)
+
+    env_full.reset()
+    env_trunc.reset()
+
+    shared_steps = min(env_full.total_steps, env_trunc.total_steps)
+    rng = np.random.default_rng(42)
+    num_stocks = env_full.num_stocks
+
+    for step in range(shared_steps):
+        action = rng.uniform(-1.0, 1.0, size=num_stocks).astype(np.float32)
+        _, reward_full, done_full, _, info_full = env_full.step(action.copy())
+        _, reward_trunc, done_trunc, _, info_trunc = env_trunc.step(action.copy())
+
+        if abs(reward_full - reward_trunc) > 1e-6 or abs(info_full["net_worth"] - info_trunc["net_worth"]) > 1e-6:
+            check_fail(
+                "Target Leakage (reward)",
+                f"step={step}: reward/net_worth diverged between full and truncated data "
+                f"(reward {reward_full:.6f} vs {reward_trunc:.6f}) — the reward function "
+                "is seeing data it shouldn't have at this point in time.",
+            )
+            ok = False
+            break
+
+        if done_trunc:
+            break
+
+    if ok:
+        check_passed("Target Leakage — reward/net_worth identical whether or not future rows exist")
+    return ok
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -264,6 +375,10 @@ def run_all_checks(verbose: bool = False) -> bool:
 
     # 3. Normalization
     results.append(check_normalization_leak())
+
+    # 3.5. Target Leakage (reward function) — documented since the original
+    # version of this file but never implemented until now.
+    results.append(check_target_leakage(all_data, verbose=verbose))
 
     # 4. Temporal Consistency
     results.append(check_temporal_consistency(all_data))
