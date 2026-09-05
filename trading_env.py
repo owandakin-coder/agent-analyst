@@ -226,11 +226,19 @@ class TradingEnvironment(gym.Env):
                 self.holdings[i] -= shares_to_sell
 
         # אחר כך קניות
+        # תקציב לכל מניה = (cash / num_stocks) * act — לא מנורמל לפי סכום
+        # כל האותות. נרמול לפי הסכום גורם למכפיל אחיד (למשל דעיכת סיכון
+        # לפי regime או RiskManager.REDUCED) *להתבטל מתמטית*, כי הוא
+        # מופיע גם במונה וגם במכנה: (k·a) / Σ(k·b) = a / Σb. אומת בפועל —
+        # walk_forward_eval עם regime detection אמיתי הפיק תוצאות זהות
+        # בייט לבייט לריצה בלי regime detection בכלל.
+        # cash_at_step_start (לא self.cash המתעדכן) כדי שהתקציב לא יהיה
+        # תלוי בסדר המניות בלולאה.
+        cash_at_step_start = self.cash
         for i, (act, price) in enumerate(zip(action, prices)):
             if act > 0 and self.cash > 0:
-                # משקיע פרופורציה מהמזומן הזמין
-                budget = self.cash * act / max(np.sum(action[action > 0]), 1.0)
-                budget = min(budget, self.cash)  # לא יותר מהמזומן
+                budget = cash_at_step_start * act / self.num_stocks
+                budget = min(budget, self.cash)  # לא יותר מהמזומן שנשאר בפועל
 
                 # החלקת מחיר: מחיר קנייה מעט גבוה יותר
                 exec_price  = price * (1 + self.slippage)
