@@ -106,6 +106,7 @@ def evaluate_window(
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
     from trading_env import TradingEnvironment
     from risk_manager import RiskManager
+    from regime_detector import RegimeDetector
 
     w = window["window"]
     print(f"\n{'─' * 50}")
@@ -165,19 +166,50 @@ def evaluate_window(
     # Live trading never uses that hard stop — only RiskManager.scale_action()
     # below does, and it can reduce/halt/recover, so this window's numbers
     # should reflect that instead of a premature cutoff at the worst point.
-    test_env_raw = DummyVecEnv([lambda: TradingEnvironment(test_data, max_drawdown_stop=1.0)])
+    inner_test_env = TradingEnvironment(test_data, max_drawdown_stop=1.0)
+    common_idx = inner_test_env._get_common_index()
+    window_size = inner_test_env.window_size
+    test_env_raw = DummyVecEnv([lambda: inner_test_env])
     test_env     = VecNormalize(test_env_raw, norm_obs=True, norm_reward=False,
                                 clip_obs=10.0, training=False)
     test_env.obs_rms = norm_env.obs_rms
     test_env.ret_rms = norm_env.ret_rms
+
+    # Real regime detection + VIX, mirroring live_trader.py's actual cycle —
+    # this loop previously ran RiskManager without ever calling
+    # RegimeDetector at all, so a walk-forward backtest could never show
+    # whatever benefit real regime-aware exposure scaling provides in
+    # production. See market_context.py for why VIX specifically.
+    regime_detector = None
+    vix_context = None
+    if "SPY" in test_data:
+        try:
+            from market_context import fetch_market_context
+            vix_context = fetch_market_context(CFG.data_start, CFG.data_end)
+            regime_detector = RegimeDetector()
+        except Exception as exc:
+            print(f"  [WARN] Could not load regime/VIX context for this window: {exc}")
 
     risk_mgr  = RiskManager(CFG.initial_capital)
     obs       = test_env.reset()
     done      = False
     equity    = [CFG.initial_capital]
     net_worth = CFG.initial_capital
+    step      = 0
 
     while not done:
+        if regime_detector is not None:
+            date_idx = min(step + window_size, len(common_idx) - 1)
+            current_date = common_idx[date_idx]
+            spy_history = test_data["SPY"][test_data["SPY"].index <= current_date]
+            vix_value = None
+            if vix_context is not None:
+                past_vix = vix_context[vix_context.index <= current_date]["vix_close"]
+                if len(past_vix):
+                    vix_value = float(past_vix.iloc[-1])
+            signal = regime_detector.detect(spy_history, vix_value=vix_value)
+            risk_mgr.set_regime_multiplier(signal.regime.position_multiplier())
+
         action, _ = model.predict(obs, deterministic=True)
         action    = action[0]
         risk_mgr.update(net_worth)
@@ -186,6 +218,7 @@ def evaluate_window(
         done      = dones[0]
         net_worth = infos[0].get("net_worth", net_worth)
         equity.append(net_worth)
+        step += 1
 
     test_env.close()
     equity = np.array(equity)

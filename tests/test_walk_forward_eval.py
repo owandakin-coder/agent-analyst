@@ -43,6 +43,39 @@ def test_evaluate_window_runs_with_transformer_policy():
     assert "sharpe" in result and "total_return" in result
 
 
+def test_evaluate_window_uses_real_regime_detection_when_spy_present(monkeypatch):
+    """When SPY is in the universe, evaluate_window should call the real
+    RegimeDetector + VIX context each step (not just RiskManager blind to
+    regime, which was the previous behavior) — mock the network-dependent
+    VIX fetch and confirm the run still completes end to end."""
+    import market_context
+    from data_manager import DataManager
+
+    dm = DataManager.__new__(DataManager)
+    raw = {
+        t: dm._compute_features(_make_ohlcv(280, seed=ord(t[0])), t)
+        for t in ("AAPL", "MSFT", "SPY")
+    }
+    idx = raw["AAPL"].index
+    split = int(len(idx) * 0.75)
+
+    fake_vix = pd.DataFrame({"vix_close": np.full(len(idx), 18.0)}, index=idx)
+    monkeypatch.setattr(market_context, "fetch_market_context", lambda *a, **k: fake_vix)
+
+    window = {
+        "window": 1,
+        "train_start": idx[0].strftime("%Y-%m-%d"),
+        "train_end": idx[split].strftime("%Y-%m-%d"),
+        "test_start": idx[split + 1].strftime("%Y-%m-%d"),
+        "test_end": idx[-1].strftime("%Y-%m-%d"),
+    }
+
+    result = evaluate_window(window, raw, timesteps=256, seed=0,
+                              model_params={"n_steps": 64, "batch_size": 32, "n_epochs": 2})
+
+    assert result["skipped"] is False
+
+
 def test_annualized_return_positive():
     result = _annualized_return(0.10, 252)
     assert 0.09 < result < 0.11
