@@ -185,6 +185,11 @@ def test_detect_regime_uses_existing_spy_data(monkeypatch, featured_df):
     spy_df = featured_df.copy()
     spy_df["close"] = np.linspace(100, 140, len(spy_df))
 
+    # _detect_regime also fetches VIX (a separate, legitimate yfinance call
+    # unrelated to this test's concern) — stub it out directly instead of
+    # letting it hit the network or trip the fake SPY-download module below.
+    monkeypatch.setattr(trader._alt_fetcher, "fetch_vix_raw", lambda: 18.0)
+
     called = {"downloaded": False}
 
     def fail_download(*args, **kwargs):

@@ -1024,9 +1024,11 @@ class LiveTrader:
         Returns RegimeSignal or None on failure.
         """
         try:
+            vix_value = self._alt_fetcher.fetch_vix_raw()
+
             spy_df = fresh_data.get("SPY")
             if spy_df is not None and not spy_df.empty and "close" in spy_df.columns:
-                return self._regime_detector.detect(spy_df.reset_index(drop=True))
+                return self._regime_detector.detect(spy_df.reset_index(drop=True), vix_value=vix_value)
 
             import yfinance as yf
             spy_raw = yf.download("SPY", period="300d", progress=False, auto_adjust=True)
@@ -1037,7 +1039,7 @@ class LiveTrader:
                 spy_raw.columns = [col[0].lower() for col in spy_raw.columns]
             else:
                 spy_raw.columns = [c.lower() for c in spy_raw.columns]
-            return self._regime_detector.detect(spy_raw.reset_index(drop=True))
+            return self._regime_detector.detect(spy_raw.reset_index(drop=True), vix_value=vix_value)
         except Exception as exc:
             log.warning(f"Regime detection failed: {exc}")
             return None

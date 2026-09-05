@@ -42,6 +42,11 @@ class AlternativeDataFetcher:
     """
 
     TIMEOUT = 8   # seconds per request
+    VIX_CACHE_SECONDS = 900   # VIX doesn't need a network round-trip every poll cycle (60s default)
+
+    def __init__(self) -> None:
+        self._vix_cache: float | None = None
+        self._vix_cache_at: float = 0.0
 
     # ──────────────────────────────────────────────────────────────────────────
     def fetch_all(self) -> dict[str, float]:
@@ -116,28 +121,49 @@ class AlternativeDataFetcher:
     # VIX proxy
     # ──────────────────────────────────────────────────────────────────────────
 
-    def fetch_vix_proxy(self) -> float:
-        """
-        Fetches VIX from Yahoo Finance (free, no API key).
-        VIX: 10=calm, 20=normal, 40=crisis.
-        Normalised: 10→-1 (calm/bullish), 40→+1 (fearful/bearish).
+    def fetch_vix_raw(self) -> float | None:
+        """Latest raw VIX close (e.g. 18.5), for callers that need the real
+        value rather than the [-1,+1] normalised proxy below — e.g.
+        RegimeDetector.detect(vix_value=...), which was validated to carry
+        real predictive signal that the normalised/clipped version loses
+        resolution on. Returns None on failure.
 
-        Returns 0.0 on failure.
+        Cached for VIX_CACHE_SECONDS: VIX doesn't meaningfully change
+        between 60-second poll cycles, so refetching every cycle would just
+        add network latency and a new failure point to every single
+        decision without adding information.
         """
+        import time
+        now = time.monotonic()
+        if self._vix_cache is not None and (now - self._vix_cache_at) < self.VIX_CACHE_SECONDS:
+            return self._vix_cache
         try:
             import yfinance as yf
             vix_data = yf.download("^VIX", period="1d", progress=False, auto_adjust=True)
             if vix_data.empty:
                 raise ValueError("Empty VIX data")
-            vix = float(vix_data["Close"].iloc[-1])
-            # Normalise: centre at 20, scale by 15
-            norm = (vix - 20) / 15
-            norm = float(np.clip(norm, -1.0, 1.0))
-            log.info(f"VIX: {vix:.1f} → normalised {norm:+.2f}")
-            return norm
+            value = float(vix_data["Close"].iloc[-1])
+            self._vix_cache = value
+            self._vix_cache_at = now
+            return value
         except Exception as exc:
             log.debug(f"VIX fetch failed: {exc}")
+            return self._vix_cache  # serve the last known-good value if we have one
+
+    def fetch_vix_proxy(self) -> float:
+        """
+        VIX: 10=calm, 20=normal, 40=crisis.
+        Normalised: 10→-1 (calm/bullish), 40→+1 (fearful/bearish).
+
+        Returns 0.0 on failure.
+        """
+        vix = self.fetch_vix_raw()
+        if vix is None:
             return 0.0
+        # Normalise: centre at 20, scale by 15
+        norm = float(np.clip((vix - 20) / 15, -1.0, 1.0))
+        log.info(f"VIX: {vix:.1f} → normalised {norm:+.2f}")
+        return norm
 
     # ──────────────────────────────────────────────────────────────────────────
     # Time-of-day feature

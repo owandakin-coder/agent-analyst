@@ -79,7 +79,20 @@ class RegimeDetector:
         self.crash_drawdown_threshold = crash_drawdown_threshold
         self.crash_return_threshold = crash_return_threshold
 
-    def detect(self, benchmark_df: pd.DataFrame) -> RegimeSignal:
+    def detect(self, benchmark_df: pd.DataFrame, vix_value: float | None = None) -> RegimeSignal:
+        """
+        vix_value: real VIX close (e.g. 18.5 for 18.5), if available. When
+        given, it replaces vol_20 (the price-derived realized-volatility
+        proxy previously used as the only volatility signal) since VIX is
+        the market's actual forward-looking volatility measure rather than
+        a backward-looking estimate from the benchmark's own returns.
+        Validated: on this universe/window, VIX alone was a statistically
+        significant predictor of next-day returns (IC +0.037, p=0.0001)
+        where price-derived technical features showed none — see
+        market_context.py. Falls back to the price-derived proxy when VIX
+        isn't available (e.g. a data outage), so behavior is unchanged for
+        any caller that doesn't pass it.
+        """
         close = benchmark_df["close"].dropna()
         if len(close) < 200:
             price = float(close.iloc[-1]) if len(close) else 0.0
@@ -99,6 +112,8 @@ class RegimeDetector:
         ma200 = float(close.rolling(200).mean().iloc[-1])
         returns = close.pct_change().dropna()
         vol_20 = float(returns.iloc[-20:].std() * np.sqrt(252))
+        if vix_value is not None and vix_value > 0:
+            vol_20 = float(vix_value) / 100.0
         high_252 = float(close.iloc[-252:].max())
         pct_from_high = (price - high_252) / high_252 if high_252 else 0.0
         trailing_return_20 = float(close.iloc[-1] / close.iloc[-21] - 1.0) if len(close) > 21 else 0.0
