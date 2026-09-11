@@ -781,7 +781,6 @@ class LiveTrader:
 
         buy_actions = [(i, t) for i, t in enumerate(self.tickers)
                        if float(action[i]) > buy_threshold]
-        total_buy_signal = sum(float(action[i]) for i, _ in buy_actions) or 1.0
 
         # חישוב שווי תיק כולל (מזומן + פוזיציות)
         net_worth_total = cash + self._portfolio_market_value(prices, positions)
@@ -814,8 +813,13 @@ class LiveTrader:
                 )
                 continue
 
-            # חלוקת מזומן פרופורציונלית לעוצמת הסיגנל
-            budget = available_cash * (act / total_buy_signal)
+            # תקציב = (available_cash / num_stocks) * act — לא מנורמל לפי
+            # סכום כל האותות. נרמול כזה (act/total_buy_signal) גורם למכפיל
+            # אחיד — RiskManager.REDUCED (50%) או regime multiplier — *להתבטל
+            # מתמטית*: (k·a) / Σ(k·b) = a / Σb. אותו באג בדיוק שתוקן ב-
+            # trading_env.py; ראה שם להסבר המלא ולריצת walk-forward שהוכיחה
+            # שצמצום סיכון לא השפיע על שום דבר עד לתיקון.
+            budget = available_cash * act / self.num_stocks
 
             # הגבל את התקציב כך שלא נחרוג מ-30%
             budget = min(
