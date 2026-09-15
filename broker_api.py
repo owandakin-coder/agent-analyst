@@ -134,28 +134,35 @@ class AlpacaBrokerAPI:
     def buy(self, ticker: str, shares: float, price: float | None = None) -> dict:
         shares = max(1, int(shares))
         snapshot = self.reconcile_account_state()
-        if NO_MARGIN:
-            price_for_check = float(price or 0.0)
-            if price_for_check <= 0:
-                latest = self.get_latest_prices([ticker]).get(ticker, 0.0)
-                price_for_check = float(latest or 0.0)
-            required_cash = shares * max(price_for_check, 0.0)
-            reserve_cash = max(0.0, float(snapshot.get("equity", 0.0)) * CASH_BUFFER_PCT)
-            available_cash = max(0.0, float(snapshot.get("cash", 0.0)) - reserve_cash)
-            if required_cash <= 0 or required_cash > available_cash:
-                log.warning(
-                    "BUY rejected by cash guard: %s %s requires $%.2f, available $%.2f",
-                    shares,
-                    ticker,
-                    required_cash,
-                    available_cash,
-                )
-                return {
-                    "status": "REJECTED",
-                    "reason": "insufficient_cash",
-                    "required_cash": required_cash,
-                    "available_cash": available_cash,
-                }
+        # Pre-flight guard against the broker's own buying_power — active
+        # regardless of NO_MARGIN. On a cash account buying_power == cash,
+        # so this is identical to the old cash-only check; on a margin
+        # account it lets leverage through while still refusing an order
+        # the broker would reject anyway, instead of relying on Alpaca's
+        # own rejection after the fact (the "actively manage margin, don't
+        # just react to liquidation" requirement).
+        price_for_check = float(price or 0.0)
+        if price_for_check <= 0:
+            latest = self.get_latest_prices([ticker]).get(ticker, 0.0)
+            price_for_check = float(latest or 0.0)
+        required_cash = shares * max(price_for_check, 0.0)
+        reserve_cash = max(0.0, float(snapshot.get("equity", 0.0)) * CASH_BUFFER_PCT)
+        spendable = float(snapshot.get("cash", 0.0)) if NO_MARGIN else float(snapshot.get("buying_power", 0.0))
+        available_cash = max(0.0, spendable - reserve_cash)
+        if required_cash <= 0 or required_cash > available_cash:
+            log.warning(
+                "BUY rejected by cash guard: %s %s requires $%.2f, available $%.2f",
+                shares,
+                ticker,
+                required_cash,
+                available_cash,
+            )
+            return {
+                "status": "REJECTED",
+                "reason": "insufficient_cash",
+                "required_cash": required_cash,
+                "available_cash": available_cash,
+            }
         order_info = {
             "side": "BUY",
             "ticker": ticker,
@@ -714,8 +721,14 @@ class BrokerAPIStub:
         self.account_id = account_id
         self.positions: dict[str, float] = {}
         self.cash = 0.0
+        self.margin_multiplier = 1.0
         self.order_counter = 0
         log.info("[STUB] BrokerAPIStub initialized. Account: %s", account_id)
+
+    def set_margin_multiplier(self, multiplier: float):
+        """Simulate a margin account whose buying_power = cash * multiplier
+        (e.g. 2.0 for Reg-T standard margin). Default 1.0 = cash account."""
+        self.margin_multiplier = float(multiplier)
 
     def buy(self, ticker: str, shares: float, price: float) -> dict:
         self.order_counter += 1
@@ -781,7 +794,7 @@ class BrokerAPIStub:
         return {
             "cash": cash,
             "equity": equity,
-            "buying_power": cash,
+            "buying_power": cash * self.margin_multiplier,
             "portfolio_value": equity,
             "status": "ACTIVE",
             "positions": dict(positions),

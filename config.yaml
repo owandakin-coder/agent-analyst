@@ -76,12 +76,26 @@ live:
   buy_threshold: 0.08
   sell_threshold: -0.05
   max_concentration: 0.08
-  max_gross_exposure: 0.65
+  # Hard, non-negotiable ceiling on total deployed capital as a multiple of
+  # net worth (gross_exposure = market_value / net_worth). _execute_actions
+  # enforces this independently of what the RL model's action vector wants
+  # (remaining_gross_room caps every buy), and _auto_deleverage_if_needed
+  # force-sells down to it if a price move pushes exposure above it.
+  # 2.0 = standard Reg-T margin, which is the real ceiling Alpaca's broker
+  # itself enforces on US equities — going higher here would not be
+  # deployable (orders would just be rejected by the broker), so this is
+  # set to the actual achievable leverage rather than an aspirational number.
+  max_gross_exposure: 2.0
   max_positions: 8
   max_single_order_notional_pct: 0.04
   cash_buffer_pct: 0.30
   stop_loss_pct: 0.06
-  no_margin: true
+  # false = size buys off the broker's real buying_power (margin), not raw
+  # cash. Alpaca enforces Reg-T maintenance margin on its side; keeping
+  # max_gross_exposure comfortably inside what Alpaca grants (see above) is
+  # the active-margin-management strategy — it avoids ever approaching the
+  # broker's own forced-liquidation threshold rather than reacting to it.
+  no_margin: false
   auto_deleverage: true
   price_min: 1.0
   price_max: 10000.0

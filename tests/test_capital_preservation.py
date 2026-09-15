@@ -101,8 +101,14 @@ def test_execute_actions_skips_new_buys_when_reserved_cash_not_available():
 
 
 def test_execute_actions_auto_deleverages_negative_cash_and_high_exposure():
+    # Under margin (no_margin=False), a small negative cash balance is
+    # normal, not dangerous — MAX_GROSS_EXPOSURE (leverage, not cash sign)
+    # is the real ceiling now. So this deep-margin-debit case is sized to
+    # clearly exceed MAX_GROSS_EXPOSURE (market_value=20,000 against
+    # net_worth=5,000 -> 4x, well past the 2x hard cap) rather than relying
+    # on cash being merely negative.
     broker = _ConservativeStubBroker(
-        cash=-1000.0,
+        cash=-15000.0,
         positions={"AAPL": 100.0, "MSFT": 50.0},
         position_details={
             "AAPL": {"qty": 100.0, "unrealized_pl": -1200.0},
@@ -114,10 +120,10 @@ def test_execute_actions_auto_deleverages_negative_cash_and_high_exposure():
     orders = trader._execute_actions(
         np.array([0.0, 0.0, 0.0]),
         {"AAPL": 100.0, "MSFT": 200.0, "GOOGL": 150.0},
-        -1000.0,
+        -15000.0,
         {"AAPL": 100.0, "MSFT": 50.0},
     )
 
     assert any(order.get("event_type") == "auto_deleverage" for order in orders)
     assert broker.sell_calls
-    assert broker.cash > -1000.0
+    assert broker.cash > -15000.0

@@ -359,6 +359,7 @@ class LiveTrader:
 
         positions = snapshot["positions"]
         cash      = snapshot["cash"]
+        buying_power = float(snapshot.get("buying_power", cash) or cash)
         self._hydrate_entry_state_from_broker(positions, snapshot, current_prices)
         net_worth = cash + sum(
             positions.get(t, 0.0) * current_prices.get(t, 0.0)
@@ -460,7 +461,7 @@ class LiveTrader:
         log.info(f"Scaled action: {action.round(3)}")
 
         # ── המרה לפקודות ────────────────────────────────────────────────────
-        broker_orders = self._execute_actions(action, current_prices, cash, positions)
+        broker_orders = self._execute_actions(action, current_prices, cash, positions, buying_power)
         self.last_cycle_result = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "model_version": self._model_version,
@@ -684,6 +685,7 @@ class LiveTrader:
         prices: dict[str, float],
         cash: float,
         positions: dict[str, float],
+        buying_power: float | None = None,
     ) -> list[dict]:
         """
         ממיר וקטור פעולות [-1,1] לפקודות קנייה/מכירה בפועל.
@@ -697,6 +699,9 @@ class LiveTrader:
         order_events: list[dict] = []
         buy_threshold = BUY_THRESHOLD
         sell_threshold = SELL_THRESHOLD
+        # buying_power is broker-granted (margin) capital, always >= cash. On a
+        # cash-only stub/account it equals cash, so this is a no-op there.
+        buying_power = float(buying_power) if buying_power is not None else cash
 
         # ── Trailing Stop-Loss ────────────────────────────────────────────────
         # Updates the high-water mark per ticker and sells if price drops
@@ -768,6 +773,7 @@ class LiveTrader:
                 snapshot = self._reconcile_snapshot()
                 if snapshot is not None:
                     cash = snapshot["cash"]
+                    buying_power = float(snapshot.get("buying_power", cash) or cash)
                     positions.update(snapshot["positions"])
                     log.info(f"Cash after sells: ${cash:,.0f}")
             except Exception as exc:
@@ -785,7 +791,7 @@ class LiveTrader:
         # חישוב שווי תיק כולל (מזומן + פוזיציות)
         net_worth_total = cash + self._portfolio_market_value(prices, positions)
         reserve_cash = max(0.0, net_worth_total * CASH_BUFFER_PCT)
-        available_cash = max(0.0, cash - reserve_cash) if NO_MARGIN else max(0.0, cash)
+        available_cash = max(0.0, cash - reserve_cash) if NO_MARGIN else max(0.0, buying_power)
         remaining_gross_room = max(
             0.0,
             net_worth_total * MAX_GROSS_EXPOSURE - self._portfolio_market_value(prices, positions),
@@ -855,7 +861,7 @@ class LiveTrader:
                     )
                     positions[ticker] = total_shares
                     cash = cash - shares_to_buy * price
-                    available_cash = max(0.0, cash - reserve_cash) if NO_MARGIN else max(0.0, cash)
+                    available_cash = max(0.0, cash - reserve_cash) if NO_MARGIN else max(0.0, buying_power)
                     remaining_gross_room = max(
                         0.0,
                         net_worth_total * MAX_GROSS_EXPOSURE - self._portfolio_market_value(prices, positions),
