@@ -81,21 +81,23 @@ live:
   # enforces this independently of what the RL model's action vector wants
   # (remaining_gross_room caps every buy), and _auto_deleverage_if_needed
   # force-sells down to it if a price move pushes exposure above it.
-  # 2.0 = standard Reg-T margin, which is the real ceiling Alpaca's broker
-  # itself enforces on US equities — going higher here would not be
-  # deployable (orders would just be rejected by the broker), so this is
-  # set to the actual achievable leverage rather than an aspirational number.
-  max_gross_exposure: 2.0
+  # The buying_power/margin wiring (live_trader.py, broker_api.py) supports
+  # up to 2.0x (standard Reg-T margin — the real ceiling Alpaca enforces on
+  # US equities) whenever no_margin is turned back off. Left at the original
+  # conservative 0.65/no_margin:true for now: the 2026-09-16 retrain under
+  # the corrected budget formula, run WITH 2.0x margin enabled, got rejected
+  # by the promotion gate on drawdown (34.8% vs previous 30.9%) — leverage
+  # and the budget-formula fix were both changed in that run, so it's not
+  # possible to tell from it which one caused the regression. This value is
+  # reverted so the next retrain isolates the budget-formula fix alone; only
+  # raise it again deliberately, once leverage's effect is understood on its
+  # own from a controlled comparison.
+  max_gross_exposure: 0.65
   max_positions: 8
   max_single_order_notional_pct: 0.04
   cash_buffer_pct: 0.30
   stop_loss_pct: 0.06
-  # false = size buys off the broker's real buying_power (margin), not raw
-  # cash. Alpaca enforces Reg-T maintenance margin on its side; keeping
-  # max_gross_exposure comfortably inside what Alpaca grants (see above) is
-  # the active-margin-management strategy — it avoids ever approaching the
-  # broker's own forced-liquidation threshold rather than reacting to it.
-  no_margin: false
+  no_margin: true
   auto_deleverage: true
   price_min: 1.0
   price_max: 10000.0
