@@ -82,16 +82,23 @@ live:
   # (remaining_gross_room caps every buy), and _auto_deleverage_if_needed
   # force-sells down to it if a price move pushes exposure above it.
   # The buying_power/margin wiring (live_trader.py, broker_api.py) supports
-  # up to 2.0x (standard Reg-T margin — the real ceiling Alpaca enforces on
-  # US equities) whenever no_margin is turned back off. Left at the original
-  # conservative 0.65/no_margin:true for now: the 2026-09-16 retrain under
-  # the corrected budget formula, run WITH 2.0x margin enabled, got rejected
-  # by the promotion gate on drawdown (34.8% vs previous 30.9%) — leverage
-  # and the budget-formula fix were both changed in that run, so it's not
-  # possible to tell from it which one caused the regression. This value is
-  # reverted so the next retrain isolates the budget-formula fix alone; only
-  # raise it again deliberately, once leverage's effect is understood on its
-  # own from a controlled comparison.
+  # up to 2.0x (standard Reg-T margin) whenever no_margin is turned back
+  # off. Three single-seed runs so far, each vs. the model that was actually
+  # in production at the time:
+  #   0.65x / no_margin: Sharpe 1.08, +16.7%, MaxDD 22.8% -> PROMOTED (d990250)
+  #   2.0x  / margin:    Sharpe 1.22, +33.2%, MaxDD 34.8% -> REJECTED (754eb6c run)
+  #   1.5x  / margin:    Sharpe 1.43, +79.8%, MaxDD 53.2% -> REJECTED (worse
+  #                       drawdown than the FULL 2.0x run — not monotonic in
+  #                       leverage at all)
+  # That non-monotonic result means drawdown here isn't a predictable
+  # function of the leverage dial — each retrain is a separate stochastic
+  # optimization (Optuna + a single PPO seed) that can land on a wildly
+  # different, more-or-less aggressive policy regardless of the leverage
+  # ceiling. Single-shot leverage experiments aren't a reliable way to find
+  # a "safe" leverage level; that would need multiple seeds per leverage
+  # level or the walk-forward (multi-window) methodology, not one-off
+  # backtests. Reverted to the safe, already-validated no-leverage setting
+  # rather than spend more multi-hour runs chasing a moving target.
   max_gross_exposure: 0.65
   max_positions: 8
   max_single_order_notional_pct: 0.04
