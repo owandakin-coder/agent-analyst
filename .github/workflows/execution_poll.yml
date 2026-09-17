@@ -53,8 +53,15 @@ jobs:
           ATZMA_REQUIRE_FRESH_QUOTES: "1"
           ATZMA_JSON_LOGS: "1"
         run: |
+          # `run:` steps use `bash -e` by default, so a single failed poll
+          # (401 from a bad token, a transient network blip, ...) would kill
+          # the whole step on its first iteration instead of retrying for
+          # the full window — `|| echo` swallows that so the loop keeps
+          # going. A job that WAS claimed still reports its own success or
+          # failure to the backend via /worker/execution/complete regardless.
           end=$((SECONDS + 240))
           while [ $SECONDS -lt $end ]; do
-            python user_execution_worker.py --poll-once --worker-id "$ATZMA_WORKER_ID"
+            python user_execution_worker.py --poll-once --worker-id "$ATZMA_WORKER_ID" \
+              || echo "::warning::poll-once attempt failed (see log above) — retrying"
             sleep 5
           done
