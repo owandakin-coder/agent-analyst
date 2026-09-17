@@ -53,8 +53,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # Full history, not the default shallow clone — the commit step
-          # rebases onto origin/main before pushing (see below), which
-          # needs real ancestor history to work.
+          # resets onto origin/main before re-committing on a rejected push
+          # (see below), which needs real ancestor history to work.
           fetch-depth: 0
 
       # ── 2. Python + pip cache ─────────────────────────────────
@@ -165,18 +165,50 @@ jobs:
 
             # Training can run for hours, so main has likely moved since
             # checkout (e.g. an unrelated push landed meanwhile) — a plain
-            # `git push` here fails as a non-fast-forward. Rebase this one
-            # commit onto the latest main and retry instead of losing the
-            # whole run's output.
+            # `git push` here fails as a non-fast-forward.
+            #
+            # 2026-09-01's scheduled run got exactly this and still failed
+            # after 5 attempts: `git rebase origin/main` on a commit that
+            # touches large binary files (models/*.zip/*.pkl) can itself end
+            # up conflicted (e.g. another push also touched models/ in the
+            # meantime), and a conflicted rebase leaves the working tree
+            # mid-rebase — every subsequent `git push` in that loop was
+            # doomed to keep failing the same way, silently burning all 5
+            # attempts on a state that could never resolve itself.
+            #
+            # These are auto-generated training artifacts, not hand-authored
+            # code — there's nothing to "merge" about them; the newest
+            # training run's files are what should land, regardless of what
+            # else changed on main meanwhile. So on a rejected push, abort
+            # any in-progress rebase, hard-reset onto the latest main, and
+            # re-stage + re-commit the (untouched, still-on-disk) freshly
+            # trained files fresh each attempt, instead of rebasing the
+            # existing commit.
             pushed=false
             for attempt in 1 2 3 4 5; do
               if git push; then
                 pushed=true
                 break
               fi
-              echo "Push rejected (attempt ${attempt}/5) — rebasing onto latest main and retrying."
+              echo "Push rejected (attempt ${attempt}/5) — resetting onto latest main and re-committing."
+              git rebase --abort 2>/dev/null || true
               git fetch origin main
-              git rebase origin/main
+              git reset --mixed origin/main
+              git add models/final_model.zip \
+                      models/vec_normalize.pkl \
+                      models/ensemble_0.zip \
+                      models/ensemble_1.zip \
+                      models/ensemble_2.zip \
+                      models/ensemble_norm_0.pkl \
+                      models/ensemble_norm_1.pkl \
+                      models/ensemble_norm_2.pkl \
+                      models/training_meta.pkl 2>/dev/null || true
+              if git diff --cached --quiet; then
+                echo "No model changes remain vs. latest main — nothing to push."
+                pushed=true
+                break
+              fi
+              git commit -m "chore: monthly retrain ${MONTH} [skip ci]"
             done
             if [ "$pushed" = true ]; then
               echo "Models committed and pushed."

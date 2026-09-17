@@ -3822,18 +3822,27 @@ function exportCSV() {
 // ════════════════════════════════════════════════════════
 // ALERTS
 // ════════════════════════════════════════════════════════
-let alertsData = [
-  {col:'#34c759',icon:'📈',title:'NVDA Buy Signal',desc:'PPO ensemble → BUY · confidence 87% · regime: BULL',time:'2 min ago',tag:'BUY',tagCol:'rgba(52,199,89,.15)'},
-  {col:'#ff3b30',icon:'🛑',title:'MSFT Stop-Loss Hit',desc:'Trailing stop triggered at $412.10 · drawdown −8.2% from peak',time:'34 min ago',tag:'STOP',tagCol:'rgba(255,59,48,.15)'},
-  {col:'#0a84ff',icon:'📊',title:'Rebalance Suggested',desc:'Tech allocation exceeded 52% of total portfolio',time:'1h ago',tag:'INFO',tagCol:'rgba(10,132,255,.15)'},
-  {col:'#ff9f0a',icon:'⚠️',title:'High Volatility Detected',desc:'VIX spike above 22 · regime multiplier reduced to 0.6×',time:'2h ago',tag:'RISK',tagCol:'rgba(255,159,10,.15)'},
-  {col:'#34c759',icon:'💰',title:'AAPL Target Reached',desc:'Price crossed $189 threshold · partial profit taken',time:'3h ago',tag:'WIN',tagCol:'rgba(52,199,89,.15)'},
-  {col:'#bf5af2',icon:'🔄',title:'Monthly Retrain Due',desc:'Scheduled retraining on June 1 · 500K steps',time:'Yesterday',tag:'SCHED',tagCol:'rgba(191,90,242,.15)'},
-];
+// Starts empty — this used to ship hardcoded fake signals (specific
+// tickers/prices/confidence %, fixed relative timestamps like "2 min ago"
+// that never actually aged) shown to every visitor regardless of sign-in
+// or broker-connection state. On a live financial product that's not a
+// placeholder, it's misleading: a guest with no account could read it as
+// real trading activity. Left empty until real per-account alerts are
+// wired to the API, with an honest empty state instead (see the "No open
+// positions" pattern elsewhere on this page for logged-out users).
+let alertsData = [];
 
 function renderAlerts() {
   const alertsList = document.getElementById('alerts-list');
   if (!alertsList) return;
+  if (!alertsData.length) {
+    alertsList.innerHTML =
+      `<div style="color:var(--g3);font-size:13px;text-align:center;padding:20px 0">No alerts yet. Sign in and connect a broker to see your account's signals.</div>` +
+      `<button class="full-btn" onclick="openModal()">+ Create New Alert</button>`;
+    const alertCount = document.getElementById('alert-count');
+    if (alertCount) alertCount.textContent = '0 new';
+    return;
+  }
   alertsList.innerHTML =
     alertsData.map((a,i)=>`
       <div class="arow" onclick="dismissAlert(${i})">
