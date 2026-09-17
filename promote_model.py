@@ -113,6 +113,57 @@ def _load_test_data() -> dict:
     }
 
 
+def _sub_period_bounds(n: int = 3, start=None, end=None) -> list[tuple]:
+    """Splits a date range (CFG.test_start..CFG.test_end by default) into n
+    roughly-equal calendar sub-periods, so a candidate's aggregate win/loss
+    over the whole window can be checked for whether it actually holds up
+    piece by piece, or is an artifact of one stretch dominating the
+    full-period number. (See the 2026-09-17 walk-forward finding: a
+    candidate that cleared the aggregate single-window gate showed no
+    improvement across independent windows — this is a lighter-weight,
+    no-retrain way to get some of that same signal on the *specific* test
+    window the gate already uses.)"""
+    import pandas as pd
+
+    start = pd.Timestamp(start if start is not None else CFG.test_start)
+    end = pd.Timestamp(end if end is not None else CFG.test_end)
+    edges = pd.date_range(start, end, periods=n + 1)
+    return [(edges[i], edges[i + 1]) for i in range(n)]
+
+
+def sub_period_report(candidate_model: Path, candidate_norm: Path,
+                       previous_model: Path, previous_norm: Path,
+                       n: int = 3, test_data: dict | None = None) -> list[dict]:
+    """Diagnostic only — does not affect should_promote(). Backtests the
+    already-trained candidate/previous models (no retraining) on n slices
+    of the same test window, to surface whether an aggregate win is
+    consistent or driven by a single sub-period. test_data overrides the
+    default CFG-driven load, for testing against synthetic data."""
+    full_test_data = test_data if test_data is not None else _load_test_data()
+    any_df = next(iter(full_test_data.values()))
+    bounds_kwargs = {} if test_data is None else {"start": any_df.index.min(), "end": any_df.index.max()}
+    rows = []
+    for period_start, period_end in _sub_period_bounds(n, **bounds_kwargs):
+        sub_data = {
+            ticker: df[(df.index >= period_start) & (df.index <= period_end)]
+            for ticker, df in full_test_data.items()
+        }
+        if not sub_data or any(len(df) < 30 for df in sub_data.values()):
+            continue
+        row = {
+            "start": period_start.date().isoformat(),
+            "end": period_end.date().isoformat(),
+            "candidate": evaluate_model_metrics(candidate_model, candidate_norm, sub_data),
+        }
+        if previous_model.exists() and previous_norm.exists():
+            row["previous"] = evaluate_model_metrics(previous_model, previous_norm, sub_data)
+        spy = compute_spy_baseline(sub_data)
+        if spy is not None:
+            row["spy"] = spy
+        rows.append(row)
+    return rows
+
+
 def backtest_equity_curve(model, vec_norm_stats, test_data: dict) -> np.ndarray:
     """Rolls a trained model deterministically over test_data.
 
@@ -223,6 +274,11 @@ def main() -> int:
     parser.add_argument("--candidate-norm", default=str(MODEL_DIR / "vec_normalize.pkl"))
     parser.add_argument("--previous", default=str(MODEL_DIR / "previous_model.zip"))
     parser.add_argument("--previous-norm", default=str(MODEL_DIR / "previous_vec_normalize.pkl"))
+    parser.add_argument("--sub-periods", type=int, default=0,
+                         help="Also print a diagnostic breakdown of the candidate/previous/SPY "
+                              "over N slices of the test window, to show whether an aggregate "
+                              "win is consistent or driven by one stretch. Informational only — "
+                              "does not affect the promote/reject decision.")
     args = parser.parse_args()
 
     candidate_model = Path(args.candidate)
@@ -245,6 +301,16 @@ def main() -> int:
         print(f"[Promote] Previous : {_fmt(previous_metrics)}")
     if spy_metrics:
         print(f"[Promote] SPY B&H  : {_fmt(spy_metrics)}")
+
+    if args.sub_periods > 1:
+        print(f"\n[Promote] Sub-period breakdown ({args.sub_periods} slices of the test window, informational only):")
+        for row in sub_period_report(candidate_model, candidate_norm, previous_model, previous_norm, n=args.sub_periods):
+            line = f"  {row['start']} -> {row['end']} | candidate: {_fmt(row['candidate'])}"
+            if "previous" in row:
+                line += f" | previous: {_fmt(row['previous'])}"
+            if "spy" in row:
+                line += f" | spy: {_fmt(row['spy'])}"
+            print(line)
 
     if promote_ok:
         print(f"[Promote] PROMOTED — {reason}")

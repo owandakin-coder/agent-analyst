@@ -12,10 +12,20 @@ test_promote_model.py
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pytest
 
-from promote_model import should_promote, backtest_equity_curve, metrics_from_equity, compute_spy_baseline
+from promote_model import (
+    should_promote,
+    backtest_equity_curve,
+    metrics_from_equity,
+    compute_spy_baseline,
+    _sub_period_bounds,
+    sub_period_report,
+)
 
 
 def _metrics(sharpe=1.0, max_drawdown=0.10, annualized_return=0.15):
@@ -144,3 +154,56 @@ class TestBacktestIntegration:
     def test_compute_spy_baseline_returns_none_without_spy(self, tiny_model_and_norm):
         _, _, raw_data, _ = tiny_model_and_norm
         assert compute_spy_baseline(raw_data) is None
+
+
+class TestSubPeriodDiagnostic:
+    """The sub-period breakdown (added 2026-09-17 after a walk-forward run
+    showed a candidate that passed the single-window gate had no edge across
+    independent windows) is diagnostic only — it must never change what
+    should_promote() decides, only add visibility into whether a pass is
+    consistent across the test window or driven by one stretch of it."""
+
+    def test_sub_period_bounds_covers_the_full_range_with_no_gaps_or_overlap(self):
+        bounds = _sub_period_bounds(n=3, start="2022-01-01", end="2022-12-31")
+        assert len(bounds) == 3
+        assert bounds[0][0] == pd.Timestamp("2022-01-01")
+        assert bounds[-1][1] == pd.Timestamp("2022-12-31")
+        for i in range(len(bounds) - 1):
+            assert bounds[i][1] == bounds[i + 1][0]
+
+    def test_sub_period_report_runs_end_to_end_on_synthetic_data(self, tiny_model_and_norm):
+        model, vec_norm, raw_data, tmp = tiny_model_and_norm
+        candidate_model = tmp / "test_model.zip"
+        candidate_norm = tmp / "vec_norm.pkl"
+        assert candidate_model.exists() and candidate_norm.exists()
+
+        rows = sub_period_report(
+            candidate_model, candidate_norm,
+            previous_model=Path("no_such_file.zip"), previous_norm=Path("no_such_file.pkl"),
+            n=2, test_data=raw_data,
+        )
+
+        assert len(rows) >= 1
+        for row in rows:
+            assert "start" in row and "end" in row
+            assert "candidate" in row
+            assert "previous" not in row  # no previous model on disk
+            for key in ("sharpe", "max_drawdown", "annualized_return"):
+                assert key in row["candidate"]
+
+    def test_sub_period_report_skips_periods_with_too_little_data(self, tiny_model_and_norm):
+        """Asking for far more slices than the data supports should skip
+        the too-thin ones rather than crash or report on noise."""
+        _, _, raw_data, tmp = tiny_model_and_norm
+        candidate_model = tmp / "test_model.zip"
+        candidate_norm = tmp / "vec_norm.pkl"
+
+        rows = sub_period_report(
+            candidate_model, candidate_norm,
+            previous_model=Path("no_such_file.zip"), previous_norm=Path("no_such_file.pkl"),
+            n=50, test_data=raw_data,
+        )
+
+        # 50 slices of a ~9-month synthetic series leaves most slices under
+        # the 30-row floor — those must be dropped, not returned as noise.
+        assert len(rows) < 50
