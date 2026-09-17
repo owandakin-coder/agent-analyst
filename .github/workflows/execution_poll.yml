@@ -1,0 +1,60 @@
+name: Execution Queue Poller
+
+# ──────────────────────────────────────────────────────────────
+# Replaces the Render background worker (atzma-worker), which Render's
+# current workspace plans no longer let this account create for free —
+# background workers now require a paid compute tier. This repo is public,
+# so GitHub Actions minutes are free and unbounded, and user_execution_worker.py
+# already has a --poll-once CLI mode built for exactly this: claim and run at
+# most one queued execution_request, then exit.
+#
+# GitHub's scheduled triggers have a 5-minute floor (and can slip further
+# under load), so this can't match a real always-on worker's ~10-second
+# responsiveness — a job may sit queued for a few minutes before a run picks
+# it up. To reduce that within the 5-minute window rather than only at its
+# edges, each run loops --poll-once for up to ~4 minutes (draining anything
+# that's queued) before exiting, leaving headroom before the next schedule.
+# ──────────────────────────────────────────────────────────────
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: execution-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Drain the execution queue for up to 4 minutes
+        env:
+          ATZMA_REMOTE_API_BASE: https://sofowpweliticltlbxrj.supabase.co/functions/v1/api
+          ATZMA_WORKER_SHARED_TOKEN: ${{ secrets.ATZMA_WORKER_SHARED_TOKEN }}
+          ATZMA_WORKER_ID: github-actions-poller
+          ATZMA_FAIL_CLOSED_CONTROL: "1"
+          ATZMA_REQUIRE_FRESH_QUOTES: "1"
+          ATZMA_JSON_LOGS: "1"
+        run: |
+          end=$((SECONDS + 240))
+          while [ $SECONDS -lt $end ]; do
+            python user_execution_worker.py --poll-once --worker-id "$ATZMA_WORKER_ID"
+            sleep 5
+          done
