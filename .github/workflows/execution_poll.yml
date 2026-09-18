@@ -56,12 +56,31 @@ jobs:
           # `run:` steps use `bash -e` by default, so a single failed poll
           # (401 from a bad token, a transient network blip, ...) would kill
           # the whole step on its first iteration instead of retrying for
-          # the full window — `|| echo` swallows that so the loop keeps
+          # the full window — `|| true` swallows that so the loop keeps
           # going. A job that WAS claimed still reports its own success or
           # failure to the backend via /worker/execution/complete regardless.
+          #
+          # But tolerating individual failures must not turn into silently
+          # reporting green when EVERY attempt in the window failed (e.g. a
+          # bad/mismatched ATZMA_WORKER_SHARED_TOKEN, seen 2026-09-17: every
+          # single poll got 401'd for the full 4 minutes, yet the step still
+          # showed success because nothing ever propagated that). Track the
+          # attempt/failure counts and fail the step if 100% of attempts
+          # failed, so a systemic auth/connectivity problem shows up as a
+          # red X instead of hiding behind "the loop didn't crash".
           end=$((SECONDS + 240))
+          attempts=0
+          failures=0
           while [ $SECONDS -lt $end ]; do
-            python user_execution_worker.py --poll-once --worker-id "$ATZMA_WORKER_ID" \
-              || echo "::warning::poll-once attempt failed (see log above) — retrying"
+            attempts=$((attempts + 1))
+            if ! python user_execution_worker.py --poll-once --worker-id "$ATZMA_WORKER_ID"; then
+              failures=$((failures + 1))
+              echo "::warning::poll-once attempt $attempts failed (see log above) — retrying"
+            fi
             sleep 5
           done
+          echo "Completed $attempts attempt(s), $failures failure(s)."
+          if [ "$attempts" -gt 0 ] && [ "$failures" -eq "$attempts" ]; then
+            echo "::error::Every poll-once attempt in this run failed — likely a systemic issue (bad ATZMA_WORKER_SHARED_TOKEN, unreachable API, etc.), not transient noise."
+            exit 1
+          fi
