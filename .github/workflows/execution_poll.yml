@@ -44,6 +44,23 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Validate worker configuration
+        env:
+          ATZMA_WORKER_SHARED_TOKEN: ${{ secrets.ATZMA_WORKER_SHARED_TOKEN }}
+        run: |
+          if [ -z "$ATZMA_WORKER_SHARED_TOKEN" ]; then
+            echo "::error::ATZMA_WORKER_SHARED_TOKEN is not set as a GitHub Actions secret (empty). Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          # Never print the value — just enough to compare against what's
+          # actually saved in Supabase without exposing either one. Compute
+          # the same sha256sum(printf '%s' "$TOKEN") locally against your own
+          # copy of the value to confirm the two sides genuinely match,
+          # instead of eyeballing a copy-paste.
+          len=${#ATZMA_WORKER_SHARED_TOKEN}
+          hash=$(printf '%s' "$ATZMA_WORKER_SHARED_TOKEN" | sha256sum | cut -c1-12)
+          echo "ATZMA_WORKER_SHARED_TOKEN is set: length=$len sha256[0:12]=$hash"
+
       - name: Drain the execution queue for up to 4 minutes
         env:
           ATZMA_REMOTE_API_BASE: https://sofowpweliticltlbxrj.supabase.co/functions/v1/api

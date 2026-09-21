@@ -208,6 +208,45 @@ def test_poll_once_returns_zero_when_queue_empty(monkeypatch):
     assert worker.poll_once(worker_id="worker-1") == 0
 
 
+def test_poll_once_reports_clear_error_on_401(monkeypatch, capsys):
+    """A token mismatch should read as a distinct, actionable config error
+    (return code 3), not an unhandled traceback that looks like transient
+    noise — this is what a bad ATZMA_WORKER_SHARED_TOKEN actually looks like
+    in practice (confirmed 2026-09 against the real deployed API)."""
+    import urllib.error
+
+    def fake_request(path, payload=None, token=None):
+        if path == "/worker/execution/claim-next":
+            raise urllib.error.HTTPError(
+                "https://example.test/api/worker/execution/claim-next",
+                401, "Unauthorized", hdrs=None, fp=None,
+            )
+        return {"ok": True}
+
+    monkeypatch.setattr(worker, "_request", fake_request)
+    assert worker.poll_once(worker_id="worker-1") == 3
+    assert "401" in capsys.readouterr().err
+
+
+def test_poll_once_reraises_non_401_http_errors(monkeypatch):
+    """Only 401 gets the friendly message — any other HTTP error (5xx,
+    network-shaped issues, ...) should still surface as a real exception
+    rather than being silently swallowed."""
+    import urllib.error
+
+    def fake_request(path, payload=None, token=None):
+        if path == "/worker/execution/claim-next":
+            raise urllib.error.HTTPError(
+                "https://example.test/api/worker/execution/claim-next",
+                500, "Internal Server Error", hdrs=None, fp=None,
+            )
+        return {"ok": True}
+
+    monkeypatch.setattr(worker, "_request", fake_request)
+    with pytest.raises(urllib.error.HTTPError):
+        worker.poll_once(worker_id="worker-1")
+
+
 def test_worker_loop_runs_reconcile_poller(monkeypatch):
     calls = {"reconcile": 0, "poll": 0}
 

@@ -212,11 +212,22 @@ def poll_once(*, worker_id: str | None = None, lease_seconds: int = 90) -> int:
         return 2
 
     worker_id = worker_id or WORKER_ID
-    claim = _request(
-        "/worker/execution/claim-next",
-        {"worker_id": worker_id, "lease_seconds": lease_seconds},
-        token=token,
-    )
+    try:
+        claim = _request(
+            "/worker/execution/claim-next",
+            {"worker_id": worker_id, "lease_seconds": lease_seconds},
+            token=token,
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            print(
+                "Worker authentication failed (401): ATZMA_WORKER_SHARED_TOKEN does not "
+                "match what the API has configured. This is a config mismatch, not a "
+                "transient failure — retrying won't help until the two are back in sync.",
+                file=sys.stderr,
+            )
+            return 3
+        raise
     request = claim.get("request") or {}
     if not request:
         return 0
