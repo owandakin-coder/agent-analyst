@@ -92,6 +92,20 @@ jobs:
           else
             echo "No existing production model — first deploy, nothing to snapshot."
           fi
+          # Also snapshot the ensemble, if one exists — this is the artifact
+          # user_execution_worker.py actually loads at execution time
+          # (falling back to final_model.zip only when there's no ensemble),
+          # so promote_model.py needs a "previous ensemble" to gate the new
+          # one against, not just the single-model snapshot above.
+          if [ -f models/ensemble_0.zip ]; then
+            for i in 0 1 2; do
+              cp "models/ensemble_${i}.zip" "models/previous_ensemble_${i}.zip"
+              cp "models/ensemble_norm_${i}.pkl" "models/previous_ensemble_norm_${i}.pkl"
+            done
+            echo "Snapshotted existing production ensemble for comparison."
+          else
+            echo "No existing production ensemble — first ensemble deploy, nothing to snapshot."
+          fi
 
       # ── 5. Train base model ───────────────────────────────────
       - name: Train base model (Optuna + 100k steps, scoped for CI compute)

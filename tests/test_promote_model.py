@@ -25,6 +25,13 @@ from promote_model import (
     compute_spy_baseline,
     _sub_period_bounds,
     sub_period_report,
+    candidate_ensemble_paths,
+    previous_ensemble_paths,
+    ensemble_exists,
+    load_ensemble_from_paths,
+    backtest_ensemble_equity_curve,
+    evaluate_ensemble_metrics,
+    run_gate,
 )
 
 
@@ -207,3 +214,91 @@ class TestSubPeriodDiagnostic:
         # 50 slices of a ~9-month synthetic series leaves most slices under
         # the 30-row floor — those must be dropped, not returned as noise.
         assert len(rows) < 50
+
+
+class TestEnsembleGating:
+    """2026-09-23 finding: main.py's --mode train_ensemble, on its normal
+    "reuse saved params" path, writes models/ensemble_{0,1,2}.zip but never
+    touches final_model.zip — yet user_execution_worker.py's actual
+    execution path loads the ensemble (falling back to final_model.zip only
+    when no ensemble exists). Gating final_model.zip alone in that case
+    evaluates an artifact nobody runs; these tests cover the ensemble-aware
+    path added to close that gap."""
+
+    def _make_ensemble_dir(self, tmp_path_factory, tiny_model_and_norm, n=3):
+        """Builds a `models/`-shaped directory with n ensemble members, each
+        a copy of the one trained model the session fixture provides — the
+        point of these tests is exercising the multi-member load/backtest
+        *mechanism*, not distinct trained policies."""
+        _, _, _, src_tmp = tiny_model_and_norm
+        model_dir = tmp_path_factory.mktemp("ensemble_models")
+        for i in range(n):
+            (model_dir / f"ensemble_{i}.zip").write_bytes((src_tmp / "test_model.zip").read_bytes())
+            (model_dir / f"ensemble_norm_{i}.pkl").write_bytes((src_tmp / "vec_norm.pkl").read_bytes())
+        return model_dir
+
+    def test_ensemble_exists_requires_all_members(self, tmp_path):
+        paths = [(tmp_path / "a.zip", tmp_path / "a.pkl"), (tmp_path / "b.zip", tmp_path / "b.pkl")]
+        assert ensemble_exists(paths) is False
+
+        for model_path, norm_path in paths:
+            model_path.write_bytes(b"x")
+            norm_path.write_bytes(b"x")
+        assert ensemble_exists(paths) is True
+
+    def test_ensemble_exists_false_for_empty_list(self):
+        assert ensemble_exists([]) is False
+
+    def test_candidate_and_previous_paths_are_distinct(self, tmp_path):
+        candidate = candidate_ensemble_paths(tmp_path)
+        previous = previous_ensemble_paths(tmp_path)
+        assert len(candidate) == len(previous) == 3
+        candidate_names = {p.name for pair in candidate for p in pair}
+        previous_names = {p.name for pair in previous for p in pair}
+        assert candidate_names.isdisjoint(previous_names)
+        assert all(name.startswith("previous_") for name in previous_names)
+
+    def test_load_and_backtest_ensemble_end_to_end(self, tmp_path_factory, tiny_model_and_norm):
+        _, _, raw_data, _ = tiny_model_and_norm
+        model_dir = self._make_ensemble_dir(tmp_path_factory, tiny_model_and_norm)
+        paths = candidate_ensemble_paths(model_dir)
+        assert ensemble_exists(paths)
+
+        agent = load_ensemble_from_paths(paths, raw_data)
+        assert len(agent.members) == 3
+
+        equity = backtest_ensemble_equity_curve(agent, raw_data)
+        assert isinstance(equity, np.ndarray)
+        assert len(equity) > 1
+        assert equity[0] == pytest.approx(100_000.0)
+
+        metrics = evaluate_ensemble_metrics(paths, raw_data)
+        for key in ("sharpe", "max_drawdown", "annualized_return"):
+            assert key in metrics
+            assert np.isfinite(metrics[key])
+
+    def test_run_gate_prefers_ensemble_when_present(self, tmp_path_factory, tiny_model_and_norm, monkeypatch):
+        """When a full candidate ensemble exists next to final_model.zip,
+        run_gate must evaluate the ensemble (what production actually
+        loads), not the possibly-stale single model."""
+        _, _, raw_data, src_tmp = tiny_model_and_norm
+        model_dir = self._make_ensemble_dir(tmp_path_factory, tiny_model_and_norm)
+        # A single-model pair also present in the same directory — must be
+        # ignored by run_gate in favor of the ensemble.
+        (model_dir / "final_model.zip").write_bytes(b"not-a-real-model")
+        (model_dir / "vec_normalize.pkl").write_bytes(b"not-a-real-norm")
+
+        monkeypatch.setattr("promote_model._load_test_data", lambda: raw_data)
+        monkeypatch.setattr("promote_model.compute_spy_baseline", lambda test_data: None)
+
+        promote_ok, reason, candidate_metrics, previous_metrics, spy_metrics = run_gate(
+            model_dir / "final_model.zip", model_dir / "vec_normalize.pkl",
+            Path("no_such_previous.zip"), Path("no_such_previous_norm.pkl"),
+        )
+
+        # Would raise trying to load "not-a-real-model" as a PPO checkpoint
+        # if run_gate fell through to the single-model path instead.
+        assert promote_ok is True
+        assert previous_metrics is None
+        for key in ("sharpe", "max_drawdown", "annualized_return"):
+            assert key in candidate_metrics

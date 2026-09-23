@@ -240,19 +240,122 @@ def evaluate_model_metrics(model_path: Path, vec_norm_path: Path, test_data: dic
     return metrics_from_equity(equity)
 
 
+# Ensemble member filenames as committed by main.py's train_ensemble()
+# (see ensemble_agent.ENSEMBLE_MEMBERS, kept separate here so a "previous"
+# snapshot can use a name prefix without touching the live filenames).
+ENSEMBLE_MEMBER_NAMES = [
+    ("ensemble_0.zip", "ensemble_norm_0.pkl"),
+    ("ensemble_1.zip", "ensemble_norm_1.pkl"),
+    ("ensemble_2.zip", "ensemble_norm_2.pkl"),
+]
+
+
+def candidate_ensemble_paths(model_dir: Path) -> list[tuple[Path, Path]]:
+    return [(model_dir / m, model_dir / n) for m, n in ENSEMBLE_MEMBER_NAMES]
+
+
+def previous_ensemble_paths(model_dir: Path) -> list[tuple[Path, Path]]:
+    return [(model_dir / f"previous_{m}", model_dir / f"previous_{n}") for m, n in ENSEMBLE_MEMBER_NAMES]
+
+
+def ensemble_exists(paths: list[tuple[Path, Path]]) -> bool:
+    return bool(paths) and all(m.exists() and n.exists() for m, n in paths)
+
+
+def load_ensemble_from_paths(paths: list[tuple[Path, Path]], test_data: dict):
+    """Loads an EnsembleAgent from explicit (model, norm) path pairs, so the
+    same loader can evaluate both the live models/ensemble_N.zip files and a
+    models/previous_ensemble_N.zip snapshot without either clobbering the
+    other. ensemble_agent.load_ensemble() only ever reads the live filenames,
+    so it can't be reused directly for a "previous" comparison."""
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+    from trading_env import TradingEnvironment
+    from ensemble_agent import EnsembleAgent, EnsembleMember
+
+    members = []
+    for model_path, norm_path in paths:
+        model = PPO.load(str(model_path))
+        dummy_env = DummyVecEnv([lambda: TradingEnvironment(test_data)])
+        vec_norm = VecNormalize.load(str(norm_path), dummy_env)
+        vec_norm.training = False
+        vec_norm.norm_reward = False
+        members.append(EnsembleMember(model=model, vec_norm=vec_norm))
+    return EnsembleAgent(members)
+
+
+def backtest_ensemble_equity_curve(agent, test_data: dict) -> np.ndarray:
+    """Same rollout as backtest_equity_curve (env, RiskManager scaling,
+    max_drawdown_stop=1.0), but for an EnsembleAgent: it takes raw
+    (un-normalised) observations and normalises per-member internally, so
+    this steps a plain env instead of wrapping it in one shared VecNormalize."""
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    from trading_env import TradingEnvironment
+    from risk_manager import RiskManager
+
+    vec_env = DummyVecEnv([lambda: TradingEnvironment(test_data, max_drawdown_stop=1.0)])
+
+    risk_mgr = RiskManager(CFG.initial_capital)
+    obs = vec_env.reset()
+    done = False
+    equity = [CFG.initial_capital]
+    net_worth = CFG.initial_capital
+
+    while not done:
+        action = agent.predict(obs, deterministic=True)
+        risk_mgr.update(net_worth)
+        action = risk_mgr.scale_action(action)
+        obs, _, dones, infos = vec_env.step(action[np.newaxis])
+        done = bool(dones[0])
+        net_worth = infos[0].get("net_worth", net_worth)
+        equity.append(net_worth)
+
+    vec_env.close()
+    return np.array(equity)
+
+
+def evaluate_ensemble_metrics(paths: list[tuple[Path, Path]], test_data: dict) -> dict:
+    agent = load_ensemble_from_paths(paths, test_data)
+    equity = backtest_ensemble_equity_curve(agent, test_data)
+    return metrics_from_equity(equity)
+
+
 def run_gate(
     candidate_model: Path,
     candidate_norm: Path,
     previous_model: Path,
     previous_norm: Path,
 ) -> tuple[bool, str, dict, dict | None, dict | None]:
+    """Gates whichever candidate actually exists on disk. main.py's --mode
+    train_ensemble, when it reuses saved hyperparameters (the normal case —
+    see its "reuse saved params" branch), trains and saves
+    models/ensemble_{0,1,2}.zip but never touches final_model.zip — that's
+    the *real* production artifact (ensemble_agent.load_ensemble() is what
+    user_execution_worker.py loads at execution time, falling back to
+    final_model.zip only when no ensemble is present). Gating final_model.zip
+    alone in that case would silently pass every run without ever having
+    evaluated what's actually about to go live — so prefer the ensemble
+    whenever a full candidate ensemble exists, and only fall back to the
+    single-model comparison when it doesn't (e.g. a plain --mode train run)."""
     test_data = _load_test_data()
+    model_dir = candidate_model.parent
 
-    candidate_metrics = evaluate_model_metrics(candidate_model, candidate_norm, test_data)
-
-    previous_metrics = None
-    if previous_model.exists() and previous_norm.exists():
-        previous_metrics = evaluate_model_metrics(previous_model, previous_norm, test_data)
+    candidate_ensemble = candidate_ensemble_paths(model_dir)
+    if ensemble_exists(candidate_ensemble):
+        candidate_metrics = evaluate_ensemble_metrics(candidate_ensemble, test_data)
+        previous_metrics = None
+        previous_ensemble = previous_ensemble_paths(model_dir)
+        if ensemble_exists(previous_ensemble):
+            previous_metrics = evaluate_ensemble_metrics(previous_ensemble, test_data)
+        elif previous_model.exists() and previous_norm.exists():
+            # First-ever ensemble retrain: nothing to compare it to yet
+            # except whatever single model it's replacing.
+            previous_metrics = evaluate_model_metrics(previous_model, previous_norm, test_data)
+    else:
+        candidate_metrics = evaluate_model_metrics(candidate_model, candidate_norm, test_data)
+        previous_metrics = None
+        if previous_model.exists() and previous_norm.exists():
+            previous_metrics = evaluate_model_metrics(previous_model, previous_norm, test_data)
 
     spy_metrics = compute_spy_baseline(test_data)
 
@@ -286,8 +389,10 @@ def main() -> int:
     previous_model = Path(args.previous)
     previous_norm = Path(args.previous_norm)
 
-    if not candidate_model.exists() or not candidate_norm.exists():
-        print(f"[Promote] Candidate model not found at {candidate_model} — nothing to gate.")
+    model_dir = candidate_model.parent
+    candidate_is_ensemble = ensemble_exists(candidate_ensemble_paths(model_dir))
+    if not candidate_is_ensemble and (not candidate_model.exists() or not candidate_norm.exists()):
+        print(f"[Promote] Candidate model not found at {candidate_model} (and no ensemble at {model_dir}) — nothing to gate.")
         return 1
 
     from notifications import send_operator_alert
@@ -322,6 +427,23 @@ def main() -> int:
         shutil.copy2(previous_model, candidate_model)
         shutil.copy2(previous_norm, candidate_norm)
         print("[Promote] Reverted final_model.zip / vec_normalize.pkl to the previous production model.")
+    previous_ensemble = previous_ensemble_paths(model_dir)
+    if ensemble_exists(previous_ensemble):
+        for (candidate_member, candidate_norm_member), (previous_member, previous_norm_member) in zip(
+            candidate_ensemble_paths(model_dir), previous_ensemble
+        ):
+            shutil.copy2(previous_member, candidate_member)
+            shutil.copy2(previous_norm_member, candidate_norm_member)
+        print("[Promote] Reverted ensemble_{0,1,2}.zip to the previous production ensemble.")
+    elif candidate_is_ensemble:
+        # No previous ensemble to fall back to (e.g. this is the first
+        # ensemble retrain) — leave the rejected ensemble files in place
+        # rather than delete them, since user_execution_worker.py's
+        # load_ensemble() would otherwise silently fall back to
+        # final_model.zip anyway; but flag it, since a rejected candidate
+        # sitting there unrevert is a real gap worth a human noticing.
+        print("[Promote] No previous ensemble snapshot to revert to — rejected ensemble files left in place. "
+              "Investigate before the next scheduled retrain overwrites them.")
     send_operator_alert(
         f"⚠️ Monthly retrain REJECTED, production model unchanged — {reason}"
     )

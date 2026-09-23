@@ -22,10 +22,26 @@ results/
 .env
 supabase/.temp/
 
-# Keep model files (needed for GitHub Actions)
+# Model artifacts: only the ones that are actually meant to be committed
+# are tracked (the single production model + the gate-approved ensemble).
+# Everything else in models/ (Optuna trial checkpoints, the previous_*
+# snapshots retrain.yml creates just to diff against within one CI run,
+# best_validation_summary.json) is scratch that regenerates every run —
+# these `!` exceptions were previously pointless because nothing broader
+# was ignored, so a plain `git add models/` would silently pick up and
+# commit all of that scratch state (caught 2026-09-23: previous_model.zip
+# and previous_vec_normalize.pkl were one `git add models/` away from
+# landing in a commit).
+models/*
 !models/final_model.zip
 !models/vec_normalize.pkl
 !models/training_meta.pkl
+!models/ensemble_0.zip
+!models/ensemble_1.zip
+!models/ensemble_2.zip
+!models/ensemble_norm_0.pkl
+!models/ensemble_norm_1.pkl
+!models/ensemble_norm_2.pkl
 
 # Trades history (runtime file)
 trades_history.csv
