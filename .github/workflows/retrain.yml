@@ -45,6 +45,16 @@ jobs:
   retrain:
     runs-on: ubuntu-latest
     timeout-minutes: 350   # was 120 — both real runs got cancelled mid-training at that limit
+    # 2026-09-22's run trained and evaluated a candidate successfully, then
+    # failed at "Commit updated models" with a flat 403 on every one of 5
+    # push attempts ("Permission to .../agent-analyst.git denied to
+    # github-actions[bot]") — not a merge conflict (the reset-and-recommit
+    # retry logic ran clean each time), but GITHUB_TOKEN itself lacking
+    # write access. This repo/org's default workflow permission is
+    # read-only; declaring it explicitly here doesn't depend on that
+    # account-level default.
+    permissions:
+      contents: write
 
     steps:
       # ── 1. Checkout ───────────────────────────────────────────
