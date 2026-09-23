@@ -17,6 +17,14 @@ def reset_worker_env(monkeypatch):
     monkeypatch.delenv("ALPACA_API_KEY", raising=False)
     monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
     monkeypatch.delenv("ALPACA_BASE_URL", raising=False)
+    # _execute_with_main loads the model via ensemble_agent.load_ensemble()
+    # (falls back to final_model.zip on its own when there's no ensemble on
+    # disk) rather than main.load_trained_model_and_norm() directly — stub
+    # it so tests never touch real model files. Individual tests still stub
+    # main.step_live_once per-case since that's what carries each test's
+    # actual scenario.
+    fake_ensemble_agent = SimpleNamespace(load_ensemble=lambda: "model")
+    monkeypatch.setitem(sys.modules, "ensemble_agent", fake_ensemble_agent)
 
 
 def test_main_success_sets_broker_env_and_completes(monkeypatch):
@@ -38,7 +46,6 @@ def test_main_success_sets_broker_env_and_completes(monkeypatch):
     monkeypatch.setattr(worker, "_request", fake_request)
 
     fake_main = SimpleNamespace(
-        load_trained_model_and_norm=lambda: ("model", "vec"),
         step_live_once=lambda model, vec_norm, auto_approve=True: None,
     )
     monkeypatch.setitem(sys.modules, "main", fake_main)
@@ -56,6 +63,51 @@ def test_main_success_sets_broker_env_and_completes(monkeypatch):
     assert payload["result"]["job_id"] == "job-123"
     assert payload["result"]["mode"] == "paper"
     assert "decision_summary" in payload["result"]
+
+
+def test_main_loads_model_via_ensemble_agent_not_single_model(monkeypatch):
+    """Regression test: _execute_with_main must go through
+    ensemble_agent.load_ensemble(), not main.load_trained_model_and_norm()
+    directly — otherwise a retrain whose CI fast path only refreshes the
+    ensemble members (train_ensemble's "reuse saved params" branch, which
+    never touches final_model.zip) never actually reaches production,
+    even though promote_model.py reports it as promoted."""
+    def fake_request(path, payload=None):
+        if path == "/worker/jobs/claim":
+            return {
+                "broker_connection": {
+                    "api_key": "user-key",
+                    "secret_key": "user-secret",
+                    "base_url": "https://paper-api.alpaca.markets",
+                    "trading_mode": "paper",
+                }
+            }
+        return {"ok": True}
+
+    monkeypatch.setattr(worker, "_request", fake_request)
+
+    load_ensemble_calls = []
+    fake_ensemble_agent = SimpleNamespace(
+        load_ensemble=lambda: load_ensemble_calls.append(1) or "ensemble-model"
+    )
+    monkeypatch.setitem(sys.modules, "ensemble_agent", fake_ensemble_agent)
+
+    received = {}
+
+    def fake_step_live_once(model, vec_norm, auto_approve=True):
+        received["model"] = model
+        received["vec_norm"] = vec_norm
+        return None
+
+    fake_main = SimpleNamespace(step_live_once=fake_step_live_once)
+    monkeypatch.setitem(sys.modules, "main", fake_main)
+
+    code = worker.main()
+
+    assert code == 0
+    assert load_ensemble_calls == [1]
+    assert received["model"] == "ensemble-model"
+    assert received["vec_norm"] is None  # EnsembleAgent normalises per-member internally
 
 
 def test_main_marks_skipped_on_zero_system_exit(monkeypatch):
@@ -80,7 +132,6 @@ def test_main_marks_skipped_on_zero_system_exit(monkeypatch):
         raise SystemExit(0)
 
     fake_main = SimpleNamespace(
-        load_trained_model_and_norm=lambda: ("model", "vec"),
         step_live_once=stop_once,
     )
     monkeypatch.setitem(sys.modules, "main", fake_main)
@@ -144,7 +195,6 @@ def test_main_marks_failed_on_runtime_error(monkeypatch):
         raise RuntimeError("boom")
 
     fake_main = SimpleNamespace(
-        load_trained_model_and_norm=lambda: ("model", "vec"),
         step_live_once=explode,
     )
     monkeypatch.setitem(sys.modules, "main", fake_main)
@@ -177,7 +227,6 @@ def test_poll_once_claims_request_and_completes(monkeypatch):
 
     monkeypatch.setattr(worker, "_request", fake_request)
     fake_main = SimpleNamespace(
-        load_trained_model_and_norm=lambda: ("model", "vec"),
         step_live_once=lambda model, vec_norm, auto_approve=True: {
             "summary": "buy AAPL",
             "regime": "TRENDING_UP",

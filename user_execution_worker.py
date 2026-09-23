@@ -159,9 +159,22 @@ def _install_runtime_hooks(request_id: str, token: str) -> None:
 def _execute_with_main(request_id: str, broker: dict, on_success, on_skip, on_failure) -> int:
     _set_broker_env(broker)
     try:
-        from main import load_trained_model_and_norm, step_live_once
+        from main import step_live_once
+        from ensemble_agent import load_ensemble
 
-        model, vec_norm = load_trained_model_and_norm()
+        # load_ensemble() reads models/ensemble_{0,1,2}.zip (+ norms) and
+        # falls back to models/final_model.zip automatically if the
+        # ensemble files aren't there — same production model as before
+        # whenever there's no ensemble, and the actual 3-seed majority-vote
+        # model (which the product already advertises: "PPO Model Info:
+        # Ensemble x 3 seeds · majority vote") whenever there is. Previously
+        # this always loaded final_model.zip directly, so a retrain whose
+        # CI fast path only refreshes the ensemble members (see
+        # retrain.yml's "train_ensemble" step) silently never reached
+        # production — LiveTrader already auto-detects EnsembleAgent via
+        # hasattr(model, "members"), so no other change is needed.
+        model = load_ensemble()
+        vec_norm = None
         decision_result = step_live_once(model, vec_norm, auto_approve=True) or {}
         on_success(_result_payload(request_id, broker, decision_result))
         return 0
