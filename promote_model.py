@@ -436,14 +436,15 @@ def main() -> int:
             shutil.copy2(previous_norm_member, candidate_norm_member)
         print("[Promote] Reverted ensemble_{0,1,2}.zip to the previous production ensemble.")
     elif candidate_is_ensemble:
-        # No previous ensemble to fall back to (e.g. this is the first
-        # ensemble retrain) — leave the rejected ensemble files in place
-        # rather than delete them, since user_execution_worker.py's
-        # load_ensemble() would otherwise silently fall back to
-        # final_model.zip anyway; but flag it, since a rejected candidate
-        # sitting there unrevert is a real gap worth a human noticing.
-        print("[Promote] No previous ensemble snapshot to revert to — rejected ensemble files left in place. "
-              "Investigate before the next scheduled retrain overwrites them.")
+        # No previous ensemble to restore. Leaving the rejected files would make
+        # load_ensemble() serve them in production (retrain.yml commits models/
+        # after a rejection — seen 2026-10-01); deleting them makes it fall back
+        # to the gated final_model.zip.
+        for member, member_norm in candidate_ensemble_paths(model_dir):
+            member.unlink(missing_ok=True)
+            member_norm.unlink(missing_ok=True)
+        print("[Promote] No previous ensemble to restore — deleted the rejected ensemble files "
+              "so production falls back to the gated single model.")
     send_operator_alert(
         f"⚠️ Monthly retrain REJECTED, production model unchanged — {reason}"
     )

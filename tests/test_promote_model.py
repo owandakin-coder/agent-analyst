@@ -302,3 +302,35 @@ class TestEnsembleGating:
         assert previous_metrics is None
         for key in ("sharpe", "max_drawdown", "annualized_return"):
             assert key in candidate_metrics
+
+    def test_rejected_first_ensemble_is_deleted_not_left_for_production(self, tmp_path, monkeypatch):
+        """A rejected ensemble with no previous ensemble to restore must not
+        stay in models/ — retrain.yml commits that directory after a
+        rejection, and load_ensemble() would serve the rejected files."""
+        import sys
+        import types
+        import promote_model
+
+        for i in range(3):
+            (tmp_path / f"ensemble_{i}.zip").write_bytes(b"x")
+            (tmp_path / f"ensemble_norm_{i}.pkl").write_bytes(b"x")
+        (tmp_path / "final_model.zip").write_bytes(b"single")
+        (tmp_path / "vec_normalize.pkl").write_bytes(b"single-norm")
+
+        bad = {"sharpe": 1.3, "max_drawdown": 0.37, "annualized_return": 0.4}
+        monkeypatch.setattr(promote_model, "run_gate",
+                            lambda *a, **k: (False, "max_drawdown too high", bad, None, None))
+        monkeypatch.setitem(sys.modules, "notifications",
+                            types.SimpleNamespace(send_operator_alert=lambda msg: None))
+        monkeypatch.setattr(sys, "argv", [
+            "promote_model.py",
+            "--candidate", str(tmp_path / "final_model.zip"),
+            "--candidate-norm", str(tmp_path / "vec_normalize.pkl"),
+            "--previous", str(tmp_path / "previous_model.zip"),
+            "--previous-norm", str(tmp_path / "previous_vec_normalize.pkl"),
+        ])
+
+        assert promote_model.main() == 2
+        assert not ensemble_exists(candidate_ensemble_paths(tmp_path))
+        assert not list(tmp_path.glob("ensemble_*"))
+        assert (tmp_path / "final_model.zip").exists()
