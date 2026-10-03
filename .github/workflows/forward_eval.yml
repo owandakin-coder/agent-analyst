@@ -1,0 +1,57 @@
+name: Daily Forward Evaluation
+
+# Scores the production model on market data after the training window
+# (2025-01-01 -> today) against SPY and appends one row per day to
+# forward_log/forward_performance.csv. A simulation on real prices, not
+# broker fills — see forward_eval.py.
+on:
+  schedule:
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forward-eval
+  cancel-in-progress: false
+
+jobs:
+  forward-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Score the production model against SPY
+        run: python -u forward_eval.py
+
+      - name: Commit the scorecard
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add forward_log/forward_performance.csv
+          if git diff --cached --quiet; then
+            echo "No scorecard change to commit."
+            exit 0
+          fi
+          git commit -m "chore: forward evaluation $(date -u +%F) [skip ci]"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push && exit 0
+            echo "push attempt $attempt failed — retrying"
+            sleep 5
+          done
+          exit 1
