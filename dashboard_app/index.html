@@ -1527,7 +1527,7 @@ select.m-input { appearance:none; cursor:pointer; }
 
       <div class="s-sec">
         <div class="s-sec-lbl">Model</div>
-        <div class="s-item" onclick="openModelSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(120,80,255,.12)">🧠</div><div><div class="s-txt-main">PPO Model</div><div class="s-txt-sub">v2.1 · Ensemble × 3 seeds</div></div></div><span class="chev">›</span></div>
+        <div class="s-item" onclick="openModelSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(120,80,255,.12)">🧠</div><div><div class="s-txt-main">PPO Model</div><div class="s-txt-sub">v2.1 · Single PPO model</div></div></div><span class="chev">›</span></div>
         <div class="s-item" onclick="openRetrainSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(255,159,10,.12)">📅</div><div><div class="s-txt-main">Last Retrain</div><div class="s-txt-sub" id="retrain-sub">Loading…</div></div></div><span class="chev">›</span></div>
       </div>
 
@@ -1786,10 +1786,9 @@ select.m-input { appearance:none; cursor:pointer; }
     <div class="sheet-handle"></div>
     <div class="sheet-title">🧠 PPO Model Info</div>
     <div class="profile-row"><span class="profile-key">Algorithm</span><span class="profile-val">PPO (Proximal Policy Optimization)</span></div>
-    <div class="profile-row"><span class="profile-key">Architecture</span><span class="profile-val">Transformer + LSTM</span></div>
-    <div class="profile-row"><span class="profile-key">Ensemble</span><span class="profile-val">3 seeds · majority vote</span></div>
+    <div class="profile-row"><span class="profile-key">Architecture</span><span class="profile-val">Transformer policy (PPO)</span></div>
+    <div class="profile-row"><span class="profile-key">Ensemble</span><span class="profile-val">Not active (single model in production)</span></div>
     <div class="profile-row"><span class="profile-key">Kelly Factor</span><span class="profile-val">0.25× fractional</span></div>
-    <div class="profile-row"><span class="profile-key">Training Steps</span><span class="profile-val" id="model-steps">500,000</span></div>
     <div class="profile-row"><span class="profile-key">Tickers</span><span class="profile-val">15 stocks</span></div>
     <div class="profile-row"><span class="profile-key">Regime-Aware</span><span class="profile-val" style="color:var(--green)">Yes ✓</span></div>
     <div class="profile-row"><span class="profile-key">Last Retrain</span><span class="profile-val" id="model-retrain-date">Loading…</span></div>
@@ -4415,22 +4414,6 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
 }
-
-// ════════════════════════════════════════════════════════
-// RANDOM ALERT PUSHER (every 30s for demo)
-// ════════════════════════════════════════════════════════
-const autoAlerts = [
-  {col:'#34c759',icon:'📈',title:'AAPL Buy Signal',desc:'Agent confidence 79% · BULL regime',time:'Just now',tag:'BUY',tagCol:'rgba(52,199,89,.15)'},
-  {col:'#ff9f0a',icon:'⚡',title:'Market Spike',desc:'SPY up 1.4% in last 15 min',time:'Just now',tag:'MOVE',tagCol:'rgba(255,159,10,.15)'},
-  {col:'#bf5af2',icon:'🧠',title:'Model Update',desc:'Ensemble weights recalibrated',time:'Just now',tag:'ML',tagCol:'rgba(191,90,242,.15)'},
-];
-setInterval(() => {
-  const a = autoAlerts[Math.floor(Math.random()*autoAlerts.length)];
-  alertsData.unshift({...a});
-  renderAlerts();
-  toast('🔔 ' + a.title);
-  document.getElementById('alert-badge').style.display = 'block';
-}, 30000);
 </script>
 </body>
 </html>

@@ -43,7 +43,7 @@ on:
 
 jobs:
   retrain:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 350   # was 120 — both real runs got cancelled mid-training at that limit
     # 2026-09-22's run trained and evaluated a candidate successfully, then
     # failed at "Commit updated models" with a flat 403 on every one of 5
