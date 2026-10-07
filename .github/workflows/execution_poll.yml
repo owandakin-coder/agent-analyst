@@ -33,6 +33,8 @@ on:
   workflow_dispatch: {}
   # Editing this file restarts a broken chain without needing the Actions UI
   # (a GitHub outage on 2026-10-07 killed it; schedule alone is hours late).
+  # A restart can itself fail while GitHub recovers ("job failed to be
+  # acquired"); in that case edit this file again.
   push:
     paths:
       - '.github/workflows/execution_poll.yml'
