@@ -31,6 +31,11 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
+  # Editing this file restarts a broken chain without needing the Actions UI
+  # (a GitHub outage on 2026-10-07 killed it; schedule alone is hours late).
+  push:
+    paths:
+      - '.github/workflows/execution_poll.yml'
 
 permissions:
   contents: read
@@ -43,7 +48,7 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
 
     steps:
       - name: Checkout repository
@@ -128,4 +133,16 @@ jobs:
           # it should keep trying to self-heal on every cycle. `schedule:`
           # is the fallback if this call itself ever fails (API outage,
           # token issue), so a single missed chain link isn't fatal.
-          gh workflow run execution_poll.yml --ref "${{ github.ref_name }}"
+          #
+          # Retried because one HTTP 500 from GitHub's dispatch API (during a
+          # GitHub-side incident, 2026-10-07 15:06 UTC) used to end the chain
+          # until the hours-late schedule tick restarted it.
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if gh workflow run execution_poll.yml --ref "${{ github.ref_name }}"; then
+              exit 0
+            fi
+            echo "::warning::dispatch attempt $attempt failed — retrying in 20s"
+            sleep 20
+          done
+          echo "::error::Could not trigger the next poll run after 8 attempts; chain will resume on the next schedule tick."
+          exit 1
