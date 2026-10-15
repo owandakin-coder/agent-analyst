@@ -42,6 +42,8 @@ jobs:
           url = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api/health"
           with urllib.request.urlopen(url, timeout=30) as response:
               health = json.load(response)
+          with urllib.request.urlopen(url.rsplit('/', 1)[0] + '/control', timeout=30) as response:
+              control = json.load(response)
           print(json.dumps({key: health.get(key) for key in (
               "worker_online", "scheduler_last_tick_at", "market_open",
               "overdue_requests", "recent_dead_letters"
@@ -54,7 +56,7 @@ jobs:
           if health.get("recent_dead_letters", 0):
               errors.append("Execution requests exhausted their retries")
           tick = health.get("scheduler_last_tick_at")
-          if tick:
+          if tick and control.get("trading_enabled") and not control.get("emergency_stop"):
               age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(tick.replace("Z", "+00:00"))).total_seconds()
               if age > 900:
                   errors.append("Scheduler has not completed a tick in 15 minutes")
