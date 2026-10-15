@@ -27,6 +27,9 @@ while Alpaca's fresh market clock says the exchange is open. The GitHub Actions
 or a Run Now click. Its self-chaining runs and independent cron backstop recover the
 poller between runs. GitHub startup and scheduling delays mean execution is not an
 exact-time guarantee; this deployment is not suitable for latency-sensitive trading.
+`runtime_watchdog.yml` independently restarts a broken worker chain after poller
+completion or on its cron backstop, and checks runtime health. It runs entirely
+on GitHub; the optional Codex chat monitor is an additional local layer.
 
 Scheduling is atomic and idempotent per connection/time slot. Any outstanding request,
 including an old request, blocks another scheduled request for that user. Pause,

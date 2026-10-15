@@ -1,0 +1,65 @@
+name: Autonomous Runtime Watchdog
+
+on:
+  workflow_run:
+    workflows: [Execution Queue Poller]
+    types: [completed]
+  schedule:
+    - cron: '*/15 * * * *'
+  push:
+    paths: ['.github/workflows/runtime_watchdog.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: autonomous-runtime-watchdog
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Recover a broken worker chain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          active=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/execution_poll.yml/runs?per_page=20" --jq '[.workflow_runs[] | select(.status != "completed")] | length')
+          if [ "$active" -eq 0 ]; then
+            gh workflow run execution_poll.yml --repo "$GITHUB_REPOSITORY" --ref main
+            echo "Restarted the execution worker chain."
+          else
+            echo "Execution worker already active or queued."
+          fi
+
+      - name: Check runtime health
+        run: |
+          python - <<'PY'
+          import datetime, json, urllib.request
+          url = "https://sofowpweliticltlbxrj.supabase.co/functions/v1/api/health"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              health = json.load(response)
+          print(json.dumps({key: health.get(key) for key in (
+              "worker_online", "scheduler_last_tick_at", "market_open",
+              "overdue_requests", "recent_dead_letters"
+          )}))
+          errors = []
+          if not health.get("worker_online"):
+              errors.append("No worker heartbeat in the last 10 minutes")
+          if health.get("overdue_requests", 0):
+              errors.append("Execution requests are overdue")
+          if health.get("recent_dead_letters", 0):
+              errors.append("Execution requests exhausted their retries")
+          tick = health.get("scheduler_last_tick_at")
+          if tick:
+              age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(tick.replace("Z", "+00:00"))).total_seconds()
+              if age > 900:
+                  errors.append("Scheduler has not completed a tick in 15 minutes")
+          for error in errors:
+              print("::error::" + error)
+          if errors:
+              raise SystemExit(1)
+          PY
