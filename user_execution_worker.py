@@ -157,6 +157,9 @@ def _install_runtime_hooks(request_id: str, token: str) -> None:
 
 
 def _execute_with_main(request_id: str, broker: dict, on_success, on_skip, on_failure) -> int:
+    if broker.get("trading_mode", "paper") != "paper" or broker.get("base_url", "https://paper-api.alpaca.markets").rstrip("/") != "https://paper-api.alpaca.markets":
+        on_failure("Autonomous worker only supports verified Paper accounts")
+        return 1
     _set_broker_env(broker)
     try:
         from main import step_live_once
@@ -312,10 +315,14 @@ def worker_loop(*, worker_id: str | None = None, poll_seconds: int = 10, lease_s
         if now - last_reconcile_at >= max(RECONCILE_INTERVAL_SECONDS, 5):
             try:
                 reconcile_open_orders(token=token)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Order reconciliation failed: {type(exc).__name__}", file=sys.stderr)
             last_reconcile_at = now
-        code = poll_once(worker_id=worker_id, lease_seconds=lease_seconds)
+        try:
+            code = poll_once(worker_id=worker_id, lease_seconds=lease_seconds)
+        except Exception as exc:
+            print(f"Worker cycle failed: {type(exc).__name__}; retrying", file=sys.stderr)
+            code = 1
         if code not in (0,):
             time.sleep(min(max(poll_seconds, 5), 60))
             continue
@@ -337,5 +344,8 @@ if __name__ == "__main__":
     if args.loop:
         raise SystemExit(worker_loop(worker_id=args.worker_id, poll_seconds=args.poll_seconds, lease_seconds=args.lease_seconds))
     if args.poll_once:
+        # Actions starts a new process each poll, so the loop's periodic
+        # reconciliation does not run there. Reconcile on this path too.
+        reconcile_open_orders()
         raise SystemExit(poll_once(worker_id=args.worker_id, lease_seconds=args.lease_seconds))
     raise SystemExit(main())

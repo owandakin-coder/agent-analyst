@@ -3,6 +3,8 @@
  * Public market data + authenticated user profile/preferences + trading control plane.
  */
 
+import { isFreshOpenClock, schedulingAllowed } from "./autonomous_scheduler.ts";
+
 const PROJECT_REF = "sofowpweliticltlbxrj";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("ATZMA_SUPABASE_URL") ?? `https://${PROJECT_REF}.supabase.co`;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("ATZMA_SUPABASE_ANON_KEY") ?? "";
@@ -157,7 +159,7 @@ function base64Encode(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
-function base64Decode(value: string): Uint8Array {
+function base64Decode(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
 }
 
@@ -870,8 +872,7 @@ function buildExecutionIdempotencyKey(userId: string, brokerConnectionId: string
 }
 
 async function findOpenTradeRequest(userId: string): Promise<ExecutionRequestRow | null> {
-  const since = new Date(Date.now() - (JOB_DEDUPE_WINDOW_MINUTES * 60_000)).toISOString();
-  const path = `/execution_requests?user_id=eq.${encodeURIComponent(userId)}&strategy_id=eq.default&status=in.(queued,leased,running,retrying,reconcile_pending)&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=1`;
+  const path = `/execution_requests?user_id=eq.${encodeURIComponent(userId)}&strategy_id=eq.default&status=in.(queued,leased,running,retrying,reconcile_pending)&order=created_at.desc&limit=1`;
   const res = await restAdmin(path);
   const rows = await res.json() as ExecutionRequestRow[];
   return rows[0] ?? null;
@@ -912,6 +913,44 @@ function sharedWorkerAuthorized(req: Request): boolean {
   return !!WORKER_SHARED_TOKEN && token === WORKER_SHARED_TOKEN;
 }
 
+let lastScheduleCheck = 0;
+async function schedulePaperExecutions(): Promise<void> {
+  if (Date.now() - lastScheduleCheck < 60_000) return;
+  const control = await loadControlState();
+  if (!schedulingAllowed(control)) return;
+  const res = await restAdmin("/broker_connections?enabled=eq.true&last_verified_status=eq.verified&trading_mode=eq.paper&select=*&limit=100");
+  if (!res.ok) throw new Error(`Scheduler broker lookup failed: ${res.status}`);
+  const brokers = await res.json() as BrokerConnectionRow[];
+  if (!brokers.length) { lastScheduleCheck = Date.now(); return; }
+  // A clock read never places an order. Try another verified connection if
+  // one account has revoked credentials, so it cannot stall everyone else.
+  let clockRead = false;
+  for (const broker of brokers) {
+    if (broker.base_url !== "https://paper-api.alpaca.markets") continue;
+    try {
+      const clockRes = await fetchWithRetry(buildAlpacaUrl(broker.base_url, "/clock"), {
+        headers: {
+          "APCA-API-KEY-ID": await decryptSecret(broker.api_key_encrypted),
+          "APCA-API-SECRET-KEY": await decryptSecret(broker.secret_key_encrypted),
+        },
+      }, 1);
+      if (!clockRes.ok) continue;
+      const clock = await clockRes.json() as JsonMap;
+      // Stale or malformed clocks fail closed, rather than pretending that
+      // the market is closed and silently stopping the scheduler.
+      const timestamp = Date.parse(String(clock.timestamp ?? ""));
+      if (!Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > 120_000
+        || typeof clock.is_open !== "boolean"
+        || (clock.is_open && !isFreshOpenClock(clock))) continue;
+      await restRpc<number>("schedule_paper_executions", { p_market_open: isFreshOpenClock(clock) });
+      clockRead = true;
+      break;
+    } catch { /* Try another connection; report failure if none works. */ }
+  }
+  if (!clockRead) throw new Error("Scheduler could not obtain a fresh broker market clock");
+  lastScheduleCheck = Date.now();
+}
+
 async function enqueueExecutionRequest(user: JsonMap, broker: BrokerConnectionRow, triggerType: "manual" | "control_plane", sourcePayload: JsonMap = {}): Promise<ExecutionRequestRow> {
   const userId = String(user.id);
   const requestedMode = broker.trading_mode === "live" ? "live" : "paper";
@@ -938,6 +977,10 @@ async function enqueueExecutionRequest(user: JsonMap, broker: BrokerConnectionRo
   });
   const rowsPayload = await readJsonSafe<ExecutionRequestRow[] | JsonMap>(res);
   if (!res.ok) {
+    if (res.status === 409) {
+      const existing = await findOpenTradeRequest(userId);
+      if (existing) return existing;
+    }
     throw new Error(extractServiceError(rowsPayload, "Could not queue execution request"));
   }
   const rows = Array.isArray(rowsPayload) ? rowsPayload : [];
@@ -1025,6 +1068,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     if (path === "/health") {
+      const runtime = await restRpc<JsonMap>("autonomous_runtime_status");
       return json({
         ok: true,
         system: "ATZMA",
@@ -1034,6 +1078,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
         executor: "worker_pool",
         can_dispatch: false,
         broker_credentials_encryption: !!BROKER_CREDENTIAL_KEY,
+        autonomous_mode: "paper",
+        schedule_interval_seconds: 900,
+        ...runtime,
       });
     }
 
@@ -1460,6 +1507,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!workerId) return json({ error: "worker_id is required" }, 400);
 
       await restRpc<number>("requeue_expired_execution_requests");
+      await schedulePaperExecutions();
       const claimed = await restRpc<ExecutionRequestRow[]>("claim_execution_request", {
         p_worker_id: workerId,
         p_lease_seconds: Math.max(15, Math.min(Number(body.lease_seconds ?? 90), 600)),

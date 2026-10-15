@@ -477,6 +477,7 @@ class AlpacaBrokerAPI:
         return {
             "cash": float(acc.cash),
             "equity": float(acc.equity),
+            "last_equity": float(getattr(acc, "last_equity", None) or acc.equity),
             "buying_power": float(acc.buying_power),
             "portfolio_value": float(acc.portfolio_value),
             "status": str(acc.status),
@@ -525,6 +526,7 @@ class AlpacaBrokerAPI:
             snapshot = {
                 "cash": account["cash"],
                 "equity": account["equity"],
+                "last_equity": account.get("last_equity", account["equity"]),
                 "buying_power": account["buying_power"],
                 "portfolio_value": account["portfolio_value"],
                 "status": account["status"],

@@ -163,6 +163,21 @@ def test_daily_loss_breach_halts_execution(monkeypatch, multi_featured):
     assert executed["called"] is False
 
 
+def test_closed_position_daily_loss_survives_worker_restart(monkeypatch, multi_featured):
+    trader = _make_trader(monkeypatch, multi_featured)
+    monkeypatch.setenv("ATZMA_DAILY_REALIZED_LOSS_LIMIT", "1000")
+    # No remaining positions or unrealized loss: the old algebra always
+    # returned zero and allowed another cycle despite a $2,000 daily loss.
+    snapshot = {"equity": 98_000, "last_equity": 100_000, "position_details": {}}
+    assert trader._enforce_daily_loss_limits(snapshot, 98_000) is True
+
+
+def test_daily_gain_does_not_trigger_loss_limit(monkeypatch, multi_featured):
+    trader = _make_trader(monkeypatch, multi_featured)
+    snapshot = {"equity": 102_000, "last_equity": 100_000, "position_details": {"AAPL": {"unrealized_pl": 10_000}}}
+    assert trader._enforce_daily_loss_limits(snapshot, 102_000) is False
+
+
 def test_fetch_fresh_data_falls_back_to_broker_bars(monkeypatch, raw_ohlcv):
     trader = _build_trader()
     monkeypatch.setattr(trader.data_manager, "load_all", lambda force_download=True: (_ for _ in ()).throw(ValueError("yf down")))

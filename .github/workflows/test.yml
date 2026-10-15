@@ -28,3 +28,13 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest -q
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check scheduler and Edge API
+        run: |
+          deno test supabase/functions/api/autonomous_scheduler_test.ts
+          deno check supabase/functions/api/index.ts

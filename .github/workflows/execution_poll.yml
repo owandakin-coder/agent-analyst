@@ -38,6 +38,9 @@ on:
   push:
     paths:
       - '.github/workflows/execution_poll.yml'
+      - 'user_execution_worker.py'
+      - 'live_trader.py'
+      - 'broker_api.py'
 
 permissions:
   contents: read

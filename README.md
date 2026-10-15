@@ -19,6 +19,40 @@ ATZMA is an autonomous trading platform built around an RL decision engine, a pr
 
 ## Core Architecture
 
+### Unattended Paper execution
+
+The deployed Edge API schedules verified, enabled Paper connections every 15 minutes
+while Alpaca's fresh market clock says the exchange is open. The GitHub Actions
+`execution_poll.yml` worker picks up these requests without a browser, local process,
+or a Run Now click. Its self-chaining runs and independent cron backstop recover the
+poller between runs. GitHub startup and scheduling delays mean execution is not an
+exact-time guarantee; this deployment is not suitable for latency-sensitive trading.
+
+Scheduling is atomic and idempotent per connection/time slot. Any outstanding request,
+including an old request, blocks another scheduled request for that user. Pause,
+Emergency Stop and daily risk blocks apply. Live accounts are excluded, and the
+autonomous Python worker rejects mismatched or Live broker connections. Set broker
+metadata `auto_execution_enabled` to false to opt a Paper connection out.
+
+Daily loss checks use the broker's prior-close equity so restarting a worker does
+not erase the day's equity loss. Current unrealized P&L is tracked separately;
+it cannot by itself determine realized P&L for positions carried from earlier days.
+
+`/health` reports worker freshness, scheduler freshness, overdue requests and recent
+dead letters. A healthy idle poll is not evidence of an executed trade. When the market
+is closed the scheduler records a successful tick and queues nothing.
+
+Operations (credentials stay in the environment or untracked `.env`):
+
+```powershell
+python scripts/autonomous_ops.py status
+python scripts/autonomous_ops.py verify-scheduler
+python scripts/autonomous_ops.py restart-worker
+```
+
+For deployment, apply `deploy-db` before `deploy-api` using the same script. The SQL
+integration check uses rolled-back fixtures and never submits broker orders.
+
 - Frontend: [https://owandakin-coder.github.io/agent-analyst/](https://owandakin-coder.github.io/agent-analyst/)
 - Backend API: `supabase/functions/api/index.ts`
 - Local dashboard server: `dashboard_app/server.py`

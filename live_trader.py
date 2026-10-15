@@ -928,20 +928,31 @@ class LiveTrader:
             for details in position_details.values():
                 if isinstance(details, dict):
                     unrealized_pnl += float(details.get("unrealized_pl", 0.0) or 0.0)
-        baseline = float(snapshot.get("equity", net_worth) or net_worth) - unrealized_pnl
-        realized_pnl = float(net_worth) - baseline - unrealized_pnl
+        # The old baseline (current equity minus unrealized P&L) made
+        # realized_pnl identically zero. Broker prior-close equity survives
+        # process restarts; current equity cannot serve as a daily baseline.
+        baseline = float(snapshot.get("last_equity") or self.initial_capital)
+        # Current unrealized P&L includes positions carried from prior days;
+        # subtracting it from today's equity change is not realized daily P&L.
+        # Use a realized value only when supplied, and independently enforce
+        # the equity-change limit for the normal Alpaca account snapshot.
+        realized_pnl = float(snapshot.get("daily_realized_pnl", 0.0) or 0.0)
         realized_loss = max(0.0, -realized_pnl)
         unrealized_loss = max(0.0, -unrealized_pnl)
+        daily_equity_loss = max(0.0, baseline - float(net_worth))
         emit_risk_event("daily_loss_state", {
             "trading_day": datetime.now(timezone.utc).date().isoformat(),
             "baseline_equity": baseline,
             "current_equity": net_worth,
             "realized_pnl": realized_pnl,
             "unrealized_pnl": unrealized_pnl,
+            "daily_equity_loss": daily_equity_loss,
+            "pnl_basis": "prior_close_equity",
+            "daily_realized_pnl_available": "daily_realized_pnl" in snapshot,
             "realized_loss_limit": _daily_realized_loss_limit(),
             "unrealized_loss_limit": _daily_unrealized_loss_limit(),
         })
-        return realized_loss >= _daily_realized_loss_limit() or unrealized_loss >= _daily_unrealized_loss_limit()
+        return max(realized_loss, daily_equity_loss) >= _daily_realized_loss_limit() or unrealized_loss >= _daily_unrealized_loss_limit()
 
     def _snapshot_hash(self, payload: dict) -> str:
         import hashlib

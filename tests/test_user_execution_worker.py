@@ -184,7 +184,7 @@ def test_main_marks_failed_on_runtime_error(monkeypatch):
                     "api_key": "user-key",
                     "secret_key": "user-secret",
                     "base_url": "https://paper-api.alpaca.markets",
-                    "trading_mode": "live",
+                    "trading_mode": "paper",
                 }
             }
         return {"ok": True}
@@ -322,3 +322,29 @@ def test_worker_loop_runs_reconcile_poller(monkeypatch):
 
     assert calls["reconcile"] >= 1
     assert calls["poll"] >= 2
+
+
+@pytest.mark.parametrize("broker", [
+    {"trading_mode": "live", "base_url": "https://api.alpaca.markets"},
+    {"trading_mode": "paper", "base_url": "https://api.alpaca.markets"},
+])
+def test_autonomous_worker_rejects_live_or_mismatched_broker(broker):
+    failures = []
+    code = worker._execute_with_main("req", broker, lambda _: pytest.fail("executed"), lambda _: pytest.fail("skipped"), failures.append)
+    assert code == 1
+    assert failures == ["Autonomous worker only supports verified Paper accounts"]
+
+
+def test_worker_loop_recovers_from_network_failure(monkeypatch):
+    calls = []
+    monkeypatch.setattr(worker, "reconcile_open_orders", lambda **_: {})
+    def poll(**_):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ConnectionError("temporary outage")
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(worker, "poll_once", poll)
+    monkeypatch.setattr(worker.time, "sleep", lambda _: None)
+    with pytest.raises(KeyboardInterrupt):
+        worker.worker_loop()
+    assert len(calls) == 2
