@@ -2738,13 +2738,18 @@ function handleSyncStatusTap() {
   toast('Workspace refreshed');
 }
 
+let workspaceRefreshScope = null;
 async function refreshMemberWorkspace() {
   if (!authSession?.access_token) {
     applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
     return;
   }
+  const scope = currentUser?.id;
+  if (!scope || workspaceRefreshScope === scope) return;
+  workspaceRefreshScope = scope;
   try {
     const brokerPayload = await apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' });
+    if (currentUser?.id !== scope) return;
     applyBrokerConnectionUI(brokerPayload.connection || null);
     let jobsPayload = { jobs: [] };
     try {
@@ -2752,6 +2757,7 @@ async function refreshMemberWorkspace() {
     } catch (jobsError) {
       console.warn('refreshMemberWorkspace jobs:', jobsError.message);
     }
+    if (currentUser?.id !== scope) return;
     renderExecutionJobs(jobsPayload.jobs || []);
     if (hasVerifiedBrokerConnection()) {
       refreshResearchEvidence();
@@ -2762,9 +2768,15 @@ async function refreshMemberWorkspace() {
     }
   } catch (e) {
     console.warn('refreshMemberWorkspace:', e.message);
-    applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
+    if (currentUser?.id === scope) applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
+  } finally {
+    if (workspaceRefreshScope === scope) workspaceRefreshScope = null;
   }
 }
+
+setInterval(() => {
+  if (document.visibilityState === 'visible' && authSession?.access_token) refreshMemberWorkspace();
+}, 60000);
 
 async function openBrokerSheet() {
   if (!currentUser) {
