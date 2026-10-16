@@ -240,3 +240,5 @@ body.has-detail .tabbar { opacity:.7; }
 .readonly-controls {margin:12px 0 24px; color:var(--g2);font-size:12px;}
 .readonly-controls summary {cursor:pointer;padding:12px 0;}
 .readonly-controls p {line-height:1.8;margin-bottom:12px;}
+
+#pg-home > .workspace-guide, #pg-home > .readonly-controls { grid-column:1 / -1; }
