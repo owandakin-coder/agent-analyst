@@ -222,3 +222,21 @@ body.has-detail .tabbar { opacity:.7; }
 }
 [dir=rtl] .back-button svg { transform:rotate(180deg); }
 [dir=rtl] .live-badge { right:auto; left:24px; }
+
+/* Plain-language overview: source and next step remain visible before details. */
+.workspace-guide { margin: 0 0 22px; padding:24px; border:1px solid var(--line, #283237); background:linear-gradient(120deg,#142624,#121b22); border-radius:20px; text-align:right; }
+.guide-eyebrow { color:var(--green); font-size:11px; letter-spacing:.06em; margin:0 0 12px; }
+.workspace-guide h2 { font-size:24px; line-height:1.45; margin:0 0 20px; }
+.guide-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:20px; }
+.guide-grid article { min-width:0; border-inline-start:2px solid #3c645a; padding-inline-start:14px; }
+.guide-grid h3 { font-size:14px; margin:0 0 9px; }
+.guide-grid p,.guide-help p { color:var(--g2); font-size:13px; line-height:1.8; margin:5px 0; }
+.guide-grid small { color:var(--g2); font-size:11px; }
+.guide-help { margin-top:22px; border-top:1px solid #2b3939; padding-top:16px; }
+.guide-help summary { cursor:pointer; font-size:13px; color:var(--green); }
+.metric-progress .progress-track { display:none; }
+@media(max-width:700px) { .workspace-guide {padding:20px 17px;} .workspace-guide h2{font-size:21px;} .guide-grid {grid-template-columns:1fr;gap:16px;} }
+
+.readonly-controls {margin:12px 0 24px; color:var(--g2);font-size:12px;}
+.readonly-controls summary {cursor:pointer;padding:12px 0;}
+.readonly-controls p {line-height:1.8;margin-bottom:12px;}

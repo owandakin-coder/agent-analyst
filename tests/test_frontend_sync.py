@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("filename", ["index.html", "workspace.css", "workspace-navigation.js"])
+@pytest.mark.parametrize("filename", ["index.html", "workspace.css", "workspace-navigation.js", "workspace-status.js"])
 def test_root_and_dashboard_html_are_identical(filename):
     root_html = Path(filename).read_bytes()
     app_html = (Path("dashboard_app") / filename).read_bytes()

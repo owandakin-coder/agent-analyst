@@ -1149,7 +1149,7 @@ select.m-input { appearance:none; cursor:pointer; }
 }
 
 </style>
-<link rel="stylesheet" href="workspace.css?v=20261016">
+<link rel="stylesheet" href="workspace.css?v=20261016b">
 </head>
 <body class="booting">
 <a class="skip-link" href="#pg-home">Skip to workspace</a>
@@ -1229,6 +1229,35 @@ select.m-input { appearance:none; cursor:pointer; }
 
     <!-- ══ HOME ══ -->
     <div class="page active" id="pg-home">
+      <section class="workspace-guide" dir="rtl" aria-label="החשבון שלך במבט ברור">
+        <p class="guide-eyebrow">ATZMA · מסחר מדומה בלבד · PAPER</p>
+        <h2 id="guide-title">לוח המעקב של חשבון הדמו שלך</h2>
+        <div class="guide-grid">
+          <article><h3>האם המערכת עובדת עבורי?</h3><p id="guide-account">נתוני החשבון יופיעו לאחר התחברות ואימות ברוקר.</p><p id="guide-market">בודק את מצב השוק…</p></article>
+          <article><h3>מה קרה לאחרונה?</h3><p id="guide-activity">טרם נטענה פעילות אישית.</p><small id="guide-time"></small></article>
+          <article><h3>מה עליי לעשות עכשיו?</h3><p id="guide-next">התחבר, חבר חשבון Paper ובדוק את יומן הביצוע.</p></article>
+        </div>
+        <details class="guide-help"><summary>מה אפשר לעשות כאן, ומה משמעות הנתונים?</summary>
+          <p><strong>1. חיבור חשבון:</strong> התחבר וחבר חשבון Alpaca Paper משלך. מפתחות הברוקר אינם פרטי ההתחברות לאתר.</p>
+          <p><strong>2. מעקב:</strong> Positions מציג החזקות נוכחיות; Orders מציג מילויים שאושרו בברוקר; Analytics מציג נתוני תיק ומחקר, לפי המקור המסומן.</p>
+          <p><strong>3. בדיקת האוטומציה:</strong> ביומן הביצוע ניתן לראות בקשות, זמני ביצוע, החלטות וסיבות לדילוג. מחזור שהושלם ללא קנייה או מכירה יכול להיות תקין.</p>
+          <p><strong>4. הגדרות:</strong> אפשר לנהל את חיבור הברוקר ואת העדפות התצוגה. העדפת סיכון שנשמרה אינה אישור לשינוי מגבלות המנוע. פעולות הבקרה הכלליות מוצגות לקריאה בלבד במסך זה.</p>
+          <p>יתרה ורווח יומי הם נתוני חשבון Paper; הם עשויים לכלול הפקדות ופעולות ידניות. הם אינם הוכחה לרווחיות האסטרטגיה. מקף פירושו שאין נתון מאומת, ולא אפס.</p>
+        </details>
+      </section>
+      <div class="workspace-banner">
+        <div class="workspace-banner-head">
+          <div>
+            <div class="workspace-banner-title" id="workspace-banner-title">Secure your personal trading workspace</div>
+            <div class="workspace-banner-copy" id="workspace-banner-copy">Sign in first, then attach your Alpaca Paper account. Live portfolio data appears only after broker verification.</div>
+          </div>
+          <div class="workspace-banner-pill" id="workspace-banner-pill">Locked</div>
+        </div>
+        <div class="workspace-banner-actions">
+          <button class="workspace-banner-btn primary" id="workspace-banner-primary" onclick="handleWorkspacePrimaryAction()">Sign In</button>
+          <button class="workspace-banner-btn secondary" id="workspace-banner-secondary" onclick="handleWorkspaceSecondaryAction()">How it works</button>
+        </div>
+      </div>
 
       <div class="card hero card-pad">
         <div class="live-badge"><div class="ldot" id="live-dot"></div><span id="market-status">LOCKED</span></div>
@@ -1257,19 +1286,8 @@ select.m-input { appearance:none; cursor:pointer; }
         </div>
       </div>
 
-      <div class="workspace-banner">
-        <div class="workspace-banner-head">
-          <div>
-            <div class="workspace-banner-title" id="workspace-banner-title">Secure your personal trading workspace</div>
-            <div class="workspace-banner-copy" id="workspace-banner-copy">Sign in first, then attach your Alpaca Paper account. Live portfolio data appears only after broker verification.</div>
-          </div>
-          <div class="workspace-banner-pill" id="workspace-banner-pill">Locked</div>
-        </div>
-        <div class="workspace-banner-actions">
-          <button class="workspace-banner-btn primary" id="workspace-banner-primary" onclick="handleWorkspacePrimaryAction()">Sign In</button>
-          <button class="workspace-banner-btn secondary" id="workspace-banner-secondary" onclick="handleWorkspaceSecondaryAction()">How it works</button>
-        </div>
-      </div>
+
+
 
       <div class="quick-access" aria-label="Workspace shortcuts">
         <button onclick="openBrokerSheet()"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 4 7v5c0 5 8 9 8 9s8-4 8-9V7l-8-4Z" stroke="currentColor" stroke-width="1.6"/><path d="m8 12 3 3 5-6" stroke="currentColor" stroke-width="1.6"/></svg><span>Connection<small>Your Paper account</small></span></button>
@@ -1347,7 +1365,7 @@ select.m-input { appearance:none; cursor:pointer; }
       </div>
 
       </details>
-      <button class="ctl-btn ctl-btn-danger" id="btn-emergency-stop" style="margin-bottom:12px;" onclick="runControlAction('stop')">Emergency Stop</button>
+      <details class="readonly-controls"><summary>בקרה כללית · לקריאה בלבד</summary><p dir="rtl">כפתורים אלה אינם זמינים להפעלה מתוך המסך האישי. אין צורך ללחוץ Run Once כדי שהמחזורים המתוזמנים יפעלו.</p><button class="ctl-btn ctl-btn-danger" id="btn-emergency-stop" style="margin-bottom:12px;" onclick="runControlAction('stop')">Emergency Stop</button>
 
       <div class="action-strip">
         <button class="action-mini" id="btn-run-once" onclick="runControlAction('run_once')">
@@ -1363,6 +1381,7 @@ select.m-input { appearance:none; cursor:pointer; }
           <span>Resume trading</span>
         </button>
       </div>
+      </details>
 
       <div class="summary-grid">
         <div class="summary-card">
@@ -1395,24 +1414,24 @@ select.m-input { appearance:none; cursor:pointer; }
         <div class="summary-card">
           <div class="summary-card-pad">
             <div class="summary-header">
-              <div class="summary-title">Risk Guard</div>
-              <span class="health-pill" id="risk-pill">ENFORCED</span>
+              <div class="summary-title">Risk policy · limits not reported</div>
+              <span class="health-pill" id="risk-pill">NOT REPORTED</span>
             </div>
             <div class="metric-progress">
               <div class="progress-line">
-                <div class="progress-meta"><span>Max Position Size</span><span id="risk-maxpos">10%</span></div>
+                <div class="progress-meta"><span>Max Position Size</span><span id="risk-maxpos">לא דווח</span></div>
                 <div class="progress-track"><div class="progress-fill" id="risk-maxpos-fill" style="width:62%;"></div></div>
               </div>
               <div class="progress-line">
-                <div class="progress-meta"><span>Drawdown Stop</span><span id="risk-ddstop">20%</span></div>
+                <div class="progress-meta"><span>Drawdown Stop</span><span id="risk-ddstop">לא דווח</span></div>
                 <div class="progress-track"><div class="progress-fill" id="risk-ddstop-fill" style="width:22%;"></div></div>
               </div>
               <div class="progress-line">
-                <div class="progress-meta"><span>Daily Order Limit</span><span id="risk-orderlimit">6/day</span></div>
+                <div class="progress-meta"><span>Daily Order Limit</span><span id="risk-orderlimit">לא דווח</span></div>
                 <div class="progress-track"><div class="progress-fill" id="risk-orderlimit-fill" style="width:38%;"></div></div>
               </div>
               <div class="progress-line">
-                <div class="progress-meta"><span>Sync Guard</span><span id="risk-syncguard">Enabled</span></div>
+                <div class="progress-meta"><span>Sync Guard</span><span id="risk-syncguard">לא דווח</span></div>
                 <div class="progress-track"><div class="progress-fill" id="risk-syncguard-fill" style="width:92%;"></div></div>
               </div>
             </div>
@@ -1525,11 +1544,11 @@ select.m-input { appearance:none; cursor:pointer; }
 
       <div class="s-sec">
         <div class="s-sec-lbl">Trading Engine</div>
-        <div class="s-item" onclick="openRiskSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(255,159,10,.12)">⚖️</div><div><div class="s-txt-main">Risk Level</div><div class="s-txt-sub" id="risk-sub">Max drawdown threshold: 15%</div></div></div><span class="s-r" id="risk-val">Normal ›</span></div>
-        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🤖</div><div><div class="s-txt-main">Auto-Trade</div><div class="s-txt-sub">PPO agent · isolated worker execution</div></div></div><label class="tog"><input type="checkbox" id="tog-autotrade" checked onchange="togSetting(this,'auto_trade')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
-        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(255,59,48,.12)">🛑</div><div><div class="s-txt-main">Trailing Stop-Loss</div><div class="s-txt-sub">8% from peak · per ticker</div></div></div><label class="tog"><input type="checkbox" id="tog-stoploss" checked onchange="togSetting(this,'stop_loss')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
-        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(191,90,242,.12)">🎲</div><div><div class="s-txt-main">Kelly Criterion</div><div class="s-txt-sub">Fractional 0.25× sizing</div></div></div><label class="tog"><input type="checkbox" id="tog-kelly" checked onchange="togSetting(this,'kelly')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
-        <div class="s-item" onclick="openRegimeInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">📡</div><div><div class="s-txt-main">Regime Detector</div><div class="s-txt-sub">Bull · Sideways · Bear mode</div></div></div><span class="s-r" id="regime-badge" style="color:var(--green);font-size:12px">BULL ›</span></div>
+        <div class="s-item" onclick="openRiskSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(255,159,10,.12)">⚖️</div><div><div class="s-txt-main">Risk preference</div><div class="s-txt-sub" id="risk-sub">Preference only · engine limits not changed</div></div></div><span class="s-r" id="risk-val">Normal ›</span></div>
+        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🤖</div><div><div class="s-txt-main">Auto-Trade</div><div class="s-txt-sub">Saved preference only · does not start or pause execution</div></div></div><label class="tog"><input type="checkbox" id="tog-autotrade" checked onchange="togSetting(this,'auto_trade')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
+        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(255,59,48,.12)">🛑</div><div><div class="s-txt-main">Trailing Stop-Loss</div><div class="s-txt-sub">Saved preference only · engine policy not changed</div></div></div><label class="tog"><input type="checkbox" id="tog-stoploss" checked onchange="togSetting(this,'stop_loss')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
+        <div class="s-item"><div class="s-l"><div class="s-ico" style="background:rgba(191,90,242,.12)">🎲</div><div><div class="s-txt-main">Kelly Criterion</div><div class="s-txt-sub">Saved preference only · engine policy not changed</div></div></div><label class="tog"><input type="checkbox" id="tog-kelly" checked onchange="togSetting(this,'kelly')"><div class="tog-track"></div><div class="tog-knob"></div></label></div>
+        <div class="s-item" onclick="openRegimeInfo()"><div class="s-l"><div class="s-ico" style="background:rgba(10,132,255,.12)">📡</div><div><div class="s-txt-main">Regime Detector</div><div class="s-txt-sub">Bull · Sideways · Bear mode</div></div></div><span class="s-r" id="regime-badge" style="color:var(--green);font-size:12px">Not observed ›</span></div>
         <div class="s-item" onclick="openExecutionSheet()"><div class="s-l"><div class="s-ico" style="background:rgba(52,199,89,.12)">🚀</div><div><div class="s-txt-main">Execution Queue</div><div class="s-txt-sub" id="execution-sub">Sign in and verify a broker workspace first</div></div></div><span class="s-r" id="execution-status" style="color:var(--g2)">Locked</span></div>
       </div>
 
@@ -1789,17 +1808,17 @@ select.m-input { appearance:none; cursor:pointer; }
 <div class="sheet-overlay" id="risk-sheet" onclick="closeSheet('risk-sheet')">
   <div class="sheet-box" onclick="event.stopPropagation()">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">Risk Level</div>
+    <div class="sheet-title">Risk preference</div><p dir="rtl" style="color:var(--g2);line-height:1.7;margin-bottom:16px">העדפה שמורה בלבד. הבחירה כאן אינה משנה את מגבלות הסיכון של מנוע המסחר. מגבלות המנוע בפועל אינן מדווחות במסך זה.</p>
     <div class="risk-opt" id="risk-conservative" onclick="setRisk('Conservative','Max drawdown threshold: 8%')">
-      <div><div class="risk-opt-lbl">🟢 Conservative</div><div class="risk-opt-sub">Max drawdown: 8% · smaller positions</div></div>
+      <div><div class="risk-opt-lbl">🟢 Conservative</div><div class="risk-opt-sub">Saved preference · no engine limit change</div></div>
       <span id="rc-check" style="color:var(--green);font-size:18px;display:none">✓</span>
     </div>
     <div class="risk-opt active" id="risk-normal" onclick="setRisk('Normal','Max drawdown threshold: 15%')">
-      <div><div class="risk-opt-lbl">🟡 Normal</div><div class="risk-opt-sub">Max drawdown: 15% · balanced sizing</div></div>
+      <div><div class="risk-opt-lbl">🟡 Normal</div><div class="risk-opt-sub">Saved preference · no engine limit change</div></div>
       <span id="rn-check" style="color:var(--green);font-size:18px;">✓</span>
     </div>
     <div class="risk-opt" id="risk-aggressive" onclick="setRisk('Aggressive','Max drawdown threshold: 25%')">
-      <div><div class="risk-opt-lbl">🔴 Aggressive</div><div class="risk-opt-sub">Max drawdown: 25% · full Kelly sizing</div></div>
+      <div><div class="risk-opt-lbl">🔴 Aggressive</div><div class="risk-opt-sub">Saved preference · no engine limit change</div></div>
       <span id="ra-check" style="color:var(--green);font-size:18px;display:none">✓</span>
     </div>
   </div>
@@ -1878,6 +1897,7 @@ select.m-input { appearance:none; cursor:pointer; }
 
 <div id="toast"></div>
 
+<script src="workspace-status.js?v=20261016b"></script>
 <script>
 // ════════════════════════════════════════════════════════
 // NEURAL BACKGROUND CANVAS
@@ -2540,7 +2560,7 @@ function renderExecutionJobs(jobs) {
     setText('last-decision-main', latest.result.regime || 'Decision');
     setText('last-decision-sub', latest.result.decision_summary);
   }
-  setText('execution-sub', latest ? (formatExecutionStatus(latest.status) + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at || new Date().toISOString())) : 'No personal runs yet');
+  setText('execution-sub', latest ? (formatExecutionStatus(latest.status) + ' · ' + fmtOrderTime(latest.requested_at || latest.created_at)) : 'No personal runs yet');
   const root = document.getElementById('execution-jobs-list');
   if (!root) return;
   if (!currentExecutionJobs.length) {
@@ -2551,8 +2571,8 @@ function renderExecutionJobs(jobs) {
   root.innerHTML = currentExecutionJobs.map(job => {
     const status = formatExecutionStatus(job.status);
     const color = job.status === 'succeeded' ? 'var(--green)' : job.status === 'failed' ? 'var(--red)' : job.status === 'running' ? 'var(--blue)' : 'var(--orange)';
-    const when = fmtOrderTime(job.requested_at || job.created_at || new Date().toISOString());
-    const detail = esc(job.error_text || (((job.requested_mode || 'paper') + '').toUpperCase() + ' · ' + when));
+    const when = fmtOrderTime(job.requested_at || job.created_at);
+    const detail = esc([job.trigger_source || 'Source not reported', job.result?.decision_summary || job.result?.skip_reason || job.result?.reason || job.error_text, ((job.requested_mode || 'paper') + '').toUpperCase(), when].filter(Boolean).join(' · '));
     return `<div class="profile-row"><div><div style="font-size:13px;font-weight:700;">${esc(job.job_type || 'trade_once')}</div><div style="font-size:11px;color:var(--g3);margin-top:3px;">${detail}</div></div><span class="profile-val" style="color:${color};text-transform:uppercase;">${esc(status)}</span></div>`;
   }).join('');
   updateWorkspaceBanner();
@@ -2643,53 +2663,23 @@ function formatExecutionStatus(status) {
 }
 
 function updateWorkspaceBanner() {
-  const titleEl = document.getElementById('workspace-banner-title');
-  const copyEl = document.getElementById('workspace-banner-copy');
-  const pillEl = document.getElementById('workspace-banner-pill');
-  const primaryEl = document.getElementById('workspace-banner-primary');
-  const secondaryEl = document.getElementById('workspace-banner-secondary');
-  if (!titleEl || !copyEl || !pillEl || !primaryEl || !secondaryEl) return;
-
-  if (!currentUser) {
-    titleEl.textContent = 'Secure your personal trading workspace';
-    copyEl.textContent = 'Sign in first, then attach your Alpaca Paper account. Live portfolio data appears only after broker verification.';
-    pillEl.textContent = 'Locked';
-    pillEl.style.color = 'var(--g2)';
-    pillEl.style.background = 'rgba(255,255,255,0.06)';
-    primaryEl.textContent = 'Sign In';
-    secondaryEl.textContent = 'How it works';
-    return;
-  }
-
-  if (!hasVerifiedBrokerConnection()) {
-    titleEl.textContent = 'Broker connection required';
-    copyEl.textContent = 'Your account is ready. Connect and verify your own Alpaca Paper workspace to unlock live positions, orders, and execution.';
-    pillEl.textContent = 'Setup';
-    pillEl.style.color = 'var(--orange)';
-    pillEl.style.background = 'rgba(255,159,10,0.14)';
-    primaryEl.textContent = 'Connect Broker';
-    secondaryEl.textContent = 'View Queue';
-    return;
-  }
-
-  if (hasOpenExecutionJob()) {
-    titleEl.textContent = 'Execution in progress';
-    copyEl.textContent = 'A trade cycle is already queued or running for this workspace. Monitor the queue instead of sending another run.';
-    pillEl.textContent = 'Active';
-    pillEl.style.color = 'var(--blue)';
-    pillEl.style.background = 'rgba(10,132,255,0.14)';
-    primaryEl.textContent = 'Open Queue';
-    secondaryEl.textContent = 'Refresh';
-    return;
-  }
-
-  titleEl.textContent = 'Workspace ready';
-  copyEl.textContent = 'Your broker is verified and live data is flowing. You can run a paper cycle now or manage trading state from the control panel.';
-  pillEl.textContent = 'Ready';
-  pillEl.style.color = 'var(--green)';
-  pillEl.style.background = 'rgba(52,199,89,0.14)';
-  primaryEl.textContent = 'Run Once';
-  secondaryEl.textContent = 'View Queue';
+  if (!window.WorkspaceStatus) return;
+  const state = WorkspaceStatus.describe({ signedIn: !!currentUser, verified: hasVerifiedBrokerConnection(),
+    health: runtimeHealth, controlAt: controlObservedAt, accountAt: accountObservedAt,
+    paused: controlState.tradingStatus === 'Paused', emergency: controlState.emergency,
+    jobs: currentExecutionJobs, jobsLoaded: jobsObservedScope === currentUser?.id && !!currentUser });
+  setText('guide-title', state.title);
+  setText('guide-account', state.account + (accountObservedAt && currentUser && hasVerifiedBrokerConnection() ? ' · ' + new Date(accountObservedAt).toLocaleTimeString('he-IL') : ''));
+  setText('guide-market', state.market);
+  setText('guide-activity', state.activity);
+  setText('guide-time', state.jobTime && Number.isFinite(Date.parse(state.jobTime)) ? 'זמן הרישום: ' + new Date(state.jobTime).toLocaleString('he-IL') : '');
+  setText('guide-next', state.next);
+  setText('meta-market-open', state.market);
+  setText('workspace-banner-title', !currentUser ? 'הצעד הראשון: התחברות' : !hasVerifiedBrokerConnection() ? 'הצעד הבא: חיבור ואימות ברוקר' : 'הפעילות האישית שלך');
+  setText('workspace-banner-copy', !currentUser ? 'התחבר כדי להציג את החשבון והפעילות שלך באופן מאובטח.' : !hasVerifiedBrokerConnection() ? 'לאחר האימות ייטענו היתרה, ההחזקות והעסקאות מחשבון הדמו שלך.' : 'פתח את יומן הביצוע כדי לראות מה התבצע בפועל ומדוע מחזור דולג. אין צורך לשלוח עסקה כדי לבדוק שהמערכת פועלת.');
+  setText('workspace-banner-pill', 'PAPER');
+  setText('workspace-banner-primary', !currentUser ? 'התחברות' : !hasVerifiedBrokerConnection() ? 'חיבור ברוקר' : 'יומן ביצוע ומחקר');
+  setText('workspace-banner-secondary', 'הסבר על המסך');
 }
 
 function handleWorkspacePrimaryAction() {
@@ -2705,24 +2695,13 @@ function handleWorkspacePrimaryAction() {
     openExecutionSheet();
     return;
   }
-  runControlAction('run_once');
+  openExecutionSheet();
 }
 
 function handleWorkspaceSecondaryAction() {
-  if (!currentUser) {
-    toast('Sign in, verify broker, then run paper trades.');
-    return;
-  }
-  if (!hasVerifiedBrokerConnection()) {
-    openExecutionSheet();
-    return;
-  }
-  if (hasOpenExecutionJob()) {
-    refreshMemberWorkspace();
-    toast('Workspace refreshed');
-    return;
-  }
-  openExecutionSheet();
+  const help = document.querySelector('.guide-help');
+  help.open = !help.open;
+  help.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
 function handleTradingStatusTap() {
@@ -2788,14 +2767,16 @@ async function refreshMemberWorkspace() {
     const brokerPayload = await apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' });
     if (currentUser?.id !== scope) return;
     applyBrokerConnectionUI(brokerPayload.connection || null);
-    let jobsPayload = { jobs: [] };
+    let jobsPayload = null;
     try {
       jobsPayload = await apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' });
     } catch (jobsError) {
       console.warn('refreshMemberWorkspace jobs:', jobsError.message);
     }
     if (currentUser?.id !== scope) return;
-    renderExecutionJobs(jobsPayload.jobs || []);
+    jobsObservedScope = jobsPayload ? scope : null;
+    if (jobsPayload) renderExecutionJobs(jobsPayload.jobs || []);
+    updateWorkspaceBanner();
     if (hasVerifiedBrokerConnection()) {
       refreshResearchEvidence();
       fetchAlpacaData();
@@ -3000,6 +2981,10 @@ let ALL_TRADES = [];
 let portBase = 0;
 let portOpen = 0;
 let trades = 0;
+let runtimeHealth = null;
+let controlObservedAt = null;
+let accountObservedAt = null;
+let jobsObservedScope = null;
 let controlState = {
   tradingStatus: 'Locked',
   tradingSub: 'Sign in and verify a broker connection to activate trading.',
@@ -3024,6 +3009,8 @@ function hasVerifiedBrokerConnection() {
 
 function resetPortfolioState() {
   alpacaAccount = null;
+  accountObservedAt = null;
+  jobsObservedScope = null;
   STOCKS = [];
   ALL_TRADES = [];
   portBase = 0;
@@ -3149,11 +3136,11 @@ function updateControlSurface() {
   } else if (controlState.tradingStatus === 'Paused') {
     setPill('ctl-trading-pill', 'PAUSED', 'warn');
   } else {
-    setPill('ctl-trading-pill', 'ACTIVE');
+    setPill('ctl-trading-pill', brokerVerified && controlObservedAt && WorkspaceStatus.fresh(controlObservedAt, Date.now()) ? 'ALLOWED' : 'NOT VERIFIED', 'warn');
   }
 
   const syncMode = controlState.sync === 'Degraded' ? 'warn' : 'ok';
-  setPill('ctl-sync-pill', guestLocked ? 'LOCKED' : controlState.sync === 'Degraded' ? 'CHECK BROKER' : 'BROKER OK', guestLocked ? 'warn' : syncMode);
+  setPill('ctl-sync-pill', guestLocked ? 'LOCKED' : accountObservedAt && WorkspaceStatus.fresh(accountObservedAt, Date.now()) ? 'BROKER DATA' : 'NOT VERIFIED', guestLocked || !accountObservedAt ? 'warn' : syncMode);
   setPill('ctl-executor-pill', 'PRIMARY');
   setPill('ctl-broker-pill', (guestLocked ? 'LOCKED' : controlState.mode.toUpperCase()), controlState.broker === 'Connected' ? 'ok' : 'warn');
   if (guestLocked) {
@@ -3161,14 +3148,17 @@ function updateControlSurface() {
   } else if (!brokerVerified) {
     setPill('decision-pill', 'ONBOARDING', 'warn');
   } else {
-    setPill('decision-pill', controlState.emergency ? 'MODEL BLOCKED' : 'MODEL LIVE', controlState.emergency ? 'stop' : 'ok');
+    setPill('decision-pill', currentExecutionJobs.some(job => job.result?.decision_summary) ? 'RECORDED' : 'NO DECISION', 'warn');
   }
-  setPill('risk-pill', 'ENFORCED', controlState.emergency ? 'warn' : 'ok');
-  const controlActionsEnabled = !guestLocked && brokerVerified && !!controlState.canDispatch;
+  setPill('risk-pill', 'NOT REPORTED', 'warn');
+  ['risk-maxpos','risk-ddstop','risk-orderlimit','risk-syncguard'].forEach(id => setText(id, 'לא דווח'));
+  updateWorkspaceBanner();
+  const controlActionsEnabled = false; // Global controls require an explicitly authorized operator surface.
   const runLockedByQueue = hasOpenExecutionJob();
   const runButton = document.getElementById('btn-run-once');
   if (runButton) {
     const runEnabled = controlActionsEnabled && !runLockedByQueue && !controlState.emergency;
+    runButton.title = 'בקרה כללית לקריאה בלבד. הפעילות האישית מתועדת ביומן הביצוע.';
     runButton.disabled = !runEnabled;
     runButton.style.opacity = runEnabled ? '1' : '0.45';
     runButton.style.cursor = runEnabled ? 'pointer' : 'not-allowed';
@@ -3176,6 +3166,7 @@ function updateControlSurface() {
   ['btn-pause', 'btn-resume', 'btn-emergency-stop'].forEach(id => {
     const button = document.getElementById(id);
     if (!button) return;
+    button.title = 'בקרה כללית לקריאה בלבד במסך זה';
     button.disabled = !controlActionsEnabled;
     button.style.opacity = controlActionsEnabled ? '1' : '0.45';
     button.style.cursor = controlActionsEnabled ? 'pointer' : 'not-allowed';
@@ -3197,15 +3188,15 @@ function applyBackendControlState(payload) {
   controlState.tradingSub = payload.note || (controlState.tradingStatus === 'Running'
     ? 'Paper engine is allowed to execute.'
     : 'Trading control is active.');
-  controlState.sync = 'Synced';
-  controlState.syncSub = 'Control plane updated ' + fmtOrderTime(payload.updated_at || new Date().toISOString());
+  // Control-plane health and broker account freshness are separate evidence.
+
   controlState.executor = payload.executor_label || 'Worker Pool';
   controlState.canDispatch = !!payload.can_dispatch;
-  controlState.executorSub = payload._source === 'remote'
+  controlState.executorSub = ['control_state', 'supabase_db', 'remote'].includes(payload._source)
     ? 'Remote execution control is synchronized with the live worker pool.'
     : 'Remote control state is unavailable. Trading controls are read-only until sync returns.';
-  setText('control-note', payload._source === 'remote'
-    ? 'Your workspace is synced with the live execution service.'
+  setText('control-note', ['control_state', 'supabase_db', 'remote'].includes(payload._source)
+    ? 'Control state received. Global controls are read-only here; review personal cycles in the execution journal.'
     : 'Control plane sync is degraded. New actions stay blocked until the remote state returns.');
   updateControlSurface();
   renderHomeAudit();
@@ -3215,11 +3206,14 @@ async function fetchControlState() {
   try {
     const res = await fetch(API_BASE + '/control', { cache:'no-store' });
     const payload = await res.json();
-    if (payload.error) throw new Error(payload.error);
+    if (!res.ok || payload.error) throw new Error(payload.error || "Control request failed");
+    controlObservedAt = ['control_state', 'supabase_db', 'remote'].includes(payload._source) ? new Date().toISOString() : null;
     applyBackendControlState(payload);
   } catch (e) {
     console.warn('fetchControlState:', e.message);
+    controlObservedAt = null;
     setText('control-note', 'Control plane is unavailable from this client right now.');
+    updateWorkspaceBanner();
   }
 }
 
@@ -3289,7 +3283,7 @@ setInterval(() => {
   const delta = (Math.random() - 0.46) * 18;
   portBase += delta;
   const chg = portBase - portOpen;
-  const pct  = (chg / portOpen) * 100;
+  const pct  = portOpen > 0 ? (chg / portOpen) * 100 : null;
   const up   = chg >= 0;
   const sign = up ? '+' : '-';
   const col  = up ? 'var(--green)' : 'var(--red)';
@@ -3353,6 +3347,10 @@ async function fetchAlpacaData() {
     applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
     return;
   }
+  const scope = currentUser?.id;
+  const connection = currentBrokerConnection?.id;
+  const token = authSession.access_token;
+  const stillScoped = () => currentUser?.id === scope && currentBrokerConnection?.id === connection && authSession?.access_token === token && hasVerifiedBrokerConnection();
   try {
     const [accRes, posRes] = await Promise.all([
       fetch(API_BASE + '/account',   { cache:'no-store', headers: getAuthHeaders() }),
@@ -3360,14 +3358,18 @@ async function fetchAlpacaData() {
     ]);
     const acc = await accRes.json();
     const positions = await posRes.json();
-    if (acc.error) throw new Error(acc.error);
+    if (!stillScoped()) return;
+    if (!accRes.ok || !posRes.ok || acc.error || !Array.isArray(positions)) throw new Error('Broker account or positions unavailable');
+    if (['equity','last_equity','buying_power'].some(key => !Number.isFinite(acc[key]))) throw new Error('Incomplete broker account values');
+    if (positions.some(p => ['qty','current_price','market_value','unrealized_pl'].some(key => !Number.isFinite(p[key])))) throw new Error('Incomplete broker position values');
+    accountObservedAt = new Date().toISOString();
 
     // Save account data for Settings
     alpacaAccount = acc;
 
     // Portfolio value from real account
     portBase = acc.equity;
-    portOpen = acc.last_equity || acc.equity;
+    portOpen = acc.last_equity;
     lastPort = portBase;
 
     controlState.mode = (acc.account_type || 'paper').toString().toUpperCase() === 'LIVE' ? 'Live' : 'Paper';
@@ -3414,6 +3416,8 @@ async function fetchAlpacaData() {
     setDataStatus('LIVE', t);
 
   } catch(e) {
+    if (!stillScoped()) return;
+    accountObservedAt = null;
     console.warn('Alpaca fetch failed:', e.message);
     if (String(e.message).includes('Verified broker connection required') || String(e.message).includes('Unauthorized')) {
       applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
@@ -3451,7 +3455,7 @@ function updateHeroUI() {
   setText('summary-day-pnl', sign + fmtMoney(chg));
 
   const pctEl = document.getElementById('h-pct');
-  pctEl.textContent = `(${sign}${Math.abs(pct).toFixed(2)}%) Today`;
+  pctEl.textContent = pct === null ? 'Daily return unavailable' : `(${sign}${Math.abs(pct).toFixed(2)}%) Today`;
   pctEl.style.color = col;
   setText('summary-equity', fmtPort(portBase));
 
@@ -3466,16 +3470,7 @@ function updateHeroUI() {
   controlState.lastDecision = latestDecision?.result?.regime || 'Awaiting decision';
   controlState.lastDecisionSub = latestDecision?.result?.decision_summary || 'No recorded model decision yet.';
 
-  setRiskCard('risk-maxpos', STOCKS.length ? Math.min(20, Math.max(6, Math.round(100 / Math.max(STOCKS.length, 1)) + 6)) + '%' : '20%', 'Single-name exposure cap.');
-  setRiskCard('risk-ddstop', '15%', 'Trading halts beyond this loss.');
-  setRiskCard('risk-orderlimit', Math.max(4, Math.min(10, STOCKS.length + 2)) + '/day', 'Execution capped during normal hours.');
-  setRiskCard('risk-syncguard', controlState.sync === 'Degraded' ? 'Watch' : 'Enabled', controlState.sync === 'Degraded' ? 'Broker sync needs attention.' : 'Broker truth overrides local state.');
-  setText('summary-buying-power', alpacaAccount ? '$' + Number(alpacaAccount.buying_power || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '$0.00');
-  const maxPosPct = STOCKS.length ? Math.min(62, Math.max(18, Math.round(100 / STOCKS.length) * 3)) : 24;
-  document.getElementById('risk-maxpos-fill').style.width = maxPosPct + '%';
-  document.getElementById('risk-ddstop-fill').style.width = Math.min(100, Math.abs(pct) * 8).toFixed(0) + '%';
-  document.getElementById('risk-orderlimit-fill').style.width = Math.min(100, Math.max(12, trades * 6)).toFixed(0) + '%';
-  document.getElementById('risk-syncguard-fill').style.width = controlState.sync === 'Degraded' ? '38%' : '92%';
+  setText('summary-buying-power', alpacaAccount ? fmtPort(alpacaAccount.buying_power) : '—');
   updateControlSurface();
 }
 
@@ -3486,11 +3481,11 @@ function setDataStatus(mode, time) {
   if (!dot || !lbl) return;
   if (mode === 'LIVE') {
     dot.style.background = controlState.emergency ? 'var(--red)' : controlState.tradingStatus === 'Paused' ? 'var(--orange)' : 'var(--green)';
-    lbl.textContent = controlState.emergency ? 'STOPPED' : controlState.tradingStatus.toUpperCase();
+    lbl.textContent = 'PAPER DATA';
     lbl.style.color = controlState.emergency ? 'var(--red)' : controlState.tradingStatus === 'Paused' ? 'var(--orange)' : 'var(--green)';
     if (sub && time) sub.textContent = 'Broker sync · ' + time;
     controlState.syncSub = 'Last broker sync at ' + time + '.';
-    setText('meta-market-open', 'Markets Open');
+    updateWorkspaceBanner();
     setText('meta-sync-line', 'Synced ' + time);
   } else if (mode === 'LOCKED') {
     dot.style.background = 'var(--g3)';
@@ -3818,18 +3813,10 @@ function renderHomeAudit() {
     controlState.lastOrder = top.side + ' ' + top.t + ' x' + top.shares;
     controlState.lastOrderSub = fmtOrderTime(top.raw_time) + ' at $' + top.price.toFixed(2) + ' · ticket $' + top.amt.toFixed(0);
   } else {
-    rows.push({
-      time: 'Now',
-      title: controlState.tradingStatus === 'Running' ? 'Awaiting next cycle' : 'Execution paused',
-      meta: controlState.tradingSub,
-      tag: controlState.emergency ? 'STOP' : 'STATE',
-    });
-    rows.push({
-      time: 'Sync',
-      title: controlState.sync,
-      meta: controlState.syncSub,
-      tag: controlState.sync === 'Degraded' ? 'WARN' : 'OK',
-    });
+    rows.push({ time: '—', title: 'אין עדיין מילויים מאומתים מהברוקר',
+      meta: 'עסקאות יופיעו רק לאחר אישור מילוי מהברוקר. מחזור ללא עסקה מוצג ביומן הביצוע.', tag: 'PAPER' });
+    controlState.lastOrder = 'No confirmed fills loaded';
+    controlState.lastOrderSub = 'Broker fills appear here; execution requests are listed in the journal.';
   }
 
   listEl.innerHTML = rows.map(row => `
@@ -3856,10 +3843,15 @@ async function loadAlpacaTrades() {
     renderHomeAudit();
     return;
   }
+  const scope = currentUser?.id;
+  const connection = currentBrokerConnection?.id;
+  const token = authSession.access_token;
+  const stillScoped = () => currentUser?.id === scope && currentBrokerConnection?.id === connection && authSession?.access_token === token && hasVerifiedBrokerConnection();
   try {
     const res = await fetch(API_BASE + '/orders', { cache:'no-store', headers: getAuthHeaders() });
     const orders = await res.json();
-    if (orders.error) throw new Error(orders.error);
+    if (!stillScoped()) return;
+    if (!res.ok || !Array.isArray(orders) || orders.some(o => !Number.isFinite(o.qty) || !Number.isFinite(o.price) || !o.time)) throw new Error('Confirmed fills unavailable');
     ALL_TRADES = orders.map(o => ({
       side:     o.side.toUpperCase(),
       t:        o.symbol,
@@ -3877,6 +3869,7 @@ async function loadAlpacaTrades() {
     renderTrades(tradeFilter);
     renderHomeAudit();
   } catch(e) {
+    if (!stillScoped()) return;
     console.warn('loadAlpacaTrades:', e.message);
     if (String(e.message).includes('Verified broker connection required') || String(e.message).includes('Unauthorized')) {
       ALL_TRADES = [];
@@ -4018,7 +4011,7 @@ function addAlert() {
 // TAB SWITCHING
 // ════════════════════════════════════════════════════════
 const HDR = {
-  home:     ['Overview',  'Your trading workspace, at a glance'],
+  home:     ['מבט על', 'מצב החשבון, הפעילות והצעד הבא'],
   charts:   ['Analytics',  'Your portfolio, in perspective'],
   trades:   ['Orders',     'Broker fills and execution history'],
   settings: ['Settings',   'Your account, preferences and connections'],
@@ -4118,7 +4111,7 @@ function togSetting(el, key) {
   if (key === 'auto_trade') {
     runControlAction(el.checked ? 'resume' : 'pause');
   }
-  toast((labels[key] || key) + ': ' + (el.checked ? 'ON ✓' : 'OFF'));
+  toast('Preference saved only · engine policy not changed');
 }
 
 // ── Push Alerts ──
@@ -4269,26 +4262,20 @@ function applyRisk(level, sub, save) {
   document.getElementById('risk-' + key).classList.add('active');
   document.getElementById('r' + key[0] + '-check').style.display = 'inline';
   document.getElementById('risk-val').textContent = level + ' ›';
-  document.getElementById('risk-sub').textContent = sub;
+  document.getElementById('risk-sub').textContent = 'Saved preference only · engine limits not changed';
   if (save) { saveS('risk_level', level); saveS('risk_sub', sub); toast('Risk Level: ' + level + ' ✓'); }
 }
 
 // ── Regime ──
 function openRegimeInfo() {
   openSheet('regime-sheet');
-  const chg = portBase - portOpen;
-  const pct = portOpen > 0 ? (chg / portOpen * 100) : 0;
-  let regime = 'SIDEWAYS', col = 'var(--orange)';
-  let mult = '1.0×';
-  if (pct > 0.5)  { regime = 'BULL';  col = 'var(--green)';  mult = '1.2×'; }
-  if (pct < -0.5) { regime = 'BEAR';  col = 'var(--red)';    mult = '0.6×'; }
-  document.getElementById('reg-current').textContent = regime;
-  document.getElementById('reg-current').style.color = col;
-  document.getElementById('regime-badge').textContent = regime + ' ›';
-  document.getElementById('regime-badge').style.color = col;
-  document.getElementById('reg-today').textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
-  document.getElementById('reg-winrate').textContent = '62.4% (last 247 trades)';
-  document.getElementById('reg-mult').textContent = mult;
+  const decision = currentExecutionJobs.find(job => job.result?.regime);
+  const regime = decision?.result.regime || 'Not observed';
+  setText('reg-current', regime);
+  setText('regime-badge', regime + ' ›');
+  setText('reg-today', 'See account daily change');
+  setText('reg-winrate', 'Not verified');
+  setText('reg-mult', 'Not reported');
   // Fetch SPY
   fetch(API_BASE + '/quotes?symbols=SPY', {cache:'no-store'})
     .then(r => r.json())
@@ -4419,6 +4406,17 @@ loadSettings();
 fetchRetrainData();
 updateControlSurface();
 loadAlpacaTrades();
+async function fetchRuntimeHealth() {
+  try {
+    const response = await fetch(API_BASE + '/health', {cache:'no-store'});
+    const payload = await response.json();
+    if (!response.ok || payload.ok !== true) throw new Error('Health unavailable');
+    runtimeHealth = payload;
+  } catch (_) { runtimeHealth = null; }
+  updateWorkspaceBanner();
+}
+fetchRuntimeHealth();
+setInterval(fetchRuntimeHealth, 30000);
 fetchControlState();
 setInterval(fetchControlState, 30000);
 
@@ -4543,6 +4541,6 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
 }
 </script>
-<script src="workspace-navigation.js?v=20261016"></script>
+<script src="workspace-navigation.js?v=20261016b"></script>
 </body>
 </html>

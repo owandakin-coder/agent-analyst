@@ -223,6 +223,7 @@
   setExecutionSection('evidence');
   d.getElementById('workspace-refresh').addEventListener('click',()=>{
     fetchControlState();
+    fetchRuntimeHealth();
     if(currentUser)refreshMemberWorkspace();
     else toast('Sign in to refresh your personal account.');
   });

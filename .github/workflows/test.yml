@@ -30,7 +30,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Check workspace navigation
-        run: node --test tests/workspace-navigation.test.cjs
+        run: node --test tests/*.test.cjs
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
