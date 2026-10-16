@@ -16,7 +16,7 @@ PROJECT = "sofowpweliticltlbxrj"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["status", "audit-research", "verify-audit", "deploy-db", "deploy-api", "verify-scheduler", "verify-research", "restart-worker", "train-candidate"])
+    parser.add_argument("action", choices=["status", "audit-research", "verify-audit", "verify-daily-risk", "deploy-db", "deploy-api", "verify-scheduler", "verify-research", "restart-worker", "train-candidate"])
     args = parser.parse_args()
     if args.action in {"restart-worker", "train-candidate"}:
         restart_worker("retrain.yml" if args.action == "train-candidate" else "execution_poll.yml")
@@ -37,7 +37,7 @@ def main() -> None:
             return json.load(response)
 
     if args.action == "deploy-db":
-        sql = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "supabase/migrations").glob("20261015*.sql")))
+        sql = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "supabase/migrations").glob("*.sql")) if path.name >= "20261015")
         query("begin;\n" + sql + "\ncommit;")
         print("Autonomous scheduler migration applied")
     elif args.action == "deploy-api":
@@ -57,6 +57,8 @@ def main() -> None:
         print(query(sql))
     elif args.action == "verify-research":
         print(query((ROOT / "tests/research_state.sql").read_text(encoding="utf-8")))
+    elif args.action == "verify-daily-risk":
+        print(query((ROOT / "tests/daily_risk_atomic.sql").read_text(encoding="utf-8")))
     elif args.action == "verify-audit":
         audit_sql = (ROOT / "scripts/research_audit.sql").read_text(encoding="utf-8")
         audit_sql = audit_sql.replace("where created_at >=", "where id=(select request_id from audit_fixture_scope) and created_at >=")

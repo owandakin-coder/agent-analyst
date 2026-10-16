@@ -78,6 +78,7 @@ npx --yes deno test supabase/functions/api/*_test.ts
 npx --yes deno check supabase/functions/api/index.ts
 python scripts/autonomous_ops.py verify-scheduler
 python scripts/autonomous_ops.py verify-research
+python scripts/autonomous_ops.py verify-daily-risk
 python scripts/autonomous_ops.py verify-audit
 python scripts/autonomous_ops.py audit-research
 ```
@@ -92,6 +93,17 @@ Deploy database changes before the Edge API, then publish the worker/UI commit.
 The GitHub watchdog and the additional chat monitor check execution freshness.
 Forward validation requires real elapsed market sessions and cannot be replaced
 by unit tests, a synthetic fixture, or an empty successful poll.
+
+Daily risk observations use an atomic user/day upsert. The original baseline,
+breach timestamp and reset-required latch survive subsequent normal observations;
+only the separate authorized reset flow can clear an existing stop. Unreadable
+broker secrets terminate an owned lease with a safe reverification error rather
+than repeatedly expiring it. Never replay failed requests or clear dead letters
+to make health green. `recent_dead_letters` includes historical failures for 24h.
+Duplicate-order attempts append evidence without changing the original broker
+fill. Existing ledger references must match user, connection and broker account.
+Unreadable connections require a complete replacement Paper key pair and fresh
+verification; the monitor must not copy credentials between accounts.
 
 Each monitoring pass should also run `audit-research`. It inspects the last
 24 hours (from the research deployment on 2026-10-16) and exits nonzero for a

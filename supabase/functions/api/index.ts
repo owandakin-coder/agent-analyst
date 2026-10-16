@@ -5,6 +5,8 @@
 
 import { isFreshOpenClock, schedulingAllowed } from "./autonomous_scheduler.ts";
 import { summarizeFills } from "./research_evidence.ts";
+import { readStoredBrokerSecrets, replacementBrokerSecrets } from "./broker_secrets.ts";
+import { brokerOrderEventPolicy } from "./broker_order_events.ts";
 import { ownsLease } from "./execution_lease.ts";
 
 const PROJECT_REF = "sofowpweliticltlbxrj";
@@ -67,6 +69,7 @@ type BrokerConnectionRow = {
   kms_key_id?: string | null;
   encrypted_data_key?: string | null;
   rotated_at?: string | null;
+  updated_at?: string;
 };
 
 type ExecutionRequestRow = {
@@ -594,23 +597,9 @@ async function appendRiskEvent(userId: string, executionRequestId: string, event
   });
   if (eventType === "daily_loss_state" || eventType === "daily_loss_breached") {
     const tradingDay = typeof payload.trading_day === "string" ? payload.trading_day : new Date().toISOString().slice(0, 10);
-    await restAdmin("/daily_risk_state", {
-      method: "POST",
-      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify({
-        user_id: userId,
-        trading_day: tradingDay,
-        baseline_equity: Number(payload.baseline_equity ?? 0),
-        current_equity: Number(payload.current_equity ?? 0),
-        realized_pnl: Number(payload.realized_pnl ?? 0),
-        unrealized_pnl: Number(payload.unrealized_pnl ?? 0),
-        realized_loss_limit: Number(payload.realized_loss_limit ?? 0),
-        unrealized_loss_limit: Number(payload.unrealized_loss_limit ?? 0),
-        breached: eventType === "daily_loss_breached",
-        breached_at: eventType === "daily_loss_breached" ? new Date().toISOString() : null,
-        reset_required: eventType === "daily_loss_breached",
-        metadata: payload,
-      }),
+    await restRpc("record_daily_risk_event", {
+      p_user_id: userId, p_trading_day: tradingDay,
+      p_breached: eventType === "daily_loss_breached", p_payload: payload,
     });
   }
 }
@@ -636,6 +625,7 @@ async function upsertBrokerOrder(request: ExecutionRequestRow, payload: JsonMap)
   const existingRes = await restAdmin(`/broker_orders?client_order_id=eq.${encodeURIComponent(clientOrderId)}&select=*`);
   const existingRows = await readJsonSafe<BrokerOrderRow[] | JsonMap>(existingRes);
   if (existingRes.ok && Array.isArray(existingRows) && existingRows[0]) {
+    brokerOrderEventPolicy(request, existingRows[0], null);
     return existingRows[0];
   }
   const res = await restAdmin("/broker_orders", {
@@ -1309,13 +1299,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (path === "/me/broker" && req.method === "GET") {
       const user = await requireUser(req);
       const row = await fetchBrokerConnection(String(user.id));
-      let apiKey = "";
-      let secretKey = "";
-      if (row) {
-        apiKey = await decryptSecret(row.api_key_encrypted);
-        secretKey = await decryptSecret(row.secret_key_encrypted);
-      }
-      return json({ connection: serializeBrokerConnection(row, apiKey, secretKey) });
+      const secrets = await readStoredBrokerSecrets(row, decryptSecret);
+      const visibleRow = row && !secrets.readable ? { ...row, last_verified_status: "failed", last_error: "Stored broker credentials are unreadable. Replace both Paper keys, save and verify." } : row;
+      return json({ connection: serializeBrokerConnection(visibleRow, secrets.apiKey, secrets.secretKey) });
     }
 
     if (path === "/me/broker" && req.method === "PUT") {
@@ -1324,14 +1310,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const userId = String(user.id);
       const existing = await fetchBrokerConnection(userId);
       const sanitized = sanitizeBrokerInput(body, existing);
-      const apiKeyPlain = typeof body.api_key === "string" && body.api_key.trim()
-        ? body.api_key.trim()
-        : existing ? await decryptSecret(existing.api_key_encrypted) : "";
-      const secretKeyPlain = typeof body.secret_key === "string" && body.secret_key.trim()
-        ? body.secret_key.trim()
-        : existing ? await decryptSecret(existing.secret_key_encrypted) : "";
-      const credentialsChanged = !existing || apiKeyPlain !== await decryptSecret(existing.api_key_encrypted)
-        || secretKeyPlain !== await decryptSecret(existing.secret_key_encrypted)
+      const stored = await readStoredBrokerSecrets(existing, decryptSecret);
+      const replacement = replacementBrokerSecrets(stored, body.api_key, body.secret_key);
+      const apiKeyPlain = replacement.apiKey, secretKeyPlain = replacement.secretKey;
+      const credentialsChanged = !existing || !stored.readable || apiKeyPlain !== stored.apiKey
+        || secretKeyPlain !== stored.secretKey
         || sanitized.baseUrl !== existing.base_url || sanitized.tradingMode !== existing.trading_mode;
       const payload = {
         user_id: userId,
@@ -1604,6 +1587,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (brokerRow) {
         await audit(String(request.user_id), "broker_secret_decrypt", { request_id: request.id, worker_id: workerId });
       }
+      const secrets = await readStoredBrokerSecrets(brokerRow, decryptSecret);
+      if (!secrets.readable) {
+        // Never return ciphertext, keys or raw crypto errors. End the owned
+        // lease explicitly instead of leaking it into repeated expiry retries.
+        await restRpc("transition_execution_request", {
+          p_request_id: request.id, p_worker_id: workerId,
+          p_from_status: "leased", p_to_status: "failed",
+          p_error_text: "broker_credentials_unreadable_reverification_required",
+        });
+        await appendExecutionEvent(String(request.user_id), request.id, "broker_credentials_unreadable", {});
+        if (brokerRow?.updated_at) {
+          await restAdmin(`/broker_connections?id=eq.${encodeURIComponent(brokerRow.id)}&updated_at=eq.${encodeURIComponent(brokerRow.updated_at)}`, {
+            method: "PATCH", headers: { "Prefer": "return=minimal" },
+            body: JSON.stringify({last_verified_status:"failed",last_error:"Stored credentials are unreadable. Replace both Paper keys, save and verify."}),
+          });
+        }
+        return json({ request: null, worker_id: workerId, blocked: "broker_reverification_required" });
+      }
       return json({
         request: sanitizeExecutionRequest(request),
         profile,
@@ -1613,8 +1614,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           trading_mode: brokerRow.trading_mode,
           base_url: brokerRow.base_url,
           account_label: brokerRow.account_label,
-          api_key: await decryptSecret(brokerRow.api_key_encrypted),
-          secret_key: await decryptSecret(brokerRow.secret_key_encrypted),
+          api_key: secrets.apiKey,
+          secret_key: secrets.secretKey,
         } : null,
       });
     }
@@ -1719,6 +1720,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const orderPayload = body.order;
       const clientOrderId = String(orderPayload.client_order_id ?? "").trim();
       if (!clientOrderId) return json({ error: "client_order_id is required" }, 400);
+      const existingRes = await restAdmin(`/broker_orders?client_order_id=eq.${encodeURIComponent(clientOrderId)}&select=*`);
+      if (!existingRes.ok) throw new Error("Broker order lookup unavailable");
+      const existingOrders = await existingRes.json() as BrokerOrderRow[];
+      const existingOrder = existingOrders[0];
+      if (!existingOrder) return json({error:"Broker order not found"},404);
+      const eventPolicy = brokerOrderEventPolicy(request, existingOrder, orderPayload.event_type);
+      if (eventPolicy === "event_only") {
+        await appendBrokerOrderEvent(String(request.user_id), request.id, existingOrder.id, "duplicate_blocked", orderPayload);
+        return json({ok:true,broker_order_id:existingOrder.id,preserved_status:existingOrder.status});
+      }
       const patched = await patchBrokerOrderByClientOrderId(clientOrderId, {
         broker_order_id: typeof orderPayload.order_id === "string" ? orderPayload.order_id : null,
         status: typeof orderPayload.status === "string" ? orderPayload.status.toLowerCase() : "created",
