@@ -27,9 +27,9 @@ or session token changes while a request is pending. Invalid account/position
 shapes do not become fresh broker data. Root and dashboard assets are mirrored;
 the new status module is included in the Pages deployment.
 
-Validation: 296 Python tests passed. Sixteen Node tests cover routes, swipe
+Validation: 296 Python tests passed. Seventeen Node tests cover routes, swipe
 guards, setup/closed/open/paused/stopped/stale/failed/succeeded status states and
-six delayed private-response scenarios. Browser QA used network-isolated local
+six delayed private-response scenarios. The personal manual request is guarded by verified Paper scope, fresh open-market/runtime/control evidence, no pause/stop and no active job; the journal opens to its queue by default. Browser QA used network-isolated local
 fixtures for guest, closed-market, paused and completed-without-fill states on
 mobile, and the deployed guest view on desktop. Fixtures are not trading evidence.
 

@@ -1783,9 +1783,9 @@ select.m-input { appearance:none; cursor:pointer; }
     <div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
       <div class="sheet-title" style="margin-bottom:0">Personal Execution Queue</div>
-      <button onclick="requestPersonalRun()" style="padding:10px 14px;background:var(--green);border:none;border-radius:12px;color:#04120a;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;">Run Now</button>
+      <button id="personal-run-button" disabled onclick="requestPersonalRun()" style="padding:10px 14px;background:var(--green);border:none;border-radius:12px;color:#04120a;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;">בקשת מחזור Paper ידני</button>
     </div>
-    <p style="font-size:12px;color:var(--g2);line-height:1.45;margin-bottom:12px;">Each request creates a separate job and runs with that member's own broker credentials.</p>
+    <p style="font-size:12px;color:var(--g2);line-height:1.45;margin-bottom:12px;">המחזורים המתוזמנים פועלים ללא לחיצה כאן. בקשה ידנית עוברת את אותן הגנות ואינה מבטיחה עסקה. זמינה רק בחשבון מאומת, בשוק פתוח ובמצב מנוע עדכני ומותר.</p>
     <div id="execution-error" style="min-height:16px;margin-bottom:10px;font-size:11px;color:#ff8f88;"></div>
     <div class="view-segments" aria-label="Activity view">
       <button data-execution-section="evidence" aria-pressed="true">Research evidence</button>
@@ -2572,7 +2572,7 @@ function renderExecutionJobs(jobs) {
     const status = formatExecutionStatus(job.status);
     const color = job.status === 'succeeded' ? 'var(--green)' : job.status === 'failed' ? 'var(--red)' : job.status === 'running' ? 'var(--blue)' : 'var(--orange)';
     const when = fmtOrderTime(job.requested_at || job.created_at);
-    const detail = esc([job.trigger_source || 'Source not reported', job.result?.decision_summary || job.result?.skip_reason || job.result?.reason || job.error_text, ((job.requested_mode || 'paper') + '').toUpperCase(), when].filter(Boolean).join(' · '));
+    const detail = esc([job.trigger_type || 'Source not reported', job.result?.decision_summary || job.result?.skip_reason || job.result?.reason || job.error_text, ((job.requested_mode || 'paper') + '').toUpperCase(), when].filter(Boolean).join(' · '));
     return `<div class="profile-row"><div><div style="font-size:13px;font-weight:700;">${esc(job.job_type || 'trade_once')}</div><div style="font-size:11px;color:var(--g3);margin-top:3px;">${detail}</div></div><span class="profile-val" style="color:${color};text-transform:uppercase;">${esc(status)}</span></div>`;
   }).join('');
   updateWorkspaceBanner();
@@ -2647,7 +2647,7 @@ async function refreshResearchEvidence() {
 }
 
 function hasOpenExecutionJob() {
-  return currentExecutionJobs.some(job => ['queued', 'claimed', 'running'].includes(String(job.status || '').toLowerCase()));
+  return currentExecutionJobs.some(job => ['queued', 'claimed', 'leased', 'running', 'retrying', 'reconcile_pending'].includes(String(job.status || '').toLowerCase()));
 }
 
 function formatExecutionStatus(status) {
@@ -2680,6 +2680,8 @@ function updateWorkspaceBanner() {
   setText('workspace-banner-pill', 'PAPER');
   setText('workspace-banner-primary', !currentUser ? 'התחברות' : !hasVerifiedBrokerConnection() ? 'חיבור ברוקר' : 'יומן ביצוע ומחקר');
   setText('workspace-banner-secondary', 'הסבר על המסך');
+  const runButton = document.getElementById('personal-run-button');
+  if (runButton) { runButton.disabled = !canRequestPersonalRun(); runButton.title = runButton.disabled ? 'נדרש חשבון Paper מאומת, שוק פתוח, מנוע ובקרה עדכניים וללא בקשה פעילה' : 'בקשת מחזור אישי בכפוף להגנות'; }
 }
 
 function handleWorkspacePrimaryAction() {
@@ -2772,10 +2774,11 @@ async function refreshMemberWorkspace() {
       jobsPayload = await apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' });
     } catch (jobsError) {
       console.warn('refreshMemberWorkspace jobs:', jobsError.message);
+      if (currentUser?.id === scope) setText('execution-error', 'לא ניתן לטעון את יומן הביצוע. אין להסיק שאין פעילות. נסה לרענן.');
     }
     if (currentUser?.id !== scope) return;
     jobsObservedScope = jobsPayload ? scope : null;
-    if (jobsPayload) renderExecutionJobs(jobsPayload.jobs || []);
+    if (jobsPayload) { setText('execution-error', ''); renderExecutionJobs(jobsPayload.jobs || []); }
     updateWorkspaceBanner();
     if (hasVerifiedBrokerConnection()) {
       refreshResearchEvidence();
@@ -2912,12 +2915,22 @@ async function openExecutionSheet() {
   await refreshMemberWorkspace();
 }
 
+function canRequestPersonalRun() {
+  const now = Date.now();
+  return !!(authSession?.access_token && hasVerifiedBrokerConnection() && controlState.mode === 'Paper'
+    && controlState.tradingStatus === 'Running' && !controlState.emergency && !hasOpenExecutionJob()
+    && WorkspaceStatus.fresh(controlObservedAt, now) && WorkspaceStatus.fresh(runtimeHealth?.timestamp, now)
+    && runtimeHealth?.market_open === true && runtimeHealth.worker_online === true
+    && WorkspaceStatus.fresh(runtimeHealth.scheduler_last_tick_at, now, 600000)
+    && WorkspaceStatus.fresh(runtimeHealth.worker_last_seen_at, now, 600000));
+}
 async function requestPersonalRun() {
   if (!authSession?.access_token) {
     showAuthOverlay();
     return;
   }
   const errorEl = document.getElementById('execution-error');
+  if (!canRequestPersonalRun()) { errorEl.textContent = 'בקשה ידנית אינה זמינה כעת. בדוק את מצב החשבון, השוק והמנוע במסך הבית.'; return; }
   errorEl.textContent = '';
   try {
     await apiJSON('/me/execution/run', {

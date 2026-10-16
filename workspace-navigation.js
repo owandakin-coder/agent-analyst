@@ -220,7 +220,7 @@
     d.getElementById('execution-jobs-section').hidden=name!=='queue';
   }
   for(const segment of segments)segment.addEventListener('click',()=>setExecutionSection(segment.dataset.executionSection));
-  setExecutionSection('evidence');
+  setExecutionSection('queue');
   d.getElementById('workspace-refresh').addEventListener('click',()=>{
     fetchControlState();
     fetchRuntimeHealth();

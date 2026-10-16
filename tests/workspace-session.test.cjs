@@ -3,6 +3,20 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
 const html=fs.readFileSync('index.html','utf8');
+test('manual Paper request needs fresh open-market evidence and cannot bypass a pause or active job',()=>{
+ const now=new Date().toISOString();
+ const base=()=>({authSession:{access_token:'fixture'}, hasVerifiedBrokerConnection:()=>true,
+  controlState:{mode:'Paper',tradingStatus:'Running',emergency:false},hasOpenExecutionJob:()=>false,
+  controlObservedAt:now,WorkspaceStatus:require('../workspace-status.js'),
+  runtimeHealth:{timestamp:now,market_open:true,worker_online:true,scheduler_last_tick_at:now,worker_last_seen_at:now}});
+ const source=html.slice(html.indexOf('function canRequestPersonalRun()'),html.indexOf('async function requestPersonalRun()'));
+ function allowed(change){const c=base();change(c);vm.createContext(c);vm.runInContext(source,c);return c.canRequestPersonalRun();}
+ assert.equal(allowed(()=>{}),true);
+ for(const change of [c=>c.controlState.emergency=true,c=>c.controlState.tradingStatus='Paused',c=>c.controlState.mode='Live',
+  c=>c.hasOpenExecutionJob=()=>true,c=>c.hasVerifiedBrokerConnection=()=>false,c=>c.authSession=null,
+  c=>c.runtimeHealth.market_open=false,c=>c.runtimeHealth.worker_online=false,c=>c.runtimeHealth=null,
+  c=>c.controlObservedAt=null,c=>c.runtimeHealth.worker_last_seen_at='2020-01-01T00:00:00Z'])assert.equal(allowed(change),false);
+});
 for (const [fn,end] of [['fetchAlpacaData','// Fetch every 30s'],['loadAlpacaTrades','function fmtOrderTime']]) {
  for (const change of ['user','connection','token']) {
   test(`${fn} discards a delayed private response after ${change} changes`,async()=>{
