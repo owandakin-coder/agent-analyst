@@ -29,6 +29,9 @@ jobs:
       - name: Run test suite
         run: python -m pytest -q
 
+      - name: Check workspace navigation
+        run: node --test tests/workspace-navigation.test.cjs
+
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:

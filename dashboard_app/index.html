@@ -1149,8 +1149,10 @@ select.m-input { appearance:none; cursor:pointer; }
 }
 
 </style>
+<link rel="stylesheet" href="workspace.css?v=20261016">
 </head>
 <body class="booting">
+<a class="skip-link" href="#pg-home">Skip to workspace</a>
 
 <!-- Neural background -->
 <canvas id="bg-canvas"></canvas>
@@ -1164,16 +1166,17 @@ select.m-input { appearance:none; cursor:pointer; }
   </div>
 </div>
 
-<div id="auth-overlay" class="auth-overlay hidden">
+<div id="auth-overlay" class="auth-overlay hidden" role="dialog" aria-modal="true" aria-label="Sign in to ATZMA" aria-hidden="true">
   <div class="auth-card">
+    <button id="auth-dismiss" class="icon-button auth-dismiss" aria-label="Close sign in" type="button">×</button>
     <div class="auth-brand">
       <img src="logo.png" alt="ATZMA">
       <div>
-        <div class="auth-kicker">Institutional Access</div>
+        <div class="auth-kicker">YOUR PERSONAL WORKSPACE</div>
         <div class="auth-title">ATZMA</div>
       </div>
     </div>
-    <div class="auth-copy">Create your own secure workspace. Your profile and settings stay separated from every other member.</div>
+    <div class="auth-copy">A clearer view of your portfolio. Connect your Paper account to bring your positions, activity and research together.</div>
     <div class="auth-tabs">
       <button id="auth-tab-signin" class="auth-tab active" onclick="setAuthMode('signin')">Sign In</button>
       <button id="auth-tab-signup" class="auth-tab" onclick="setAuthMode('signup')">Create Account</button>
@@ -1208,18 +1211,21 @@ select.m-input { appearance:none; cursor:pointer; }
   <!-- Header -->
   <div class="hdr">
     <div class="hdr-l">
-      <h1 id="hdr-title" style="display:flex;align-items:center;gap:7px;">
-        ATZMA
+      <div class="workspace-eyebrow">ATZMA / WORKSPACE</div>
+      <h1 id="hdr-title" tabindex="-1" style="display:flex;align-items:center;gap:7px;">
+        Overview
       </h1>
-      <p id="hdr-sub">AI Trading Intelligence</p>
+      <p id="hdr-sub">Your trading workspace, at a glance</p>
     </div>
-    <div class="avatar" style="background:transparent;border:none;">
-      <img src="logo.png" width="36" height="36" style="border-radius:50%;object-fit:cover;" alt="ATZMA">
+    <div class="header-actions">
+      <span class="environment-chip">PAPER</span>
+      <button class="icon-button" id="workspace-refresh" aria-label="Refresh workspace"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="header-account" onclick="openProfile()" aria-label="Open your profile"><img src="logo.png" alt=""></button>
     </div>
   </div>
 
   <!-- Pages -->
-  <div class="pages">
+  <main class="pages" id="workspace-main" aria-label="Workspace" tabindex="-1">
 
     <!-- ══ HOME ══ -->
     <div class="page active" id="pg-home">
@@ -1227,7 +1233,7 @@ select.m-input { appearance:none; cursor:pointer; }
       <div class="card hero card-pad">
         <div class="live-badge"><div class="ldot" id="live-dot"></div><span id="market-status">LOCKED</span></div>
         <div id="last-updated-lbl" style="position:absolute;top:40px;right:14px;font-size:8px;color:var(--g3);letter-spacing:0.2px;font-family:'JetBrains Mono',monospace;"></div>
-        <div class="lbl">Autonomous Trading Control</div>
+        <div class="lbl">Your portfolio · Paper</div>
         <div class="hero-val" id="h-val">Connect Account</div>
         <div class="hero-chg">
           <span class="trend-arrow" id="h-arrow">•</span>
@@ -1265,6 +1271,13 @@ select.m-input { appearance:none; cursor:pointer; }
         </div>
       </div>
 
+      <div class="quick-access" aria-label="Workspace shortcuts">
+        <button onclick="openBrokerSheet()"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 4 7v5c0 5 8 9 8 9s8-4 8-9V7l-8-4Z" stroke="currentColor" stroke-width="1.6"/><path d="m8 12 3 3 5-6" stroke="currentColor" stroke-width="1.6"/></svg><span>Connection<small>Your Paper account</small></span></button>
+        <button onclick="openExecutionSheet()"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 20V4M4 20h16M8 15l4-5 4 2 4-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Research<small>Evidence & activity</small></span></button>
+        <button onclick="switchTab('alerts')"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M8 6V4h8v2M3 12h18M10 12v3h4v-3" stroke="currentColor" stroke-width="1.6"/></svg><span>Positions<small>Your current holdings</small></span></button>
+      </div>
+      <details class="system-health">
+      <summary><span>System health</span><span>Connection, execution & sync</span></summary>
       <div class="status-panel">
         <div class="status-row clickable" onclick="handleTradingStatusTap()">
           <div class="status-row-icon" style="color:var(--green);border-color:rgba(72,235,117,0.18);background:rgba(72,235,117,0.06);">
@@ -1333,6 +1346,7 @@ select.m-input { appearance:none; cursor:pointer; }
         </div>
       </div>
 
+      </details>
       <button class="ctl-btn ctl-btn-danger" id="btn-emergency-stop" style="margin-bottom:12px;" onclick="runControlAction('stop')">Emergency Stop</button>
 
       <div class="action-strip">
@@ -1559,10 +1573,20 @@ select.m-input { appearance:none; cursor:pointer; }
       </div>
     </div>
 
-  </div><!-- /pages -->
+    <section id="workspace-detail" class="workspace-detail" aria-labelledby="detail-title" hidden>
+      <div class="detail-toolbar">
+        <button class="back-button" id="workspace-back" aria-label="Go back"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div><div class="detail-context" id="detail-context">Workspace</div><h2 id="detail-title" tabindex="-1"></h2></div>
+        <span class="gesture-hint">Swipe left<br>to go back</span>
+      </div>
+      <div class="detail-content" id="detail-content"></div>
+    </section>
+  </main><!-- /pages -->
 
   <!-- Tab Bar -->
-  <div class="tabbar">
+  <nav class="tabbar" aria-label="Main navigation">
+    <div class="nav-brand"><img src="logo.png" alt=""><span>ATZMA</span></div>
+    <div class="nav-caption">YOUR WORKSPACE</div>
     <div class="tab active" id="tab-home" onclick="switchTab('home')">
       <div class="tab-bar-indicator"></div>
       <div class="tab-icon">
@@ -1570,7 +1594,7 @@ select.m-input { appearance:none; cursor:pointer; }
           <path d="M3 12L12 3L21 12V20C21 20.55 20.55 21 20 21H15V16H9V21H4C3.45 21 3 20.55 3 20V12Z" fill="#34c759"/>
         </svg>
       </div>
-      <span class="tab-lbl">Home</span>
+      <span class="tab-lbl">Overview</span>
     </div>
     <div class="tab" id="tab-charts" onclick="switchTab('charts')">
       <div class="tab-bar-indicator"></div>
@@ -1602,7 +1626,7 @@ select.m-input { appearance:none; cursor:pointer; }
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="#636366" stroke-width="1.8"/>
         </svg>
       </div>
-      <span class="tab-lbl">More</span>
+      <span class="tab-lbl">Settings</span>
     </div>
     <div class="tab" id="tab-alerts" onclick="switchTab('alerts')">
       <div class="tab-bar-indicator"></div>
@@ -1615,7 +1639,8 @@ select.m-input { appearance:none; cursor:pointer; }
       </div>
       <span class="tab-lbl">Positions</span>
     </div>
-  </div>
+    <div class="nav-footer"><strong>Built for a clearer perspective.</strong>Paper workspace<br>Research with evidence.</div>
+  </nav>
 
 </div><!-- /app -->
 
@@ -1743,14 +1768,20 @@ select.m-input { appearance:none; cursor:pointer; }
     </div>
     <p style="font-size:12px;color:var(--g2);line-height:1.45;margin-bottom:12px;">Each request creates a separate job and runs with that member's own broker credentials.</p>
     <div id="execution-error" style="min-height:16px;margin-bottom:10px;font-size:11px;color:#ff8f88;"></div>
-    <section style="margin:16px 0;padding:14px;border:1px solid var(--c4);border-radius:16px;" aria-label="Paper evidence lab">
+    <div class="view-segments" aria-label="Activity view">
+      <button data-execution-section="evidence" aria-pressed="true">Research evidence</button>
+      <button data-execution-section="queue" aria-pressed="false">Execution queue</button>
+    </div>
+    <section id="execution-evidence-section" style="margin:16px 0;padding:14px;border:1px solid var(--c4);border-radius:16px;" aria-label="Paper evidence lab">
       <div style="font-size:15px;font-weight:800;margin-bottom:6px;">Paper Evidence Lab</div>
       <p style="font-size:11px;color:var(--g2);line-height:1.6;margin-bottom:12px;">Broker fills and observed account equity are shown separately from simulated shadow portfolios. A model needs at least 20 completed forward sessions before automatic promotion.</p>
       <div id="research-evidence" aria-live="polite" style="font-size:12px;color:var(--g2);">Sign in and verify a Paper broker to view your evidence.</div>
     </section>
+    <section id="execution-jobs-section" aria-label="Execution queue" hidden>
     <div id="execution-jobs-list" style="display:grid;gap:10px;">
       <div class="profile-row"><span class="profile-key">Queue</span><span class="profile-val">No jobs yet</span></div>
     </div>
+    </section>
   </div>
 </div>
 
@@ -1853,6 +1884,7 @@ select.m-input { appearance:none; cursor:pointer; }
 // ════════════════════════════════════════════════════════
 (function() {
   const cvs = document.getElementById('bg-canvas');
+  if (getComputedStyle(cvs).display === 'none') return;
   const ctx = cvs.getContext('2d');
   let W, H, nodes = [], frame = 0;
 
@@ -2455,6 +2487,7 @@ function normalizeBrokerBaseUrl(rawValue, mode) {
 
 function applyBrokerConnectionUI(connection) {
   currentBrokerConnection = connection || null;
+  const updateFields = document.getElementById('broker-sheet').dataset.dirty !== 'true';
   if (!connection) {
     setText('broker-sub', 'Connect your personal Alpaca workspace');
     setText('broker-status', 'Setup ›');
@@ -2466,10 +2499,12 @@ function applyBrokerConnectionUI(connection) {
     setText('broker-sheet-verified', 'Never');
     setText('broker-sheet-api-mask', '-');
     setText('broker-sheet-secret-mask', '-');
+    if (updateFields) {
     document.getElementById('broker-account-label').value = '';
     document.getElementById('broker-trading-mode').value = 'paper';
     document.getElementById('broker-base-url').value = 'https://paper-api.alpaca.markets';
     document.getElementById('broker-enabled').checked = true;
+    }
     return;
   }
   const verified = connection.last_verified_status === 'verified';
@@ -2487,10 +2522,12 @@ function applyBrokerConnectionUI(connection) {
   setText('broker-sheet-verified', connection.last_verified_at ? fmtOrderTime(connection.last_verified_at) : 'Never');
   setText('broker-sheet-api-mask', connection.masked_api_key || '-');
   setText('broker-sheet-secret-mask', connection.masked_secret_key || '-');
+  if (updateFields) {
   document.getElementById('broker-account-label').value = connection.account_label || '';
   document.getElementById('broker-trading-mode').value = connection.trading_mode || 'paper';
   document.getElementById('broker-base-url').value = connection.base_url || 'https://paper-api.alpaca.markets';
   document.getElementById('broker-enabled').checked = connection.enabled !== false;
+  }
 }
 
 function renderExecutionJobs(jobs) {
@@ -2784,9 +2821,10 @@ async function openBrokerSheet() {
     toast('Sign in required');
     return;
   }
-  await refreshMemberWorkspace();
-  document.getElementById('broker-api-key').value = '';
-  document.getElementById('broker-secret-key').value = '';
+  if (document.getElementById('broker-sheet').dataset.dirty !== 'true') {
+    document.getElementById('broker-api-key').value = '';
+    document.getElementById('broker-secret-key').value = '';
+  }
   document.getElementById('broker-error').textContent = currentBrokerConnection?.last_error || '';
   const modeEl = document.getElementById('broker-trading-mode');
   const baseEl = document.getElementById('broker-base-url');
@@ -2800,6 +2838,10 @@ async function openBrokerSheet() {
     baseEl.dataset.bound = '1';
   }
   openSheet('broker-sheet');
+  const connectionScope = currentUser.id;
+  await refreshMemberWorkspace();
+  if (currentUser?.id !== connectionScope || !document.getElementById('broker-sheet').classList.contains('open')) return;
+  document.getElementById('broker-error').textContent = currentBrokerConnection?.last_error || '';
 }
 
 async function saveBrokerConnection(options = {}) {
@@ -2827,6 +2869,7 @@ async function saveBrokerConnection(options = {}) {
         enabled: document.getElementById('broker-enabled').checked,
       }),
     });
+    document.getElementById('broker-sheet').dataset.dirty = 'false';
     applyBrokerConnectionUI(payload.connection || null);
     document.getElementById('broker-api-key').value = '';
     document.getElementById('broker-secret-key').value = '';
@@ -2884,8 +2927,8 @@ async function openExecutionSheet() {
     return;
   }
   document.getElementById('execution-error').textContent = '';
-  await refreshMemberWorkspace();
   openSheet('execution-sheet');
+  await refreshMemberWorkspace();
 }
 
 async function requestPersonalRun() {
@@ -3017,13 +3060,13 @@ function applyPortfolioOnboardingState(message = 'Connect and verify your person
   const bEl = document.getElementById('st-buys');  if (bEl) bEl.textContent = '0';
   const sEl = document.getElementById('st-sells'); if (sEl) sEl.textContent = '0';
   const kEl = document.getElementById('k-tr');     if (kEl) kEl.textContent = '0';
-  setText('h-val', '$0.00');
-  setText('h-chg', '$0.00');
-  setText('h-pct', '(0.00%) Today');
-  setText('summary-equity', '$0.00');
-  setText('summary-day-pnl', '$0.00');
-  setText('summary-unrealized', '$0.00');
-  setText('summary-buying-power', '$0.00');
+  setText('h-val', 'Your portfolio.');
+  setText('h-chg', 'Connect your Paper account');
+  setText('h-pct', 'Your portfolio will appear here');
+  setText('summary-equity', '—');
+  setText('summary-day-pnl', '—');
+  setText('summary-unrealized', '—');
+  setText('summary-buying-power', '—');
   setText('alpaca-sub', currentUser ? 'No broker connected' : 'Sign in to connect a broker');
   setText('alpaca-status', currentUser ? 'Locked' : 'Sign in');
   setDataStatus('LOCKED');
@@ -3552,7 +3595,8 @@ function renderPositionsPage() {
   if (!container) return;
   if (pill) pill.textContent = STOCKS.length + ' OPEN';
   if (!STOCKS.length) {
-    container.innerHTML = '<div class="position-card"><div class="position-symbol">No positions</div><div class="position-name">The broker returned an empty book.</div></div>';
+    const linked = hasVerifiedBrokerConnection();
+    container.innerHTML = '<div class="position-card"><div class="position-symbol">' + (linked ? 'No open positions' : 'A home for your holdings') + '</div><div class="position-name">' + (linked ? 'Your broker currently has no open positions.' : 'Connect and verify a Paper account to see your positions here.') + '</div></div>';
     return;
   }
   container.innerHTML = STOCKS.map((s) => {
@@ -3965,7 +4009,7 @@ function addAlert() {
     time:'Just now', tag:'NEW', tagCol:'rgba(10,132,255,.15)',
   });
   renderAlerts();
-  document.getElementById('modal-overlay').classList.remove('open');
+  closeSheet('modal-overlay');
   document.getElementById('m-val').value = '';
   toast('Alert created ✓');
 }
@@ -3974,10 +4018,10 @@ function addAlert() {
 // TAB SWITCHING
 // ════════════════════════════════════════════════════════
 const HDR = {
-  home:     ['Dashboard',  'Mobile Control Surface'],
-  charts:   ['Analytics',  'Equity, allocation and performance'],
+  home:     ['Overview',  'Your trading workspace, at a glance'],
+  charts:   ['Analytics',  'Your portfolio, in perspective'],
   trades:   ['Orders',     'Broker fills and execution history'],
-  settings: ['More',       'System configuration and utilities'],
+  settings: ['Settings',   'Your account, preferences and connections'],
   alerts:   ['Positions',  'Live holdings and exposure'],
 };
 
@@ -4131,9 +4175,11 @@ function openProfile() {
     ['p-type','p-acct','p-equity','p-bp','p-cash','p-pos','p-status'].forEach(id => {
       document.getElementById(id).textContent = 'Loading...';
     });
+    const profileScope = currentUser.id;
     fetch(API_BASE + '/account', {cache:'no-store', headers: getAuthHeaders() }).then(r=>r.json()).then(a => {
+      if (currentUser?.id !== profileScope) return;
       alpacaAccount = a;
-      openProfile();
+      if (document.getElementById('profile-sheet').classList.contains('open') && document.getElementById('profile-edit').style.display === 'none') openProfile();
     }).catch(() => toast('Could not load account data'));
   }
 }
@@ -4438,7 +4484,6 @@ async function bootstrapAuth() {
     updateIdentityUI();
     applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
     showAuthUrlFeedback();
-    showAuthOverlay();
     finishBootstrap();
     return;
   }
@@ -4498,5 +4543,6 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
 }
 </script>
+<script src="workspace-navigation.js?v=20261016"></script>
 </body>
 </html>
