@@ -41,6 +41,10 @@ on:
         required: false
         default: '4'
 
+concurrency:
+  group: model-release
+  cancel-in-progress: false
+
 jobs:
   retrain:
     runs-on: ubuntu-24.04
@@ -85,6 +89,7 @@ jobs:
       # has something to compare the new candidate against.
       - name: Snapshot current production model
         run: |
+          python model_registry.py snapshot
           if [ -f models/final_model.zip ]; then
             cp models/final_model.zip models/previous_model.zip
             cp models/vec_normalize.pkl models/previous_vec_normalize.pkl
@@ -106,6 +111,9 @@ jobs:
           else
             echo "No existing production ensemble — first ensemble deploy, nothing to snapshot."
           fi
+
+      - name: Generate rolling training-only data windows
+        run: python scripts/rolling_training_config.py
 
       # ── 5. Train base model ───────────────────────────────────
       - name: Train base model (Optuna + 100k steps, scoped for CI compute)
@@ -150,12 +158,17 @@ jobs:
         run: |
           python -u promote_model.py \
             --previous models/previous_model.zip \
-            --previous-norm models/previous_vec_normalize.pkl
+            --previous-norm models/previous_vec_normalize.pkl \
+            --stage-for-shadow
+
+      - name: Restore production after training (including gate failures)
+        if: always()
+        run: python model_registry.py restore-snapshot
 
       - name: Report promotion outcome
         run: |
           if [ "${{ steps.promote.outcome }}" = "success" ]; then
-            echo "Candidate model promoted to production."
+            echo "Candidate staged for shadow evaluation. Production restored."
           else
             echo "Candidate model REJECTED — production model reverted to the previous snapshot."
           fi
@@ -180,6 +193,7 @@ jobs:
                   models/ensemble_norm_1.pkl \
                   models/ensemble_norm_2.pkl \
                   models/training_meta.pkl 2>/dev/null || true
+          if [ -d models/challenger ]; then git add models/challenger; fi
 
           if git diff --cached --quiet; then
             echo "No model changes to commit."
@@ -227,6 +241,7 @@ jobs:
                       models/ensemble_norm_1.pkl \
                       models/ensemble_norm_2.pkl \
                       models/training_meta.pkl 2>/dev/null || true
+              if [ -d models/challenger ]; then git add models/challenger; fi
               if git diff --cached --quiet; then
                 echo "No model changes remain vs. latest main — nothing to push."
                 pushed=true

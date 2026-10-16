@@ -391,7 +391,7 @@ class AlpacaBrokerAPI:
             order = self._find_matching_broker_order(ticker, side, shares, client_order_id)
         except Exception as exc:
             log.warning("Duplicate check against broker failed: %s", exc)
-            return None
+            raise RuntimeError("Broker duplicate check unavailable; submission blocked") from exc
 
         if order is not None:
             return {"source": "broker_history", "order_id": getattr(order, "id", None)}
@@ -497,6 +497,7 @@ class AlpacaBrokerAPI:
                 positions[symbol] = float(qty)
         except Exception as exc:
             log.warning("Could not fetch positions: %s", exc)
+            raise
         return positions
 
     def get_position_details(self) -> dict[str, dict]:
@@ -517,6 +518,7 @@ class AlpacaBrokerAPI:
                 }
         except Exception as exc:
             log.warning("Could not fetch position details: %s", exc)
+            raise
         return details
 
     def reconcile_account_state(self) -> dict:
@@ -537,9 +539,7 @@ class AlpacaBrokerAPI:
             self._last_snapshot = snapshot
             return snapshot
         except Exception:
-            if self._last_snapshot is not None:
-                log.warning("Broker snapshot failed; using cached account snapshot.")
-                return dict(self._last_snapshot)
+            log.warning("Broker snapshot unavailable; execution must stop.")
             raise
 
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:

@@ -148,7 +148,7 @@ class TestAccountInfo:
         assert "AAPL" in pos
         assert pos["AAPL"] == 10.0
 
-    def test_get_positions_error_returns_empty(self, broker):
-        """שגיאה ב-get_all_positions → dict ריק (לא קריסה)."""
+    def test_get_positions_error_does_not_pretend_account_is_empty(self, broker):
         broker._trading.get_all_positions.side_effect = Exception("API down")
-        assert broker.get_positions() == {}
+        with pytest.raises(Exception, match="API down"):
+            broker.get_positions()

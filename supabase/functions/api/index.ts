@@ -4,6 +4,8 @@
  */
 
 import { isFreshOpenClock, schedulingAllowed } from "./autonomous_scheduler.ts";
+import { summarizeFills } from "./research_evidence.ts";
+import { ownsLease } from "./execution_lease.ts";
 
 const PROJECT_REF = "sofowpweliticltlbxrj";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("ATZMA_SUPABASE_URL") ?? `https://${PROJECT_REF}.supabase.co`;
@@ -71,6 +73,7 @@ type ExecutionRequestRow = {
   id: string;
   user_id: string;
   broker_connection_id: string | null;
+  broker_account_id?: string | null;
   strategy_id: string;
   trigger_type: string;
   requested_mode: string;
@@ -642,6 +645,7 @@ async function upsertBrokerOrder(request: ExecutionRequestRow, payload: JsonMap)
       user_id: userId,
       execution_request_id: request.id,
       broker_connection_id: request.broker_connection_id,
+      broker_account_id: request.broker_account_id ?? "",
       broker_name: typeof payload.broker_name === "string" ? payload.broker_name : "alpaca",
       broker_order_id: typeof payload.order_id === "string" ? payload.order_id : null,
       client_order_id: clientOrderId,
@@ -965,6 +969,7 @@ async function enqueueExecutionRequest(user: JsonMap, broker: BrokerConnectionRo
     body: JSON.stringify({
       user_id: userId,
       broker_connection_id: broker.id,
+      broker_account_id: String(broker.metadata?.account_number ?? ""),
       strategy_id: "default",
       trigger_type: triggerType,
       requested_mode: requestedMode,
@@ -989,12 +994,23 @@ async function enqueueExecutionRequest(user: JsonMap, broker: BrokerConnectionRo
 
 async function persistExecutionArtifacts(request: ExecutionRequestRow, result: JsonMap = {}): Promise<void> {
   const userId = String(request.user_id);
+  const research = Array.isArray(result.research_samples) ? result.research_samples as JsonMap[] : [];
+  if (research.length) {
+    const response = await restAdmin("/research_observations", {
+      method: "POST", headers: { "Prefer": "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify(research.map(sample => ({ execution_request_id: request.id, user_id: userId,
+        strategy: sample.strategy, observed_at: sample.timestamp, equity: sample.equity, payload: sample,
+        broker_account_id: request.broker_account_id ?? "" }))),
+    });
+    if (!response.ok) throw new Error("Could not persist research observations");
+  }
   await restAdmin("/decision_events", {
     method: "POST",
     headers: { "Prefer": "return=minimal" },
     body: JSON.stringify({
       user_id: userId,
       execution_request_id: request.id,
+      broker_account_id: request.broker_account_id ?? "",
       model_version: typeof result.model_version === "string" ? result.model_version : null,
       feature_snapshot_hash: typeof result.feature_snapshot_hash === "string" ? result.feature_snapshot_hash : null,
       market_data_source: typeof result.market_data_source === "string" ? result.market_data_source : "alpaca+yfinance",
@@ -1314,6 +1330,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const secretKeyPlain = typeof body.secret_key === "string" && body.secret_key.trim()
         ? body.secret_key.trim()
         : existing ? await decryptSecret(existing.secret_key_encrypted) : "";
+      const credentialsChanged = !existing || apiKeyPlain !== await decryptSecret(existing.api_key_encrypted)
+        || secretKeyPlain !== await decryptSecret(existing.secret_key_encrypted)
+        || sanitized.baseUrl !== existing.base_url || sanitized.tradingMode !== existing.trading_mode;
       const payload = {
         user_id: userId,
         broker_name: "alpaca",
@@ -1324,7 +1343,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         api_key_encrypted: apiKeyPlain ? await encryptSecret(apiKeyPlain) : null,
         secret_key_encrypted: secretKeyPlain ? await encryptSecret(secretKeyPlain) : null,
         last_error: existing?.last_error ?? null,
-        last_verified_status: existing?.last_verified_status ?? "pending",
+        last_verified_status: credentialsChanged ? "pending" : existing?.last_verified_status ?? "pending",
       };
       const method = existing ? "PATCH" : "POST";
       const pathSuffix = existing ? `/broker_connections?id=eq.${encodeURIComponent(existing.id)}` : "/broker_connections";
@@ -1370,7 +1389,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           api_key_encrypted: await encryptSecret(apiKey),
           secret_key_encrypted: await encryptSecret(secretKey),
           last_error: row?.last_error ?? null,
-          last_verified_status: row?.last_verified_status ?? "pending",
+          last_verified_status: (body.api_key || body.secret_key || body.base_url || body.trading_mode) ? "pending" : row?.last_verified_status ?? "pending",
         };
         const method = row ? "PATCH" : "POST";
         const pathSuffix = row ? `/broker_connections?id=eq.${encodeURIComponent(row.id)}` : "/broker_connections";
@@ -1399,7 +1418,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             last_verified_status: "verified",
             last_verified_at: new Date().toISOString(),
             last_error: null,
-            metadata: { account_number: account.account_number ?? account.id ?? null },
+            metadata: { ...(row.metadata ?? {}), account_number: account.account_number ?? account.id ?? null },
           }),
         });
         const rows = await res.json() as BrokerConnectionRow[];
@@ -1433,6 +1452,52 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const res = await restAdmin(`/execution_requests?user_id=eq.${encodeURIComponent(String(user.id))}&select=*&order=created_at.desc&limit=30`);
       const jobs = await res.json() as ExecutionRequestRow[];
       return json({ jobs: jobs.map((job) => sanitizeExecutionRequest(job)) });
+    }
+
+    if (path === "/me/research" && req.method === "GET") {
+      const user = await requireUser(req);
+      const userId = encodeURIComponent(String(user.id));
+      const broker = await fetchBrokerConnection(String(user.id));
+      const accountId = encodeURIComponent(String(broker?.metadata?.account_number ?? ""));
+      const observations = await restAdmin(`/research_observations?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=observed_at.desc&limit=600&select=strategy,observed_at,equity,payload`);
+      const decisions = await restAdmin(`/decision_events?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=created_at.desc&limit=30&select=summary,model_version,created_at,regime,payload`);
+      const marks = await restAdmin(`/paper_account_marks?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=observed_at.desc&limit=1000&select=observed_at,equity,payload`);
+      const orders = await restAdmin(`/broker_orders?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=updated_at.desc&limit=100&select=symbol,side,quantity,requested_price,status,payload,updated_at`);
+      if (!observations.ok || !decisions.ok || !orders.ok || !marks.ok) throw new Error("Research evidence is unavailable");
+      const orderRows = await orders.json() as JsonMap[];
+      const strategySummary = await restRpc<JsonMap[]>("research_summary", {p_user_id: String(user.id)});
+      return json({ observations: await observations.json(), decisions: await decisions.json(), orders: orderRows,
+        fill_summary: summarizeFills(orderRows), strategy_summary: strategySummary,
+        account_marks: await marks.json(), source: "paper_broker_and_separate_shadow_simulations", performance_verified: false });
+    }
+
+    if ((path === "/worker/state/load" || path === "/worker/state/save") && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json() as {request_id: string; worker_id: string; expected_version?: number; state?: JsonMap};
+      const request = await fetchExecutionRequest(body.request_id);
+      if (!ownsLease(request, body.worker_id)) return json({ error: "Active owned lease required" }, 409);
+      if (!request) return json({ error: "Request not found" }, 404);
+      if (path.endsWith("/save")) {
+        const version = await restRpc<number>("save_strategy_runtime_state", { p_request_id: request.id, p_worker_id: body.worker_id,
+          p_expected_version: body.expected_version, p_state: body.state });
+        return json({ version });
+      }
+      const broker = await fetchBrokerConnection(String(request.user_id));
+      const accountId = encodeURIComponent(String(broker?.metadata?.account_number ?? ""));
+      if (String(request.broker_account_id ?? "") !== String(broker?.metadata?.account_number ?? "")) return json({error:"Broker account changed during execution"},409);
+      const response = await restAdmin(`/strategy_runtime_state?user_id=eq.${request.user_id}&broker_connection_id=eq.${request.broker_connection_id}&strategy_id=eq.${encodeURIComponent(request.strategy_id)}&broker_account_id=eq.${accountId}&select=version,state`);
+      if (!response.ok) throw new Error("Risk state unavailable");
+      const rows = await response.json() as JsonMap[];
+      return json(rows[0] ?? { version: 0, state: {} });
+    }
+
+    if (path === "/worker/research/evidence" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
+      const body = await req.json().catch(() => ({})) as {offset?: number};
+      const offset = Math.max(0, Math.floor(Number(body.offset ?? 0)));
+      const response = await restAdmin(`/research_observations?order=observed_at.asc,execution_request_id.asc,strategy.asc&offset=${offset}&limit=1000&select=user_id,broker_account_id,execution_request_id,strategy,observed_at,equity,payload`);
+      if (!response.ok) throw new Error("Research evidence unavailable");
+      return json({ observations: await response.json() });
     }
 
     if (path === "/me/execution/run" && req.method === "POST") {
@@ -1560,11 +1625,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!body.request_id || !body.worker_id) return json({ error: "request_id and worker_id are required" }, 400);
       const request = await fetchExecutionRequest(body.request_id);
       if (!request) return json({ error: "Request not found" }, 404);
-      if (request.worker_id !== body.worker_id || request.status !== "leased") {
+      if (!ownsLease(request, body.worker_id, "leased")) {
         return json({ error: "Request is not leased by this worker" }, 409);
       }
       const control = await loadControlState();
-      const allowed = !!control.trading_enabled && !control.emergency_stop;
+      const connection = await fetchBrokerConnection(String(request.user_id));
+      const brokerAllowed = connection?.enabled && connection.last_verified_status === "verified"
+        && connection.id === request.broker_connection_id && connection.trading_mode === "paper"
+        && String(request.broker_account_id ?? "") === String(connection.metadata?.account_number ?? "");
+      const allowed = !!control.trading_enabled && !control.emergency_stop && !!brokerAllowed;
       const today = new Date().toISOString().slice(0, 10);
       const dailyRiskRes = await restAdmin(`/daily_risk_state?user_id=eq.${encodeURIComponent(String(request.user_id))}&trading_day=eq.${today}&select=*`);
       const dailyRiskRows = await dailyRiskRes.json() as JsonMap[];
@@ -1627,10 +1696,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (path === "/worker/orders/prepare" && req.method === "POST") {
       if (!sharedWorkerAuthorized(req)) return json({ error: "Unauthorized" }, 401);
-      const body = await req.json().catch(() => ({})) as { request_id?: string; order?: JsonMap };
+      const body = await req.json().catch(() => ({})) as { request_id?: string; worker_id?: string; order?: JsonMap };
       if (!body.request_id || !body.order) return json({ error: "request_id and order are required" }, 400);
       const request = await fetchExecutionRequest(body.request_id);
       if (!request) return json({ error: "Request not found" }, 404);
+      if (!ownsLease(request, body.worker_id)) return json({ error: "Active owned lease required before broker submission" }, 409);
+      const broker = await fetchBrokerConnection(String(request.user_id));
+      if (!broker?.enabled || broker.last_verified_status !== "verified"
+        || String(request.broker_account_id ?? "") !== String(broker.metadata?.account_number ?? "")) return json({error:"Broker verification changed during execution"},409);
       const order = await upsertBrokerOrder(request, body.order);
       if (!order) return json({ error: "client_order_id is required" }, 400);
       await appendBrokerOrderEvent(String(request.user_id), request.id, order.id, "created", body.order);
@@ -1696,13 +1769,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!body.request_id || !body.status) return json({ error: "request_id and status are required" }, 400);
       const request = await fetchExecutionRequest(body.request_id);
       if (!request) return json({ error: "Request not found" }, 404);
-      if (request.worker_id && body.worker_id && request.worker_id !== body.worker_id) {
+      if (request.worker_id !== body.worker_id) {
         return json({ error: "Worker ownership mismatch" }, 409);
       }
       const normalizedStatus = ["succeeded", "failed", "skipped", "cancelled", "dead_letter", "reconcile_pending"].includes(body.status)
         ? body.status
         : "failed";
-      await restAdmin(`/execution_requests?id=eq.${encodeURIComponent(body.request_id)}`, {
+      if (request.status === normalizedStatus) return json({ ok: true, duplicate: true });
+      if (!ownsLease(request, body.worker_id)) {
+        return json({ error: "Active owned lease required to complete execution" }, 409);
+      }
+      // Do not mark a run successful before its evidence is durably recorded.
+      if (body.result && typeof body.result === "object") await persistExecutionArtifacts(request, body.result);
+      const completed = await restAdmin(`/execution_requests?id=eq.${encodeURIComponent(body.request_id)}&worker_id=eq.${encodeURIComponent(String(body.worker_id))}&status=eq.running&lease_expires_at=gt.${encodeURIComponent(new Date().toISOString())}`, {
         method: "PATCH",
         headers: { "Prefer": "return=representation" },
         body: JSON.stringify({
@@ -1714,9 +1793,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           lease_expires_at: null,
         }),
       });
-      if (body.result && typeof body.result === "object") {
-        await persistExecutionArtifacts(request, body.result);
-      }
+      const completedRows = await completed.json() as JsonMap[];
+      if (!completed.ok || !completedRows.length) return json({ error: "Execution lease changed during completion" }, 409);
       await appendExecutionEvent(String(request.user_id), request.id, "execution_completed", {
         status: normalizedStatus,
         worker_id: body.worker_id ?? request.worker_id ?? null,

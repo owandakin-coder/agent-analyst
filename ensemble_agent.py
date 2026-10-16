@@ -151,6 +151,10 @@ def load_ensemble(
     """
     members = []
 
+    present = [os.path.exists(os.path.join(MODEL_DIR, name)) for pair in ENSEMBLE_MEMBERS for name in pair]
+    if any(present) and not all(present):
+        raise RuntimeError("Incomplete ensemble deployment; refusing a different model than the released artifact")
+
     for model_file, norm_file in ENSEMBLE_MEMBERS:
         model_path = os.path.join(MODEL_DIR, model_file)
         norm_path  = os.path.join(MODEL_DIR, norm_file)
@@ -169,6 +173,7 @@ def load_ensemble(
             log.info(f"Loaded ensemble member: {model_file}")
         except Exception as exc:
             log.warning(f"Failed to load {model_file}: {exc}")
+            raise RuntimeError(f"Released ensemble member could not load: {model_file}") from exc
 
     if not members:
         log.warning("No ensemble members found — falling back to final_model.zip.")

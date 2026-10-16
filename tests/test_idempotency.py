@@ -118,13 +118,13 @@ class TestIdempotency:
         assert result["source"] == "broker_history"
         trading.submit_order.assert_not_called()
 
-    def test_duplicate_check_network_error_falls_back_to_submit(self, broker_with_mock):
+    def test_duplicate_check_network_error_blocks_submission(self, broker_with_mock):
         broker, trading = broker_with_mock
         trading.get_orders.side_effect = ConnectionError("timeout")
 
-        result = broker._submit_order("AAPL", 10, "buy")
-        assert result["status"] != "DUPLICATE_BLOCKED"
-        trading.submit_order.assert_called_once()
+        with pytest.raises(RuntimeError, match="submission blocked"):
+            broker._submit_order("AAPL", 10, "buy")
+        trading.submit_order.assert_not_called()
 
     def test_different_ticker_allowed(self, broker_with_mock):
         broker, trading = broker_with_mock
@@ -163,11 +163,10 @@ class TestIdempotency:
         assert snapshot["cash"] == 50000.0
         assert snapshot["positions"]["AAPL"] == 5.0
 
-    def test_reconcile_snapshot_uses_cached_state_on_retry_exhaustion(self, broker_with_mock):
+    def test_reconcile_snapshot_does_not_trade_from_cached_state(self, broker_with_mock):
         broker, trading = broker_with_mock
         first = broker.reconcile_account_state()
         trading.get_account.side_effect = ConnectionError("broker unavailable")
         trading.get_all_positions.side_effect = ConnectionError("broker unavailable")
-        second = broker.reconcile_account_state()
-        assert second["cash"] == first["cash"]
-        assert second["status"] == first["status"]
+        with pytest.raises(ConnectionError, match="broker unavailable"):
+            broker.reconcile_account_state()

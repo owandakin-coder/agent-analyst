@@ -1,0 +1,40 @@
+name: Forward Model Governance
+on:
+  schedule:
+    - cron: '15 22 * * 1-5'
+  workflow_dispatch: {}
+  push:
+    paths: ['model_registry.py', '.github/workflows/model_governance.yml']
+permissions:
+  contents: write
+concurrency:
+  group: model-release
+  cancel-in-progress: false
+jobs:
+  govern:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Evaluate completed forward sessions and release or roll back
+        env:
+          ATZMA_WORKER_SHARED_TOKEN: ${{ secrets.ATZMA_WORKER_SHARED_TOKEN }}
+        run: python model_registry.py govern > model-governance-report.json
+      - name: Commit verified release changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A models/
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: apply forward-validated Paper model release'
+            git push
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: model-governance-${{ github.run_number }}
+          path: model-governance-report.json
+          retention-days: 90

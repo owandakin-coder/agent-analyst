@@ -16,10 +16,10 @@ PROJECT = "sofowpweliticltlbxrj"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["status", "deploy-db", "deploy-api", "verify-scheduler", "restart-worker"])
+    parser.add_argument("action", choices=["status", "deploy-db", "deploy-api", "verify-scheduler", "verify-research", "restart-worker", "train-candidate"])
     args = parser.parse_args()
-    if args.action == "restart-worker":
-        restart_worker()
+    if args.action in {"restart-worker", "train-candidate"}:
+        restart_worker("retrain.yml" if args.action == "train-candidate" else "execution_poll.yml")
         return
     config = dotenv_values(ROOT / ".env")
     token = os.environ.get("SUPABASE_ACCESS_TOKEN") or config.get("SUPABASE_ACCESS_TOKEN")
@@ -37,7 +37,7 @@ def main() -> None:
             return json.load(response)
 
     if args.action == "deploy-db":
-        sql = (ROOT / "supabase/migrations/20261015210000_autonomous_paper_scheduler.sql").read_text(encoding="utf-8")
+        sql = "\n".join(path.read_text(encoding="utf-8") for path in sorted((ROOT / "supabase/migrations").glob("20261015*.sql")))
         query("begin;\n" + sql + "\ncommit;")
         print("Autonomous scheduler migration applied")
     elif args.action == "deploy-api":
@@ -49,16 +49,18 @@ def main() -> None:
         # Roll back every change, including control state and test requests.
         sql = (ROOT / "tests/autonomous_scheduler.sql").read_text(encoding="utf-8")
         print(query(sql))
+    elif args.action == "verify-research":
+        print(query((ROOT / "tests/research_state.sql").read_text(encoding="utf-8")))
 
 
-def restart_worker() -> None:
+def restart_worker(workflow: str = "execution_poll.yml") -> None:
     """Restart a broken chain, without duplicating an active or queued run."""
-    api = "https://api.github.com/repos/owandakin-coder/agent-analyst/actions/workflows/execution_poll.yml"
+    api = f"https://api.github.com/repos/owandakin-coder/agent-analyst/actions/workflows/{workflow}"
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "ATZMA-operations"}
     with urllib.request.urlopen(urllib.request.Request(api + "/runs?per_page=10", headers=headers), timeout=20) as response:
         runs = json.load(response)["workflow_runs"]
     if any(run["status"] in {"queued", "in_progress", "waiting", "requested", "pending"} for run in runs):
-        print("Worker workflow already active; no restart needed")
+        print(f"{workflow} already active; no dispatch needed")
         return
     github_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not github_token:
@@ -72,7 +74,7 @@ def restart_worker() -> None:
     headers["Content-Type"] = "application/json"
     request = urllib.request.Request(api + "/dispatches", data=b'{"ref":"main"}', headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=20) as response:
-        print("Worker restart dispatched:", response.status)
+        print(f"{workflow} dispatched:", response.status)
 
 
 if __name__ == "__main__":

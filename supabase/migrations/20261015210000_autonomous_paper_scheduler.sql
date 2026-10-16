@@ -41,10 +41,10 @@ begin
   ) then return 0; end if;
 
   insert into public.execution_requests (
-    user_id, broker_connection_id, strategy_id, trigger_type,
+    user_id, broker_connection_id, broker_account_id, strategy_id, trigger_type,
     requested_mode, idempotency_key, priority, actor, payload
   )
-  select b.user_id, b.id, 'default', 'schedule', 'paper',
+  select b.user_id, b.id, coalesce(b.metadata->>'account_number',''), 'default', 'schedule', 'paper',
     'schedule:' || b.id::text || ':' || slot::text, 100,
     'autonomous-paper-scheduler', jsonb_build_object('schedule_slot', slot)
   from public.broker_connections b

@@ -42,6 +42,8 @@ models/*
 !models/ensemble_norm_0.pkl
 !models/ensemble_norm_1.pkl
 !models/ensemble_norm_2.pkl
+!models/challenger/
+!models/rollback/
 
 # Trades history (runtime file)
 trades_history.csv

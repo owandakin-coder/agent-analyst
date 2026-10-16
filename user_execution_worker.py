@@ -104,6 +104,9 @@ def _result_payload(request_id: str, broker: dict, decision_result: dict | None)
         "request_id": request_id,
         "job_id": request_id,
         "mode": broker.get("trading_mode", "paper"),
+        **{key: decision_result.get(key) for key in (
+            "model_version", "strategy_version", "feature_snapshot_hash", "market_snapshot_hash",
+            "broker_snapshot_hash", "broker_snapshot", "market_snapshot", "feature_snapshot", "research_samples")},
         "decision_summary": decision_result.get("summary"),
         "regime": decision_result.get("regime"),
         "strategy_mode": decision_result.get("strategy_mode"),
@@ -117,7 +120,19 @@ def _result_payload(request_id: str, broker: dict, decision_result: dict | None)
     }
 
 
-def _install_runtime_hooks(request_id: str, token: str) -> None:
+def _install_runtime_hooks(request_id: str, token: str, worker_id: str | None = None) -> None:
+    version = 0
+    def state_load_hook() -> dict:
+        nonlocal version
+        response = _request("/worker/state/load", {"request_id": request_id, "worker_id": worker_id or WORKER_ID}, token=token)
+        version = int(response.get("version", 0))
+        return response.get("state") or {}
+
+    def state_save_hook(state: dict) -> None:
+        nonlocal version
+        response = _request("/worker/state/save", {"request_id": request_id, "worker_id": worker_id or WORKER_ID,
+            "expected_version": version, "state": state}, token=token)
+        version = int(response["version"])
     def execution_hook(stage: str, payload: dict) -> None:
         _request("/worker/execution/event", {
             "request_id": request_id,
@@ -135,6 +150,7 @@ def _install_runtime_hooks(request_id: str, token: str) -> None:
     def order_prepare_hook(payload: dict) -> dict | None:
         response = _request("/worker/orders/prepare", {
             "request_id": request_id,
+            "worker_id": worker_id or WORKER_ID,
             "order": payload,
         }, token=token)
         return {
@@ -153,11 +169,14 @@ def _install_runtime_hooks(request_id: str, token: str) -> None:
         risk_hook=risk_hook,
         order_prepare_hook=order_prepare_hook,
         order_update_hook=order_update_hook,
+        state_load_hook=state_load_hook,
+        state_save_hook=state_save_hook,
     )
 
 
 def _execute_with_main(request_id: str, broker: dict, on_success, on_skip, on_failure) -> int:
     if broker.get("trading_mode", "paper") != "paper" or broker.get("base_url", "https://paper-api.alpaca.markets").rstrip("/") != "https://paper-api.alpaca.markets":
+        clear_execution_runtime_hooks()
         on_failure("Autonomous worker only supports verified Paper accounts")
         return 1
     _set_broker_env(broker)
@@ -178,7 +197,10 @@ def _execute_with_main(request_id: str, broker: dict, on_success, on_skip, on_fa
         # hasattr(model, "members"), so no other change is needed.
         model = load_ensemble()
         vec_norm = None
-        decision_result = step_live_once(model, vec_norm, auto_approve=True) or {}
+        decision_result = step_live_once(model, vec_norm, auto_approve=True)
+        if decision_result is None:
+            on_skip({"request_id": request_id, "reason": "cycle_aborted_without_decision"})
+            return 0
         on_success(_result_payload(request_id, broker, decision_result))
         return 0
     except SystemExit as exc:
@@ -268,7 +290,7 @@ def poll_once(*, worker_id: str | None = None, lease_seconds: int = 90) -> int:
 
     heartbeat = _LeaseHeartbeat(worker_id=worker_id, request_id=request_id, lease_seconds=lease_seconds, token=token)
     heartbeat.start()
-    _install_runtime_hooks(request_id, token)
+    _install_runtime_hooks(request_id, token, worker_id)
 
     try:
         return _execute_with_main(

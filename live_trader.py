@@ -13,6 +13,7 @@ import time
 import logging
 import os
 import pickle
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,10 @@ import pandas as pd
 
 from control_plane import can_trade, load_control_state
 from decision_journal import write_last_decision
+from execution_runtime import load_execution_state, save_execution_state
+import risk_state
+import model_registry
+from research_lab import evaluate_shadows, positive_action_weights
 from execution_runtime import emit_execution_event, emit_risk_event
 from multi_agent import MultiAgentDecisionEngine
 from notifications import send_operator_alert
@@ -191,6 +196,7 @@ class LiveTrader:
         self._entry_prices:   dict[str, float] = {}
         self._trailing_highs: dict[str, float] = {}   # max price since entry
         self.stop_loss_pct: float = STOP_LOSS_PCT
+        risk_state.restore(self, load_execution_state())
 
     def _portfolio_market_value(self, prices: dict[str, float], positions: dict[str, float]) -> float:
         return float(sum(max(0.0, positions.get(t, 0.0)) * max(0.0, prices.get(t, 0.0)) for t in self.tickers))
@@ -297,6 +303,14 @@ class LiveTrader:
             self._notify_shutdown()
 
     def run_once(self):
+        try:
+            return self._run_cycle()
+        finally:
+            # Persist even on an aborted cycle or a partial execution. State
+            # writes are fenced by the database lease/version check.
+            save_execution_state(risk_state.snapshot(self))
+
+    def _run_cycle(self):
         """
         מחזור החלטה יחיד:
         בנה תצפית → חזה פעולה → בדוק סיכון → שלח פקודות.
@@ -361,11 +375,20 @@ class LiveTrader:
         cash      = snapshot["cash"]
         buying_power = float(snapshot.get("buying_power", cash) or cash)
         self._hydrate_entry_state_from_broker(positions, snapshot, current_prices)
-        net_worth = cash + sum(
-            positions.get(t, 0.0) * current_prices.get(t, 0.0)
-            for t in self.tickers
-        )
-        self._peak_net_worth = max(self._peak_net_worth, net_worth)
+        net_worth = float(snapshot["equity"] if snapshot.get("equity") is not None else cash + sum(
+            positions.get(t, 0.0) * current_prices.get(t, 0.0) for t in self.tickers))
+        if not np.isfinite(net_worth) or not np.isfinite(cash):
+            emit_execution_event("execution_aborted", {"reason": "invalid_account_equity"})
+            return
+        self._latest_account_sample = {"observed_at": datetime.now(timezone.utc).isoformat(),
+            "equity": net_worth, "cash": cash, "source": "paper_broker_snapshot",
+            "model_id": model_registry.artifact_id(Path(MODEL_DIR)),
+            "gross_exposure": max(0.0, (net_worth - cash) / net_worth) if net_worth > 0 else None,
+            "benchmark_price": current_prices.get("SPY"), "cashflow_adjusted": False}
+        if net_worth <= 0:
+            emit_execution_event("execution_aborted", {"reason": "nonpositive_account_equity"})
+            return
+        self._peak_net_worth = max(self._peak_net_worth, self.risk_manager.peak_value, net_worth)
         drawdown = (self._peak_net_worth - net_worth) / (self._peak_net_worth + 1e-9)
 
         log.info(
@@ -460,11 +483,34 @@ class LiveTrader:
         )
         log.info(f"Scaled action: {action.round(3)}")
 
+        # Every independent strategy trades only in a simulated shadow ledger.
+        from model_registry import shadow_predictions, artifact_id
+        comparators = {}
+        for name, prediction in shadow_predictions(fresh_data, obs).items():
+            bundle = self._multi_agent.evaluate(tickers=self.tickers, fresh_data=fresh_data,
+                raw_action=prediction, regime_signal=regime_signal, positions=positions,
+                entry_prices=self._entry_prices, trailing_highs=self._trailing_highs, current_drawdown=drawdown)
+            scaled = self.risk_manager.scale_action(bundle.final_action_vector(self.tickers), tickers=self.tickers, price_history=price_history)
+            comparators[name] = positive_action_weights(self.tickers, scaled)
+        self._shadow_portfolios, research_samples = evaluate_shadows(
+            self._shadow_portfolios, fresh_data, current_prices,
+            positive_action_weights(self.tickers, action), comparators)
+        champion_id = artifact_id(Path(MODEL_DIR))
+        for sample in research_samples:
+            sample["champion_id"] = champion_id
+            sample["decision_regime"] = decision_bundle.regime
+        self._latest_research_samples = research_samples
+        for ticker, held in positions.items():
+            if held > 0 and ticker in current_prices:
+                self._trailing_highs[ticker] = max(self._trailing_highs.get(ticker, current_prices[ticker]), current_prices[ticker])
+        # Save protection levels and shadow marks BEFORE any broker mutation.
+        save_execution_state(risk_state.snapshot(self))
+
         # ── המרה לפקודות ────────────────────────────────────────────────────
         broker_orders = self._execute_actions(action, current_prices, cash, positions, buying_power)
         self.last_cycle_result = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "model_version": self._model_version,
+            "model_version": champion_id,
             "strategy_version": os.getenv("ATZMA_STRATEGY_VERSION", "default"),
             "regime": decision_bundle.regime,
             "strategy_mode": decision_bundle.strategy_mode,
@@ -475,7 +521,8 @@ class LiveTrader:
             "market_data_source": "alpaca_latest_quote",
             "broker_snapshot_hash": self._snapshot_hash(snapshot),
             "market_snapshot_hash": self._snapshot_hash({"prices": current_prices, "quotes": quote_info}),
-            "feature_snapshot_hash": self._snapshot_hash({"tickers": self.tickers, "obs_shape": list(obs.shape)}),
+            "feature_snapshot_hash": self._snapshot_hash({"tickers": self.tickers, "observation": obs.tolist()}),
+            "research_samples": research_samples,
             "broker_snapshot": snapshot,
             "market_snapshot": self._build_market_snapshot(fresh_data, current_prices, quote_info),
             "feature_snapshot": {
@@ -888,6 +935,10 @@ class LiveTrader:
         mark that saw the real peak, never later).
         """
         position_details = snapshot.get("position_details") or {}
+        for ticker in list(self._entry_prices):
+            if positions.get(ticker, 0) <= 0:
+                self._entry_prices.pop(ticker, None)
+                self._trailing_highs.pop(ticker, None)
         for ticker, held in positions.items():
             if held <= 0 or ticker in self._entry_prices:
                 continue

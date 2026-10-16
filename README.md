@@ -65,6 +65,10 @@ integration check uses rolled-back fixtures and never submits broker orders.
 
 ## Decision Stack
 
+See [RESEARCH_RUNBOOK.md](RESEARCH_RUNBOOK.md) for the evidence ledger, independent
+shadow strategies, durable risk state, rolling training windows and forward-only
+model release/rollback rules. The Paper Evidence Lab is inside Execution Queue.
+
 ATZMA no longer relies on a single opaque model output.
 
 Each live trading cycle now flows through:

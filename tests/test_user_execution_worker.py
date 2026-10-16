@@ -46,7 +46,7 @@ def test_main_success_sets_broker_env_and_completes(monkeypatch):
     monkeypatch.setattr(worker, "_request", fake_request)
 
     fake_main = SimpleNamespace(
-        step_live_once=lambda model, vec_norm, auto_approve=True: None,
+        step_live_once=lambda model, vec_norm, auto_approve=True: {"summary": "Hold"},
     )
     monkeypatch.setitem(sys.modules, "main", fake_main)
 

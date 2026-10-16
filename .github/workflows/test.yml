@@ -36,5 +36,5 @@ jobs:
 
       - name: Check scheduler and Edge API
         run: |
-          deno test supabase/functions/api/autonomous_scheduler_test.ts
+          deno test supabase/functions/api/*_test.ts
           deno check supabase/functions/api/index.ts

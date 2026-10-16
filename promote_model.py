@@ -35,6 +35,7 @@ Usage (wired into retrain.yml around the existing training steps):
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 import sys
 from pathlib import Path
@@ -69,6 +70,10 @@ SPY_UNDERPERFORMANCE_TOLERANCE_PP = 0.20
 def should_promote(candidate: dict, previous: dict | None, spy: dict | None = None) -> tuple[bool, str]:
     """Pure decision function so the policy is unit-testable without a GPU or market data."""
     reasons = []
+    required = ("sharpe", "max_drawdown", "annualized_return")
+    for label, metrics in (("candidate", candidate), ("production", previous), ("benchmark", spy)):
+        if metrics is not None and any(not isinstance(metrics.get(key), (float, int)) or not math.isfinite(metrics[key]) for key in required):
+            return False, f"{label} metrics are missing or non-finite"
 
     if previous is not None:
         if candidate["sharpe"] < previous["sharpe"] - SHARPE_TOLERANCE:
@@ -377,6 +382,7 @@ def main() -> int:
     parser.add_argument("--candidate-norm", default=str(MODEL_DIR / "vec_normalize.pkl"))
     parser.add_argument("--previous", default=str(MODEL_DIR / "previous_model.zip"))
     parser.add_argument("--previous-norm", default=str(MODEL_DIR / "previous_vec_normalize.pkl"))
+    parser.add_argument("--stage-for-shadow", action="store_true", help="Stage a backtest-qualified model for forward observation; do not release it")
     parser.add_argument("--sub-periods", type=int, default=0,
                          help="Also print a diagnostic breakdown of the candidate/previous/SPY "
                               "over N slices of the test window, to show whether an aggregate "
@@ -418,6 +424,11 @@ def main() -> int:
             print(line)
 
     if promote_ok:
+        if args.stage_for_shadow:
+            from model_registry import stage
+            staged = stage(model_dir, model_dir, {"candidate": candidate_metrics, "previous": previous_metrics, "benchmark": spy_metrics})
+            print(f"[Promote] SHADOW ONLY — candidate {staged['candidate_id']} requires completed forward evidence before release")
+            return 0
         print(f"[Promote] PROMOTED — {reason}")
         send_operator_alert(f"✅ Monthly retrain promoted to production — {reason}")
         return 0
