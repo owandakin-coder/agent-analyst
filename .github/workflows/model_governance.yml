@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install exchange session calendar
+        run: pip install 'exchange-calendars>=4.5,<5'
       - name: Evaluate completed forward sessions and release or roll back
         env:
           ATZMA_WORKER_SHARED_TOKEN: ${{ secrets.ATZMA_WORKER_SHARED_TOKEN }}

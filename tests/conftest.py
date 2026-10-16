@@ -87,6 +87,8 @@ def mock_alpaca_order():
     order = MagicMock()
     order.id     = "order-uuid-1234"
     order.status = "accepted"
+    order.filled_qty = "0"
+    order.filled_avg_price = None
     return order
 
 

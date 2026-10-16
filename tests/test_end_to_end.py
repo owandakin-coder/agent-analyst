@@ -34,6 +34,8 @@ def _make_broker(monkeypatch, tmp_path, trading_mock):
     monkeypatch.setenv("ATZMA_FAIL_CLOSED_CONTROL", "0")
     monkeypatch.setenv("ATZMA_ALLOW_LOCAL_CONTROL_FALLBACK", "1")
     monkeypatch.setenv("ATZMA_REQUIRE_FRESH_QUOTES", "0")
+    monkeypatch.setattr("live_trader.load_control_state", lambda: {"trading_enabled": True, "emergency_stop": False})
+    monkeypatch.setattr("live_trader.can_trade", lambda _: (True, None))
 
     import broker_api as ba
 
@@ -94,6 +96,8 @@ def trading_mock():
     order = MagicMock()
     order.id = "order-123"
     order.status = "accepted"
+    order.filled_qty = "0"
+    order.filled_avg_price = None
     order.client_order_id = "ATZMA-2026-05-29-AAPL-BUY-633"
     mock.submit_order.return_value = order
     return mock

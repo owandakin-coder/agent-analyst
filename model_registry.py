@@ -101,27 +101,54 @@ def shadow_predictions(data: dict, observation) -> dict:
 
 
 def forward_gate(rows: list[dict], strategy: str, champion_id: str, minimum_sessions: int = 20,
-                 now: datetime | None = None, improvement: float = 0.005, require_benchmark: bool = True) -> tuple[bool, dict]:
+                 now: datetime | None = None, improvement: float = 0.005, require_benchmark: bool = True,
+                 not_before: str | None = None) -> tuple[bool, dict]:
     """Compare paired daily marks, never inflate evidence with intraday samples/users."""
     now = now or datetime.now(timezone.utc)
+    import exchange_calendars as xcals
+    calendar = xcals.get_calendar("XNYS")
+    start_at = datetime.fromisoformat(not_before.replace("Z", "+00:00")) if not_before else None
+    if start_at is not None and start_at.tzinfo is None:
+        raise ValueError("Release evidence boundary requires a timezone")
     today = now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
     paired = {}
+    invalid_pairs = set()
+    rejected_rows = 0
+    required = (strategy, "champion", "benchmark_spy") if require_benchmark else (strategy, "champion")
     for row in rows:
         payload = row.get("payload", {})
         if row.get("strategy") not in {strategy, "champion", "benchmark_spy"} or payload.get("champion_id") != champion_id:
             continue
-        if payload.get("source") != "shadow_simulation" or payload.get("cost_bps") != 10 or payload.get("schema_version") != 1:
+        if payload.get("source") != "shadow_simulation" or payload.get("cost_bps") != 10 or payload.get("schema_version") != 2:
             continue
-        timestamp = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
-        day = timestamp.astimezone(ZoneInfo("America/New_York")).date().isoformat()
-        equity = float(row["equity"])
-        if day >= today or not math.isfinite(equity) or equity <= 0:
+        try:
+            timestamp = datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                raise ValueError("Missing timezone")
+            if start_at is not None and timestamp < start_at:
+                raise ValueError("Observation predates this candidate/release")
+            day = timestamp.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+            equity = float(row["equity"])
+            if day >= today or not math.isfinite(equity) or equity <= 0 or not calendar.is_session(day):
+                raise ValueError("Not a completed exchange session")
+            if not calendar.session_open(day).to_pydatetime() <= timestamp <= calendar.session_close(day).to_pydatetime():
+                raise ValueError("Observation outside regular session")
+            if not row.get("user_id") or not row.get("broker_account_id") or not row.get("execution_request_id"):
+                raise ValueError("Missing account/request scope")
+        except (ValueError, TypeError, KeyError):
+            rejected_rows += 1
             continue
-        key = (row["user_id"] + ":" + row.get("broker_account_id", ""), row.get("execution_request_id", timestamp.isoformat()))
-        paired.setdefault(key, {})[row["strategy"]] = (timestamp, day, equity)
+        key = ((row["user_id"], row["broker_account_id"]), row["execution_request_id"])
+        group = paired.setdefault(key, {})
+        value = (timestamp, day, equity)
+        if row["strategy"] in group and group[row["strategy"]] != value:
+            invalid_pairs.add(key)
+        group[row["strategy"]] = value
     accounts = {}
-    for (user, _), group in paired.items():
-        if not all(name in group for name in (strategy, "champion", "benchmark_spy")):
+    for (user, request), group in paired.items():
+        if (user, request) in invalid_pairs or not all(name in group for name in required):
+            continue
+        if len({group[name][0] for name in required}) != 1:
             continue
         timestamp, day, _ = group[strategy]
         prior = accounts.setdefault(user, {}).get(day)
@@ -133,7 +160,7 @@ def forward_gate(rows: list[dict], strategy: str, champion_id: str, minimum_sess
         if len(ordered) < minimum_sessions + 1:
             continue
         metrics = {}
-        for name in (strategy, "champion", "benchmark_spy"):
+        for name in required:
             values = [row[name] for row in ordered]
             returns = [b / a - 1 for a, b in zip(values, values[1:])]
             peak, drawdown = values[0], 0.0
@@ -144,7 +171,8 @@ def forward_gate(rows: list[dict], strategy: str, champion_id: str, minimum_sess
             metrics[name] = {"return": values[-1] / values[0] - 1, "max_drawdown": drawdown,
                              "sharpe": statistics.mean(returns) / std * math.sqrt(252) if std > 1e-12 else 0}
         results.append({"sessions": len(ordered) - 1, "metrics": metrics})
-    report = {"eligible_accounts": len(results), "minimum_completed_sessions": minimum_sessions, "source": "paired_forward_shadow", "accounts": results}
+    report = {"eligible_accounts": len(results), "minimum_completed_sessions": minimum_sessions, "source": "paired_forward_shadow",
+              "calendar": "XNYS", "schema_version": 2, "rejected_rows": rejected_rows, "accounts": results}
     if not results:
         return False, {**report, "reason": "Insufficient paired, completed forward sessions"}
     def median(name, metric):
@@ -182,7 +210,7 @@ def promote(directory: Path, rows: list[dict]) -> dict:
         raise ValueError("Release artifacts no longer match the staged comparison")
     if artifact_id(directory) != manifest["champion_id"]:
         return {"promoted": False, "reason": "Staged comparison superseded; awaiting the next retrain"}
-    passed, report = forward_gate(rows, "candidate:" + manifest["candidate_id"], manifest["champion_id"])
+    passed, report = forward_gate(rows, "candidate:" + manifest["candidate_id"], manifest["champion_id"], not_before=manifest["staged_at"])
     if not passed:
         return {"promoted": False, **report}
     rollback = directory / "rollback"
@@ -203,7 +231,8 @@ def rollback_if_degraded(directory: Path, rows: list[dict]) -> dict:
     release = json.loads(manifest_path.read_text(encoding="utf-8"))
     if artifact_id(directory) != release["active_id"] or artifact_id(backup) != release["previous_id"]:
         raise ValueError("Rollback release hash mismatch")
-    passed, report = forward_gate(rows, "rollback:" + release["previous_id"], release["active_id"], minimum_sessions=5, improvement=0.02, require_benchmark=False)
+    passed, report = forward_gate(rows, "rollback:" + release["previous_id"], release["active_id"], minimum_sessions=5, improvement=0.02,
+                                  require_benchmark=False, not_before=release["promoted_at"])
     if not passed:
         return {"rolled_back": False, **report}
     copy_release(backup, directory)

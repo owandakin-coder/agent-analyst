@@ -322,10 +322,12 @@ class AlpacaBrokerAPI:
             result = {
                 "order_id": str(order.id),
                 "client_order_id": str(getattr(order, "client_order_id", client_order_id) or client_order_id),
-                "status": str(order.status),
+                "status": str(order.status).split(".")[-1].lower(),
                 "side": side.upper(),
                 "ticker": ticker,
                 "shares": shares,
+                "filled_qty": float(getattr(order, "filled_qty", 0) or 0),
+                "filled_avg_price": float(getattr(order, "filled_avg_price", 0) or 0),
                 "time": now_iso,
             }
             update_order({
@@ -486,6 +488,11 @@ class AlpacaBrokerAPI:
     def get_cash(self) -> float:
         return self.get_account()["cash"]
 
+    def get_open_orders(self) -> list:
+        """Pending orders reserve risk; failure to read them must block execution."""
+        request = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
+        return list(self._call_with_retry("get_open_orders", self._trading.get_orders, filter=request))
+
     def get_positions(self) -> dict[str, float]:
         positions: dict[str, float] = {}
         try:
@@ -544,6 +551,8 @@ class AlpacaBrokerAPI:
 
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:
         prices: dict[str, float] = {}
+        # A failed refresh must not retain receipts from an earlier fetch.
+        self._last_quotes_info = {}
         observed_at = datetime.now(timezone.utc).isoformat()
         try:
             request = StockLatestQuoteRequest(symbol_or_symbols=tickers)
@@ -744,6 +753,8 @@ class BrokerAPIStub:
             "ticker": ticker,
             "shares": shares,
             "price": price,
+            "filled_qty": shares,
+            "filled_avg_price": price,
         }
 
     def sell(self, ticker: str, shares: float, price: float) -> dict:
@@ -762,6 +773,8 @@ class BrokerAPIStub:
             "ticker": ticker,
             "shares": shares,
             "price": price,
+            "filled_qty": shares,
+            "filled_avg_price": price,
         }
 
     def hold(self, ticker: str):

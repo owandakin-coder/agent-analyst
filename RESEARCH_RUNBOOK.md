@@ -48,6 +48,10 @@ execution. Account snapshots are not silently replaced by stale cached balances.
 4. Daily governance uses paired observations from the same user and execution
    request, with matching champion hash, schema and cost assumptions. It keeps
    the last paired mark per completed New York day. Today is excluded.
+   Schema 2 observations must fall inside an XNYS regular trading session;
+   weekends, holidays and observations after an early close do not count.
+   Paired strategies require the same timestamp and account/request scope.
+   Evidence predating this candidate's staging or this release is excluded.
 5. At least 21 daily marks (20 completed return intervals) are required per
    eligible account. Repeating intraday samples or adding accounts cannot
    substitute for elapsed sessions. Candidate and champion are normalized to
@@ -74,6 +78,8 @@ npx --yes deno test supabase/functions/api/*_test.ts
 npx --yes deno check supabase/functions/api/index.ts
 python scripts/autonomous_ops.py verify-scheduler
 python scripts/autonomous_ops.py verify-research
+python scripts/autonomous_ops.py verify-audit
+python scripts/autonomous_ops.py audit-research
 ```
 
 The SQL integration checks create isolated fixtures inside a rolled-back
@@ -86,3 +92,18 @@ Deploy database changes before the Edge API, then publish the worker/UI commit.
 The GitHub watchdog and the additional chat monitor check execution freshness.
 Forward validation requires real elapsed market sessions and cannot be replaced
 by unit tests, a synthetic fixture, or an empty successful poll.
+
+Each monitoring pass should also run `audit-research`. It inspects the last
+24 hours (from the research deployment on 2026-10-16) and exits nonzero for a
+successful Paper cycle missing account marks, scoped durable state or the five
+core shadow strategies, or for cross-account evidence. Zero scheduled cycles
+means forward execution remains unverified. `verify-audit` proves detection of
+missing, complete and incorrectly scoped evidence in a rolled-back transaction.
+
+Broker acceptance is never a fill. Execution state uses explicit finite
+`filled_qty` and `filled_avg_price`; partial or ambiguous receipts stop the
+batch until reconciliation. Existing open broker orders block new submissions.
+Exchange quote timestamps, control state and market openness are checked again
+before each submission. Download timestamps cannot make old quotes fresh.
+Whole-share orders must fit the calculated budget. Shadow allocations target
+post-cost equity so the 50% exposure ceiling holds after costs (schema 2).

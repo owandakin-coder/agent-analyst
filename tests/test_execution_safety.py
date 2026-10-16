@@ -92,7 +92,7 @@ def test_stale_quotes_abort_execution(monkeypatch, multi_featured):
     assert executed["called"] is False
 
 
-def test_recent_observed_at_allows_execution_when_exchange_timestamp_is_old(monkeypatch, multi_featured):
+def test_recent_download_cannot_make_an_old_exchange_quote_fresh(monkeypatch, multi_featured):
     trader = _make_trader(monkeypatch, multi_featured)
     monkeypatch.setenv("ATZMA_REQUIRE_FRESH_QUOTES", "1")
     monkeypatch.setattr("live_trader.load_control_state", lambda: {"trading_enabled": True, "emergency_stop": False})
@@ -114,7 +114,7 @@ def test_recent_observed_at_allows_execution_when_exchange_timestamp_is_old(monk
     monkeypatch.setattr(trader, "_execute_actions", lambda *args, **kwargs: executed.__setitem__("called", True) or [])
 
     trader.run_once()
-    assert executed["called"] is True
+    assert executed["called"] is False
 
 
 def test_control_plane_outage_fails_closed(monkeypatch, multi_featured):

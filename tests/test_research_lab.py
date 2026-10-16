@@ -11,16 +11,24 @@ from scripts.rolling_training_config import periods
 
 def test_shadow_marks_previous_holdings_and_charges_costs():
     state, first = advance_portfolio(None, {"SPY": .5}, {"SPY": 100}, "2026-10-01T14:00:00Z")
-    assert first["equity"] == pytest.approx(99_950)
+    assert first["equity"] == pytest.approx(100000 / 1.0005)
     state, second = advance_portfolio(state, {}, {"SPY": 110}, "2026-10-02T14:00:00Z")
-    assert second["equity"] == pytest.approx(104_895)
+    assert second["equity"] == pytest.approx(first["equity"] * 1.05 - (first["equity"] * .5 * 1.1 * .001))
     assert state["quantities"] == {}
-    assert state["costs"] == pytest.approx(105)
+    assert state["costs"] == pytest.approx(first["costs"] + first["equity"] * .5 * 1.1 * .001)
 
 
 def test_first_shadow_tick_cannot_claim_the_historical_return():
     _, sample = advance_portfolio(None, {"SPY": .5}, {"SPY": 1000}, "2026-10-01T14:00:00Z")
-    assert sample["return"] == pytest.approx(-0.0005)
+    assert sample["return"] == pytest.approx(1 / 1.0005 - 1)
+
+
+def test_shadow_exposure_ceiling_holds_after_costs_and_rebalancing():
+    state = None
+    for i, price in enumerate([100, 120, 70, 160]):
+        state, sample = advance_portfolio(state, {"SPY": 1}, {"SPY": price}, f"2026-10-{i+1:02d}T14:00:00Z")
+        assert sample["exposure"] <= .5000000001
+        assert state["cash"] >= 0 and sample["schema_version"] == 2
 
 
 def test_shadow_prices_and_timestamps_fail_closed():

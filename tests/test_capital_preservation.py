@@ -56,13 +56,13 @@ class _ConservativeStubBroker:
         self.positions[ticker] = held - sold
         self.cash += sold * price
         self.sell_calls.append((ticker, sold, price))
-        return {"status": "FILLED_STUB", "ticker": ticker, "shares": sold, "side": "SELL", "price": price}
+        return {"status": "FILLED_STUB", "ticker": ticker, "shares": sold, "side": "SELL", "price": price, "filled_qty": sold, "filled_avg_price": price}
 
     def buy(self, ticker: str, shares: int, price: float):
         self.buy_calls.append((ticker, shares, price))
         self.positions[ticker] = self.positions.get(ticker, 0.0) + shares
         self.cash -= shares * price
-        return {"status": "FILLED_STUB", "ticker": ticker, "shares": shares, "side": "BUY", "price": price}
+        return {"status": "FILLED_STUB", "ticker": ticker, "shares": shares, "side": "BUY", "price": price, "filled_qty": shares, "filled_avg_price": price}
 
     def get_position_details(self):
         return self.position_details

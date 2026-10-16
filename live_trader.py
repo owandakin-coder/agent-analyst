@@ -26,6 +26,7 @@ from execution_runtime import load_execution_state, save_execution_state
 import risk_state
 import model_registry
 from research_lab import evaluate_shadows, positive_action_weights
+from order_evidence import confirmed_fill, requires_reconciliation
 from execution_runtime import emit_execution_event, emit_risk_event
 from multi_agent import MultiAgentDecisionEngine
 from notifications import send_operator_alert
@@ -243,12 +244,13 @@ class LiveTrader:
                 ticker,
                 shares_to_sell,
             )
-            result = self.broker.sell(ticker, shares_to_sell, price)
+            result = self._place_order("sell", ticker, shares_to_sell, price)
             order_events.append({"event_type": "auto_deleverage", **result})
-            if result.get("status") in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
-                continue
-            positions[ticker] = max(0.0, positions.get(ticker, 0.0) - shares_to_sell)
-            cash += shares_to_sell * price
+            filled, fill_price = confirmed_fill(result)
+            positions[ticker] = max(0.0, positions.get(ticker, 0.0) - filled)
+            cash += filled * fill_price
+            if requires_reconciliation(result):
+                break
 
         return cash, positions
 
@@ -303,6 +305,9 @@ class LiveTrader:
             self._notify_shutdown()
 
     def run_once(self):
+        self.last_cycle_result = None
+        self._latest_research_samples = []
+        self._latest_account_sample = None
         try:
             return self._run_cycle()
         finally:
@@ -354,6 +359,9 @@ class LiveTrader:
         # ── מחירים נוכחיים ──────────────────────────────────────────────────
         current_prices = self.broker.get_latest_prices(self.tickers)
         quote_info = self.broker.get_latest_quotes_info(self.tickers) if hasattr(self.broker, "get_latest_quotes_info") else {}
+        if _require_fresh_quotes():
+            # Price and exchange timestamp must describe the same receipt.
+            current_prices = {t: info.get("price", 0) for t, info in quote_info.items()}
         if not current_prices:
             current_prices = {
                 t: float(fresh_data[t]["close"].iloc[-1])
@@ -364,6 +372,7 @@ class LiveTrader:
             emit_execution_event("execution_aborted", {"reason": "stale_quotes", "quotes": quote_info})
             log.error("Aborting execution due to stale or missing live quotes.")
             return
+        self._execution_quotes = quote_info
         log.info(f"Prices: {current_prices}")
 
         # ── שווי תיק עדכני ──────────────────────────────────────────────────
@@ -454,6 +463,9 @@ class LiveTrader:
             obs_norm = self.vec_norm.normalize_obs(obs[np.newaxis])  # (1, W, F)
             raw_action, _ = self.model.predict(obs_norm, deterministic=True)
         raw_action = np.array(raw_action).flatten()
+        if raw_action.size != self.num_stocks or not np.isfinite(raw_action).all() or (np.abs(raw_action) > 1).any():
+            emit_execution_event("execution_aborted", {"reason": "invalid_model_action"})
+            return
 
         decision_bundle = self._multi_agent.evaluate(
             tickers=self.tickers,
@@ -655,8 +667,19 @@ class LiveTrader:
         for ticker in self.tickers:
             if ticker not in prices:
                 return False
+            try:
+                if not np.isfinite(float(prices[ticker])) or float(prices[ticker]) <= 0:
+                    return False
+            except (TypeError, ValueError):
+                return False
             info = quote_info.get(ticker) or {}
-            candidates = [info.get("observed_at"), info.get("timestamp")]
+            try:
+                if float(info.get("price", 0)) != float(prices[ticker]):
+                    return False
+            except (TypeError, ValueError):
+                return False
+            # Download time does not establish the age of the exchange quote.
+            candidates = [info.get("timestamp")]
             fresh = False
             for candidate in candidates:
                 if not candidate:
@@ -744,11 +767,20 @@ class LiveTrader:
         - אחרת → החזק
         """
         order_events: list[dict] = []
+        action = np.asarray(action, dtype=float).flatten()
+        if action.size != self.num_stocks or not np.isfinite(action).all() or (np.abs(action) > 1).any():
+            raise ValueError("Invalid execution action")
+        # Do not overlap new exposure with unsettled broker instructions,
+        # including orders placed by another client on the same account.
+        if hasattr(self.broker, "get_open_orders") and self.broker.get_open_orders():
+            emit_execution_event("execution_blocked", {"reason": "open_broker_orders"})
+            return order_events
         buy_threshold = BUY_THRESHOLD
         sell_threshold = SELL_THRESHOLD
         # buying_power is broker-granted (margin) capital, always >= cash. On a
         # cash-only stub/account it equals cash, so this is a no-op there.
         buying_power = float(buying_power) if buying_power is not None else cash
+        exited_tickers: set[str] = set()
 
         # ── Trailing Stop-Loss ────────────────────────────────────────────────
         # Updates the high-water mark per ticker and sells if price drops
@@ -772,23 +804,29 @@ class LiveTrader:
                     f"TRAILING STOP triggered: {ticker} dropped {drop_pct:.1%} "
                     f"from high ${trail_high:.2f} → now ${price:.2f}. Selling all."
                 )
-                result = self.broker.sell(ticker, int(held), price)
+                result = self._place_order("sell", ticker, int(held), price)
+                exited_tickers.add(ticker)
                 order_events.append({"event_type": "trailing_stop_exit", **result})
-                if result.get("status") not in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
+                filled, fill_price = confirmed_fill(result)
+                if filled > 0:
                     # Record Kelly outcome
                     entry = self._entry_prices.get(ticker, 0.0)
                     if entry > 0:
-                        pnl_pct = (price - entry) / entry
+                        pnl_pct = (fill_price - entry) / entry
                         self.risk_manager.record_trade_outcome(ticker, pnl_pct)
-                    self._entry_prices.pop(ticker, None)
-                    self._trailing_highs.pop(ticker, None)
-                    positions[ticker] = 0.0
+                    positions[ticker] = max(0.0, held - filled)
+                    cash += filled * fill_price
+                    if positions[ticker] == 0:
+                        self._entry_prices.pop(ticker, None)
+                        self._trailing_highs.pop(ticker, None)
                     self._telegram(
                         f"🛑 *Trailing Stop triggered*\n"
                         f"{ticker}: -{drop_pct:.1%} from high\n"
                         f"High: ${trail_high:.2f} → Now: ${price:.2f}\n"
-                        f"Sold {int(held)} shares."
+                        f"Confirmed sold {filled:g} shares."
                     )
+                if requires_reconciliation(result):
+                    return order_events
 
         # ── מכירות קודם (לשחרר מזומן) ──────────────────────────────────────
         sells_executed = 0
@@ -800,34 +838,42 @@ class LiveTrader:
             if act < sell_threshold and held > 0 and price > 0:
                 shares_to_sell = max(1, int(held * abs(act)))
                 log.info(f"Action {act:.3f} -> SELL {shares_to_sell} {ticker} @ ${price:.2f}")
-                result = self.broker.sell(ticker, shares_to_sell, price)
+                result = self._place_order("sell", ticker, shares_to_sell, price)
+                exited_tickers.add(ticker)
                 order_events.append({"event_type": "sell_signal", **result})
-                if result.get("status") in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
-                    log.warning(f"SELL {ticker} failed: {result}")
-                else:
+                filled, fill_price = confirmed_fill(result)
+                if filled > 0:
                     sells_executed += 1
-                    positions[ticker] = max(0.0, held - shares_to_sell)
+                    positions[ticker] = max(0.0, held - filled)
+                    cash += filled * fill_price
                     # Record outcome for Kelly Criterion — P&L from entry to exit
                     entry = self._entry_prices.get(ticker, 0.0)
                     if entry > 0:
-                        pnl_pct = (price - entry) / entry
+                        pnl_pct = (fill_price - entry) / entry
                         self.risk_manager.record_trade_outcome(ticker, pnl_pct)
                         log.debug(f"Kelly record: {ticker} pnl={pnl_pct:+.2%}")
+                if requires_reconciliation(result):
+                    return order_events
 
         # ── רענון מזומן אחרי מכירות ─────────────────────────────────────────
         if sells_executed > 0:
             try:
                 snapshot = self._reconcile_snapshot()
-                if snapshot is not None:
+                if snapshot is None:
+                    return order_events
+                else:
                     cash = snapshot["cash"]
                     buying_power = float(snapshot.get("buying_power", cash) or cash)
                     positions.update(snapshot["positions"])
                     log.info(f"Cash after sells: ${cash:,.0f}")
-            except Exception as exc:
-                log.warning(f"Could not refresh cash after sells: {exc}")
+            except Exception:
+                log.warning("Could not refresh cash after sells; stopping execution.")
+                return order_events
 
         net_worth_total = cash + self._portfolio_market_value(prices, positions)
         cash, positions = self._auto_deleverage_if_needed(prices, positions, cash, net_worth_total, order_events)
+        if order_events and requires_reconciliation(order_events[-1]):
+            return order_events
 
         # ── קניות אחר כך ─────────────────────────────────────────────────────
         max_concentration = MAX_CONCENTRATION
@@ -848,6 +894,8 @@ class LiveTrader:
             return order_events
 
         for i, ticker in buy_actions:
+            if ticker in exited_tickers:
+                continue
             act   = float(action[i])
             price = prices.get(ticker, 0.0)
             if price <= 0:
@@ -886,35 +934,53 @@ class LiveTrader:
                     f"Skipping BUY {ticker}: budget ${budget:.2f} below minimum ${MIN_TRADE_VALUE:.2f}"
                 )
                 continue
-            shares_to_buy = max(1, int(budget / price))
+            shares_to_buy = int(budget / price)
+            if shares_to_buy < 1:
+                continue
 
             log.info(f"Action {act:.3f} -> BUY {shares_to_buy} {ticker} @ ${price:.2f}")
-            result = self.broker.buy(ticker, shares_to_buy, price)
+            result = self._place_order("buy", ticker, shares_to_buy, price)
             order_events.append({"event_type": "buy_signal", **result})
-            if result.get("status") in ("ERROR", "REJECTED", "REJECTED_BY_USER"):
-                log.warning(f"BUY {ticker} failed: {result}")
-            else:
+            filled, fill_price = confirmed_fill(result)
+            if filled > 0:
                 # עדכון מחיר כניסה ממוצע (weighted average)
                 prev_held  = positions.get(ticker, 0.0)
                 prev_entry = self._entry_prices.get(ticker, price)
-                total_shares = prev_held + shares_to_buy
+                total_shares = prev_held + filled
                 if total_shares > 0:
                     self._entry_prices[ticker] = (
-                        (prev_held * prev_entry + shares_to_buy * price) / total_shares
+                        (prev_held * prev_entry + filled * fill_price) / total_shares
                     )
                     # Reset trailing high to current price on new buy
                     self._trailing_highs[ticker] = max(
-                        self._trailing_highs.get(ticker, price), price
+                        self._trailing_highs.get(ticker, fill_price), fill_price
                     )
                     positions[ticker] = total_shares
-                    cash = cash - shares_to_buy * price
+                    cash = cash - filled * fill_price
+                    buying_power = max(0.0, buying_power - filled * fill_price)
                     available_cash = max(0.0, cash - reserve_cash) if NO_MARGIN else max(0.0, buying_power)
                     remaining_gross_room = max(
                         0.0,
                         net_worth_total * MAX_GROSS_EXPOSURE - self._portfolio_market_value(prices, positions),
                     )
+            if requires_reconciliation(result):
+                return order_events
 
         return order_events
+
+    def _place_order(self, side: str, ticker: str, shares: int, price: float) -> dict:
+        # Model/data work can take time. A pause or aged quote must also stop
+        # orders after the initial cycle check, including later orders in a batch.
+        if hasattr(self, "_execution_quotes"):
+            try:
+                allowed, reason = can_trade(load_control_state())
+            except Exception:
+                allowed, reason = False, "control_plane_unavailable"
+            if not allowed or not self._quotes_are_fresh(self._execution_quotes, {t: q.get("price", 0) for t, q in self._execution_quotes.items()}):
+                return {"status": "REJECTED", "reason": reason or "stale_quotes_before_submission"}
+            if hasattr(self.broker, "is_market_open") and not self.broker.is_market_open():
+                return {"status": "REJECTED", "reason": "market_closed_before_submission"}
+        return getattr(self.broker, side)(ticker, shares, price)
 
     def _hydrate_entry_state_from_broker(
         self,

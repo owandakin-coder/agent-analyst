@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 COST_BPS = 10.0  # 5 bps commission/fees allowance + 5 bps assumed slippage
 MAX_EXPOSURE = 0.5
 
@@ -53,6 +53,8 @@ def advance_portfolio(previous: dict | None, weights: dict[str, float], prices: 
     if prior.get("timestamp") and datetime.fromisoformat(timestamp.replace("Z", "+00:00")) <= datetime.fromisoformat(prior["timestamp"].replace("Z", "+00:00")):
         raise ValueError("Shadow timestamps must increase")
     held = prior.get("quantities", {})
+    if any(not math.isfinite(float(q)) or float(q) < 0 for q in held.values()):
+        raise ValueError("Invalid shadow holdings")
     if any(t not in marks and float(q) != 0 for t, q in held.items()):
         raise ValueError("Missing price for an existing shadow holding")
     nav = float(prior["cash"]) + sum(float(q) * marks[t] for t, q in held.items() if float(q) != 0)
@@ -62,10 +64,21 @@ def advance_portfolio(previous: dict | None, weights: dict[str, float], prices: 
     total = sum(valid.values())
     if total > MAX_EXPOSURE:
         valid = {t: w * MAX_EXPOSURE / total for t, w in valid.items()}
-    target = {t: nav * w / marks[t] for t, w in valid.items()}
-    turnover = sum(abs(target.get(t, 0) - float(held.get(t, 0))) * marks[t] for t in set(target) | set(held) if t in marks)
-    cost = turnover * cost_bps / 10_000
+    def turnover_at(equity):
+        return sum(abs(equity * valid.get(t, 0) - float(held.get(t, 0)) * marks[t]) for t in set(valid) | set(held) if t in marks)
+    # Solve costs against post-cost equity: targeting 50% of pre-cost NAV
+    # silently exceeds the exposure ceiling after fees are deducted.
+    low, high = 0.0, nav
+    for _ in range(60):
+        mid = (low + high) / 2
+        if mid + turnover_at(mid) * cost_bps / 10_000 > nav:
+            high = mid
+        else:
+            low = mid
+    equity = (low + high) / 2
+    cost = turnover_at(equity) * cost_bps / 10_000
     equity = nav - cost
+    target = {t: equity * w / marks[t] for t, w in valid.items()}
     cash = equity - sum(q * marks[t] for t, q in target.items())
     peak = max(float(prior.get("peak", nav)), equity)
     state = {"cash": cash, "quantities": target, "initial_equity": float(prior["initial_equity"]),

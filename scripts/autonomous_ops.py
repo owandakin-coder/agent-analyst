@@ -16,7 +16,7 @@ PROJECT = "sofowpweliticltlbxrj"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["status", "deploy-db", "deploy-api", "verify-scheduler", "verify-research", "restart-worker", "train-candidate"])
+    parser.add_argument("action", choices=["status", "audit-research", "verify-audit", "deploy-db", "deploy-api", "verify-scheduler", "verify-research", "restart-worker", "train-candidate"])
     args = parser.parse_args()
     if args.action in {"restart-worker", "train-candidate"}:
         restart_worker("retrain.yml" if args.action == "train-candidate" else "execution_poll.yml")
@@ -45,12 +45,23 @@ def main() -> None:
         subprocess.run(["npx.cmd" if os.name == "nt" else "npx", "--yes", "supabase", "functions", "deploy", "api", "--project-ref", PROJECT, "--no-verify-jwt", "--use-api"], env=env, cwd=ROOT, check=True)
     elif args.action == "status":
         print(json.dumps(query("select public.autonomous_runtime_status() as runtime"), indent=2))
+    elif args.action == "audit-research":
+        result = query((ROOT / "scripts/research_audit.sql").read_text(encoding="utf-8"))
+        print(json.dumps(result, indent=2))
+        audit = result[0]["research_audit"]
+        if any(audit[name] for name in ("missing_account_marks", "missing_risk_checkpoints", "missing_independent_research", "scope_violations")):
+            raise SystemExit(1)
     elif args.action == "verify-scheduler":
         # Roll back every change, including control state and test requests.
         sql = (ROOT / "tests/autonomous_scheduler.sql").read_text(encoding="utf-8")
         print(query(sql))
     elif args.action == "verify-research":
         print(query((ROOT / "tests/research_state.sql").read_text(encoding="utf-8")))
+    elif args.action == "verify-audit":
+        audit_sql = (ROOT / "scripts/research_audit.sql").read_text(encoding="utf-8")
+        audit_sql = audit_sql.replace("where created_at >=", "where id=(select request_id from audit_fixture_scope) and created_at >=")
+        fixture = (ROOT / "tests/research_audit.sql").read_text(encoding="utf-8")
+        print(query(fixture.replace("-- AUDIT QUERY", audit_sql)))
 
 
 def restart_worker(workflow: str = "execution_poll.yml") -> None:
