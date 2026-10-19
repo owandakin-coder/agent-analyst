@@ -3,6 +3,24 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
 const html=fs.readFileSync('index.html','utf8');
+
+for (const change of ['user','connection','token']) {
+ test(`market scanner discards delayed results after ${change} changes`,async()=>{
+  let release;
+  const pending=new Promise(resolve=>release=resolve);
+  const context={currentUser:{id:'first'},currentBrokerConnection:{id:'broker-first'},authSession:{access_token:'first'},
+   hasVerifiedBrokerConnection:()=>true,getAuthHeaders:()=>({}),apiJSON:()=>pending,
+   renderMarketScan:()=>{throw Error('Stale scanner data rendered');},setText:()=>{throw Error('Stale error rendered');}};
+  vm.createContext(context);
+  vm.runInContext(html.slice(html.indexOf('async function refreshMarketScan()'),html.indexOf('async function refreshResearchEvidence()')),context);
+  const request=context.refreshMarketScan();
+  if(change==='user')context.currentUser={id:'second'};
+  if(change==='connection')context.currentBrokerConnection={id:'broker-second'};
+  if(change==='token')context.authSession={access_token:'second'};
+  release({scan:{status:'completed'}});
+  await request;
+ });
+}
 test('manual Paper request needs fresh open-market evidence and cannot bypass a pause or active job',()=>{
  const now=new Date().toISOString();
  const base=()=>({authSession:{access_token:'fixture'}, hasVerifiedBrokerConnection:()=>true,

@@ -8,6 +8,7 @@ import { summarizeFills } from "./research_evidence.ts";
 import { readStoredBrokerSecrets, replacementBrokerSecrets } from "./broker_secrets.ts";
 import { brokerOrderEventPolicy } from "./broker_order_events.ts";
 import { ownsLease } from "./execution_lease.ts";
+import { eligibleAssets, screenSnapshots } from "./market_scanner.ts";
 
 const PROJECT_REF = "sofowpweliticltlbxrj";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("ATZMA_SUPABASE_URL") ?? `https://${PROJECT_REF}.supabase.co`;
@@ -1435,6 +1436,96 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const res = await restAdmin(`/execution_requests?user_id=eq.${encodeURIComponent(String(user.id))}&select=*&order=created_at.desc&limit=30`);
       const jobs = await res.json() as ExecutionRequestRow[];
       return json({ jobs: jobs.map((job) => sanitizeExecutionRequest(job)) });
+    }
+
+    if (path === "/me/market-scan" && req.method === "GET") {
+      const user = await requireUser(req);
+      const broker = await fetchBrokerConnection(String(user.id));
+      if (!broker || !broker.enabled || broker.last_verified_status !== "verified" || broker.trading_mode !== "paper") {
+        return json({scan:null, reason:"verified_paper_required"});
+      }
+      const res = await restAdmin(`/market_scans?user_id=eq.${user.id}&broker_connection_id=eq.${broker.id}&select=*`);
+      if (!res.ok) throw new Error("Market scan unavailable");
+      const scan = (await res.json() as JsonMap[])[0];
+      const matches = scan && String(scan.broker_account_id) === String(broker.metadata?.account_number ?? "")
+        && Date.parse(String(scan.credential_version)) === Date.parse(String(broker.updated_at));
+      if (scan) { delete scan.attempt_id; delete scan.credential_version; delete scan.user_id; }
+      return json({scan:matches ? scan : null, research_only:true});
+    }
+
+    if (path === "/worker/scanner/connections" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({error:"Unauthorized"},401);
+      const body = await req.json() as {after?:string};
+      if (body.after && !/^[0-9a-f-]{36}$/.test(body.after)) return json({error:"Invalid cursor"},400);
+      const res = await restAdmin(`/broker_connections?enabled=eq.true&last_verified_status=eq.verified&trading_mode=eq.paper&base_url=eq.https://paper-api.alpaca.markets&select=id&order=id&limit=100${body.after ? `&id=gt.${body.after}` : ""}`);
+      if (!res.ok) throw new Error("Scanner connections unavailable");
+      return json({connections:await res.json()});
+    }
+
+    if (path === "/worker/scanner/run" && req.method === "POST") {
+      if (!sharedWorkerAuthorized(req)) return json({error:"Unauthorized"},401);
+      const body = await req.json() as {connection_id:string};
+      if (!/^[0-9a-f-]{36}$/.test(body.connection_id ?? "")) return json({error:"Invalid connection"},400);
+      const attempt = crypto.randomUUID();
+      if (!await restRpc<boolean>("claim_market_scan", {p_connection_id:body.connection_id,p_attempt_id:attempt})) {
+        return json({status:"skipped",reason:"already_scanned_or_active_or_unverified"});
+      }
+      const target = `/market_scans?broker_connection_id=eq.${body.connection_id}&attempt_id=eq.${attempt}`;
+      try {
+        const lookup = await restAdmin(`/broker_connections?id=eq.${body.connection_id}&select=*`);
+        if (!lookup.ok) throw new Error("broker_unavailable");
+        const broker = (await lookup.json() as BrokerConnectionRow[])[0];
+        if (!broker?.enabled || broker.last_verified_status !== "verified" || broker.trading_mode !== "paper"
+          || broker.base_url !== "https://paper-api.alpaca.markets") throw new Error("broker_unavailable");
+        const session = {apiKey:await decryptSecret(broker.api_key_encrypted),secretKey:await decryptSecret(broker.secret_key_encrypted),baseUrl:broker.base_url,mode:"paper",scoped:true};
+        const raw = await alpacaGetWithSession(session,"/assets","status=active&asset_class=us_equity");
+        if (!Array.isArray(raw)) throw new Error("invalid_assets");
+        const assets = eligibleAssets(raw);
+        if (!assets.length) throw new Error("empty_universe");
+        const headers = {"APCA-API-KEY-ID":session.apiKey,"APCA-API-SECRET-KEY":session.secretKey};
+        const snapshotBatch = async (batch:typeof assets, feed:string) => {
+          const response = await fetch(`https://data.alpaca.markets/v2/stocks/snapshots?feed=${feed}&symbols=${encodeURIComponent(batch.map(a=>a.symbol).join(","))}`,
+            {headers,signal:AbortSignal.timeout(20000)});
+          return response;
+        };
+        let feed = "sip";
+        let first = await snapshotBatch(assets.slice(0,200),feed);
+        if (first.status === 403) { feed="iex"; first=await snapshotBatch(assets.slice(0,200),feed); }
+        if (!first.ok) throw new Error(`data_http_${first.status}`);
+        let candidates:JsonMap[]=[];
+        const excluded = {missing:0,stale:0,price:0,liquidity:0};
+        const consume = (batch:typeof assets, data:JsonMap) => {
+          if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid_snapshots");
+          const result=screenSnapshots(batch,data);
+          candidates.push(...result.candidates);
+          for (const key of Object.keys(excluded) as (keyof typeof excluded)[]) excluded[key]+=result.excluded[key];
+        };
+        consume(assets.slice(0,200),await first.json());
+        // Small sequential batches respect the basic plan's request budget.
+        for (let i=200;i<assets.length;i+=200) {
+          const batch=assets.slice(i,i+200), response=await snapshotBatch(batch,feed);
+          if (!response.ok) throw new Error(`data_http_${response.status}`);
+          consume(batch,await response.json());
+        }
+        if (excluded.missing+excluded.stale===assets.length) throw new Error("no_fresh_data");
+        candidates.sort((a,b)=>Number(b.score)-Number(a.score) || String(a.symbol).localeCompare(String(b.symbol)));
+        const eligible = candidates.length;
+        candidates=candidates.slice(0,30);
+        // Never publish results from a connection changed while the scan was running.
+        const check=await fetchBrokerConnection(broker.user_id);
+        if (!check || check.id!==broker.id || check.updated_at!==broker.updated_at || !check.enabled || check.last_verified_status!=="verified") throw new Error("connection_changed");
+        const report={research_only:true,source:"alpaca",feed,universe_count:raw.length,scanned_count:assets.length,
+          eligible_count:eligible,excluded,candidates,filters:{min_price:5,min_feed_dollar_volume:1000000},
+          history_validated:false,sector_diversification_validated:false};
+        const saved=await restAdmin(target,{method:"PATCH",body:JSON.stringify({status:"completed",completed_at:new Date().toISOString(),report,error_code:null})});
+        if (!saved.ok) throw new Error("storage_failed");
+        return json({status:"completed",scanned:assets.length,eligible,feed});
+      } catch (error) {
+        const message=error instanceof Error ? error.message : "";
+        const code=/^(data_http_[0-9]{3}|broker_unavailable|invalid_assets|empty_universe|invalid_snapshots|no_fresh_data|connection_changed|storage_failed)$/.test(message) ? message : "scan_unavailable";
+        await restAdmin(target,{method:"PATCH",body:JSON.stringify({status:"failed",error_code:code,report:null})});
+        return json({status:"failed",error:code},502);
+      }
     }
 
     if (path === "/me/research" && req.method === "GET") {

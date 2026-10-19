@@ -119,3 +119,32 @@ Exchange quote timestamps, control state and market openness are checked again
 before each submission. Download timestamps cannot make old quotes fresh.
 Whole-share orders must fit the calculated budget. Shadow allocations target
 post-cost equity so the 50% exposure ceiling holds after costs (schema 2).
+
+## Daily market discovery (research only)
+
+`Daily Market Research Scanner` runs at 22:30 UTC Monday-Friday, after the
+regular US close in either daylight-saving season. It can also be dispatched
+without placing any orders. `/worker/scanner/*` requires the existing worker
+token; `/me/market-scan` requires authentication and returns only the current
+verified Paper connection's results. Tables have no direct member/anonymous access.
+`python scripts/autonomous_ops.py verify-scanner` tests claims and permissions
+inside a rolled-back transaction.
+
+The scanner reads Alpaca's active tradable US equities on supported listed
+exchanges (including ETFs), in batches of 200. It tries SIP, falling back to IEX
+only on HTTP 403. The actual feed, coverage and exclusion counts are retained.
+IEX dollar volume is venue-only, not consolidated market liquidity. Screening
+requires price >= $5, feed dollar volume >= $1m and finite recent ordered daily
+bars. Rank = log10(feed dollar volume) + min(abs(daily change percent),10)/10.
+The top 30 are attention candidates, not buy signals; negative movers count too.
+History depth, corporate-action effects and sector diversification are not yet
+validated. They must be addressed before training a model on this dynamic universe.
+
+No scanner output modifies `config.yaml`, model artifacts, risk state, broker
+verification, pauses or execution requests. Same-day claims are idempotent,
+active scans are leased, failed attempts can retry after 30 minutes. A new scan
+clears the previous report; failed/empty/missing/stale states are explicit.
+Connection/account/credential changes invalidate stored and in-flight results.
+Scanner success is never forward execution or model performance evidence.
+Monitor the additional workflow for actual failures; do not rerun just to create
+market evidence during closures. No credentials should appear in job logs.

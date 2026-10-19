@@ -1787,6 +1787,11 @@ select.m-input { appearance:none; cursor:pointer; }
     </div>
     <p style="font-size:12px;color:var(--g2);line-height:1.45;margin-bottom:12px;">המחזורים המתוזמנים פועלים ללא לחיצה כאן. בקשה ידנית עוברת את אותן הגנות ואינה מבטיחה עסקה. זמינה רק בחשבון מאומת, בשוק פתוח ובמצב מנוע עדכני ומותר.</p>
     <div id="execution-error" style="min-height:16px;margin-bottom:10px;font-size:11px;color:#ff8f88;"></div>
+    <section aria-label="סריקת שוק למחקר" dir="rtl" style="margin:16px 0;padding:14px;border:1px solid var(--c4);border-radius:16px;">
+      <div style="font-size:15px;font-weight:800;">סריקת שוק יומית · למחקר</div>
+      <p style="font-size:12px;color:var(--g2);line-height:1.7;">סריקת ניירות ערך אמריקאיים הזמינים ב־Alpaca, כולל קרנות סל. הדירוג משלב נזילות ותנועת מחיר ואינו אות קנייה. הרשימה אינה משנה את מניות המודל או שולחת הזמנות.</p>
+      <div id="market-scan-results" aria-live="polite" style="font-size:12px;line-height:1.7;">יש להתחבר ולאמת חשבון Paper כדי לצפות בסריקה.</div>
+    </section>
     <div class="view-segments" aria-label="Activity view">
       <button data-execution-section="evidence" aria-pressed="true">Research evidence</button>
       <button data-execution-section="queue" aria-pressed="false">Execution queue</button>
@@ -2506,6 +2511,8 @@ function normalizeBrokerBaseUrl(rawValue, mode) {
 }
 
 function applyBrokerConnectionUI(connection) {
+  if (currentBrokerConnection?.id !== connection?.id || currentBrokerConnection?.updated_at !== connection?.updated_at
+      || connection?.last_verified_status !== 'verified') renderMarketScan(null);
   currentBrokerConnection = connection || null;
   const updateFields = document.getElementById('broker-sheet').dataset.dirty !== 'true';
   if (!connection) {
@@ -2632,6 +2639,41 @@ function renderResearchEvidence(payload) {
     html += `<details style="padding:10px 0;"><summary>${esc(decision.summary || 'Decision recorded')}<br><span style="font-size:10px;">${esc(fmtOrderTime(decision.created_at))}</span></summary><p style="font-size:11px;line-height:1.6;">Model ${esc(decision.model_version || 'Unavailable')} · regime ${esc(decision.regime || 'Unavailable')}</p></details>`;
   }
   root.innerHTML = html;
+}
+
+function renderMarketScan(payload) {
+  const root=document.getElementById('market-scan-results');
+  if (!root) return;
+  if (!payload) { root.textContent='יש להתחבר ולאמת חשבון Paper כדי לצפות בסריקה.'; return; }
+  const scan=payload.scan;
+  if (!scan) { root.textContent='טרם התקבלה סריקה לחיבור זה. הסריקה מתוזמנת בכל יום מסחר לאחר הסגירה.'; return; }
+  if (scan.status!=='completed' || !scan.report) {
+    root.textContent=scan.status==='running' ? 'סריקת השוק מתבצעת כעת.' : 'הסריקה האחרונה לא הושלמה. נתוני השוק או הרשאות הגישה דורשים בדיקה; אין רשימת מועמדות עדכנית.';
+    return;
+  }
+  const report=scan.report, rows=Array.isArray(report.candidates)?report.candidates:[];
+  const age=Date.now()-Date.parse(scan.completed_at);
+  const stale=!Number.isFinite(age) || age>4*86400000;
+  let html=`<p><strong>${stale?'סריקה ישנה — יש להמתין לעדכון':'סריקה הושלמה'}</strong> · ${esc(fmtOrderTime(scan.completed_at))}</p>`;
+  html+=`<p>נבדקו ${esc(report.scanned_count)} ניירות · ${esc(report.eligible_count)} עברו את הסינון · מוצגים עד 30.<br>מקור: Alpaca ${esc(report.feed)}. ${report.feed==='iex'?'הכיסוי מבוסס על בורסת IEX בלבד; המחזור אינו מחזור השוק המלא.':''}</p>`;
+  html+='<details><summary>איך נבחרה הרשימה?</summary><p>מחיר של 5 דולר לפחות ומחזור כספי של מיליון דולר לפחות במקור הנתונים. ניירות ללא נתונים תקינים או עדכניים הושמטו. עדיפות לנזילות ולתנועה יומית מוחלטת — גם ירידות נכללות. עדיין לא אומתו עומק היסטורי, פיזור ענפי או התאמה למודל.</p>';
+  html+=`<p>הושמטו: נתונים חסרים ${esc(report.excluded?.missing ?? 0)}, ישנים ${esc(report.excluded?.stale ?? 0)}, מחיר נמוך ${esc(report.excluded?.price ?? 0)}, נזילות נמוכה ${esc(report.excluded?.liquidity ?? 0)}.</p></details>`;
+  if (!rows.length) html+='<p>אף נייר לא עבר את הסינון בסריקה זו.</p>';
+  const number=(v,d=2)=>typeof v==='number' && Number.isFinite(v)?v.toLocaleString('he-IL',{maximumFractionDigits:d}):'—';
+  for (const row of rows) html+=`<div style="border-top:1px solid var(--c4);padding:10px 0;overflow-wrap:anywhere;"><strong dir="ltr">${esc(row.symbol)}</strong> · ${esc(row.name)}<br>מחיר $${number(row.price)} · שינוי ${number(row.change_pct)}% · מחזור במקור $${number(row.dollar_volume,0)}<br><span style="color:var(--g2);">נתוני יום: ${esc(fmtOrderTime(row.observed_at))} · מועמדת למחקר לפי נזילות ותנועת מחיר</span></div>`;
+  root.innerHTML=html;
+}
+
+async function refreshMarketScan() {
+  const user=currentUser?.id, connection=currentBrokerConnection?.id, token=authSession?.access_token;
+  if (!user || !token || !hasVerifiedBrokerConnection()) { renderMarketScan(null); return; }
+  const current=()=>currentUser?.id===user && currentBrokerConnection?.id===connection && authSession?.access_token===token && hasVerifiedBrokerConnection();
+  try {
+    const payload=await apiJSON('/me/market-scan',{headers:getAuthHeaders(),cache:'no-store'});
+    if (current()) renderMarketScan(payload);
+  } catch {
+    if (current()) setText('market-scan-results','לא ניתן לטעון את הסריקה כרגע. תתבצע בדיקה חוזרת ברענון הבא.');
+  }
 }
 
 async function refreshResearchEvidence() {
@@ -2781,10 +2823,12 @@ async function refreshMemberWorkspace() {
     if (jobsPayload) { setText('execution-error', ''); renderExecutionJobs(jobsPayload.jobs || []); }
     updateWorkspaceBanner();
     if (hasVerifiedBrokerConnection()) {
+      refreshMarketScan();
       refreshResearchEvidence();
       fetchAlpacaData();
       loadAlpacaTrades();
     } else {
+      renderMarketScan(null);
       applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
     }
   } catch (e) {
@@ -3033,6 +3077,7 @@ function resetPortfolioState() {
 }
 
 function applyPortfolioOnboardingState(message = 'Connect and verify your personal Alpaca Paper account to unlock live portfolio data.') {
+  renderMarketScan(null);
   renderResearchEvidence(null);
   resetPortfolioState();
   controlState.broker = currentUser ? 'Awaiting Broker Setup' : 'Sign In Required';

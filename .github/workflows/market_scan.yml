@@ -1,0 +1,23 @@
+name: Daily Market Research Scanner
+on:
+  schedule:
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: market-research-scanner
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Screen verified Paper connections (research only)
+        env:
+          ATZMA_WORKER_SHARED_TOKEN: ${{ secrets.ATZMA_WORKER_SHARED_TOKEN }}
+        run: python scripts/market_scan.py

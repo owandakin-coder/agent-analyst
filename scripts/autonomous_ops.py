@@ -16,7 +16,7 @@ PROJECT = "sofowpweliticltlbxrj"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["status", "audit-research", "verify-audit", "verify-daily-risk", "deploy-db", "deploy-api", "verify-scheduler", "verify-research", "restart-worker", "train-candidate"])
+    parser.add_argument("action", choices=["status", "audit-research", "verify-audit", "verify-daily-risk", "verify-scanner", "deploy-db", "deploy-api", "verify-scheduler", "verify-research", "restart-worker", "train-candidate"])
     args = parser.parse_args()
     if args.action in {"restart-worker", "train-candidate"}:
         restart_worker("retrain.yml" if args.action == "train-candidate" else "execution_poll.yml")
@@ -59,6 +59,8 @@ def main() -> None:
         print(query((ROOT / "tests/research_state.sql").read_text(encoding="utf-8")))
     elif args.action == "verify-daily-risk":
         print(query((ROOT / "tests/daily_risk_atomic.sql").read_text(encoding="utf-8")))
+    elif args.action == "verify-scanner":
+        print(query((ROOT / "tests/market_scanner.sql").read_text(encoding="utf-8")))
     elif args.action == "verify-audit":
         audit_sql = (ROOT / "scripts/research_audit.sql").read_text(encoding="utf-8")
         audit_sql = audit_sql.replace("where created_at >=", "where id=(select request_id from audit_fixture_scope) and created_at >=")
