@@ -1229,7 +1229,9 @@ select.m-input { appearance:none; cursor:pointer; }
 
     <!-- ══ HOME ══ -->
     <div class="page active" id="pg-home">
-      <section class="workspace-guide" dir="rtl" aria-label="החשבון שלך במבט ברור">
+      <details class="workspace-guide" dir="rtl" aria-label="החשבון שלך במבט ברור">
+        <summary class="guide-toggle"><span>הסבר על המערכת והחשבון שלך</span><span class="guide-toggle-hint" aria-hidden="true"></span></summary>
+        <div class="guide-content">
         <p class="guide-eyebrow">ATZMA · מסחר מדומה בלבד · PAPER</p>
         <h2 id="guide-title">לוח המעקב של חשבון הדמו שלך</h2>
         <div class="guide-grid">
@@ -1244,7 +1246,8 @@ select.m-input { appearance:none; cursor:pointer; }
           <p><strong>4. הגדרות:</strong> אפשר לנהל את חיבור הברוקר ואת העדפות התצוגה. העדפת סיכון שנשמרה אינה אישור לשינוי מגבלות המנוע. פעולות הבקרה הכלליות מוצגות לקריאה בלבד במסך זה.</p>
           <p>יתרה ורווח יומי הם נתוני חשבון Paper; הם עשויים לכלול הפקדות ופעולות ידניות. הם אינם הוכחה לרווחיות האסטרטגיה. מקף פירושו שאין נתון מאומת, ולא אפס.</p>
         </details>
-      </section>
+        </div>
+      </details>
       <div class="workspace-banner">
         <div class="workspace-banner-head">
           <div>
@@ -2744,6 +2747,7 @@ function handleWorkspacePrimaryAction() {
 
 function handleWorkspaceSecondaryAction() {
   const help = document.querySelector('.guide-help');
+  document.querySelector('.workspace-guide').open = true;
   help.open = !help.open;
   help.scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
