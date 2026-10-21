@@ -232,6 +232,7 @@ body.has-detail .tabbar { opacity:.7; }
 .guide-toggle-hint { color:var(--green); flex-shrink:0; font-size:12px; }
 .guide-toggle-hint::after { content:"הרחבה +"; }
 .workspace-guide[open] > .guide-toggle .guide-toggle-hint::after { content:"צמצום −"; }
+.workspace-guide:not([open]) > .guide-content { display:none; }
 .guide-content { padding:8px 24px 24px; }
 .guide-eyebrow { color:var(--green); font-size:11px; letter-spacing:.06em; margin:0 0 12px; }
 .workspace-guide h2 { font-size:24px; line-height:1.45; margin:0 0 20px; }
