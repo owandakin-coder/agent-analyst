@@ -16,9 +16,12 @@
 <title>ATZMA – AI Trading Intelligence</title>
 <link rel="icon" type="image/png" href="logo.png">
 <link rel="apple-touch-icon" href="logo.png">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script defer src="vendor/chart.umd.min.js" onload="if(document.getElementById('pg-charts')?.classList.contains('active')) initCharts();"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" media="print" onload="this.media='all'">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 
 :root {
   --bg: #000;
@@ -2014,7 +2017,7 @@ function getAuthHeaders(includeJson = false) {
 async function apiJSON(path, options = {}) {
   let res;
   try {
-    res = await fetch(API_BASE + path, options);
+    res = await fetch(API_BASE + path, { signal: AbortSignal.timeout(15000), ...options });
   } catch (networkError) {
     const error = new Error(networkError?.message || 'Network request failed');
     error.status = 0;
@@ -2052,6 +2055,7 @@ async function refreshAuthSession(force = false) {
 
   authRefreshPromise = (async () => {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      signal: AbortSignal.timeout(15000),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2384,7 +2388,19 @@ async function resendConfirmation() {
   }
 }
 
-async function hydrateCurrentUser(options = {}) {
+let hydrationPromise = null;
+let hydrationToken = null;
+function hydrateCurrentUser(options = {}) {
+  const token = authSession?.access_token;
+  if (hydrationPromise && hydrationToken === token) return hydrationPromise;
+  hydrationToken = token;
+  const pending = hydrateCurrentUserOnce(options).finally(() => {
+    if (hydrationPromise === pending) hydrationPromise = null;
+  });
+  hydrationPromise = pending;
+  return pending;
+}
+async function hydrateCurrentUserOnce(options = {}) {
   const { retryOnAuthFailure = true, showOverlayOnAuthFailure = true } = options;
   if (!authSession?.access_token) {
     currentUser = null;
@@ -2394,14 +2410,18 @@ async function hydrateCurrentUser(options = {}) {
   }
   try {
     await refreshAuthSession(false);
+    const sessionToken = authSession?.access_token;
     const payload = await apiJSON('/me', {
       headers: getAuthHeaders(),
       cache: 'no-store',
     });
+    if (authSession?.access_token !== sessionToken) return null;
     currentUser = payload.profile || null;
     currentPreferences = payload.preferences || null;
     mergeRemotePreferences();
     loadSettings();
+    updateIdentityUI();
+    finishBootstrap();
     try {
       await refreshMemberWorkspace();
     } catch (workspaceError) {
@@ -2414,7 +2434,7 @@ async function hydrateCurrentUser(options = {}) {
     if (retryOnAuthFailure && isAuthFailure(e) && authSession?.refresh_token) {
       try {
         await refreshAuthSession(true);
-        return await hydrateCurrentUser({ retryOnAuthFailure: false, showOverlayOnAuthFailure });
+        return await hydrateCurrentUserOnce({ retryOnAuthFailure: false, showOverlayOnAuthFailure });
       } catch (refreshError) {
         e = refreshError;
       }
@@ -2812,12 +2832,22 @@ async function refreshMemberWorkspace() {
   if (!scope || workspaceRefreshScope === scope) return;
   workspaceRefreshScope = scope;
   try {
+    const jobsRequest = apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' })
+      .then(payload => ({ payload }), error => ({ error }));
     const brokerPayload = await apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' });
     if (currentUser?.id !== scope) return;
     applyBrokerConnectionUI(brokerPayload.connection || null);
+    if (hasVerifiedBrokerConnection()) {
+      refreshMarketScan();
+      refreshResearchEvidence();
+      fetchAlpacaData();
+      loadAlpacaTrades();
+    }
     let jobsPayload = null;
     try {
-      jobsPayload = await apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' });
+      const jobsResult = await jobsRequest;
+      if (jobsResult.error) throw jobsResult.error;
+      jobsPayload = jobsResult.payload;
     } catch (jobsError) {
       console.warn('refreshMemberWorkspace jobs:', jobsError.message);
       if (currentUser?.id === scope) setText('execution-error', 'לא ניתן לטעון את יומן הביצוע. אין להסיק שאין פעילות. נסה לרענן.');
@@ -2826,12 +2856,7 @@ async function refreshMemberWorkspace() {
     jobsObservedScope = jobsPayload ? scope : null;
     if (jobsPayload) { setText('execution-error', ''); renderExecutionJobs(jobsPayload.jobs || []); }
     updateWorkspaceBanner();
-    if (hasVerifiedBrokerConnection()) {
-      refreshMarketScan();
-      refreshResearchEvidence();
-      fetchAlpacaData();
-      loadAlpacaTrades();
-    } else {
+    if (!hasVerifiedBrokerConnection()) {
       renderMarketScan(null);
       applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
     }
@@ -3779,7 +3804,7 @@ function refreshAllocation() {
 }
 
 function initCharts() {
-  if (chartsInited) return;
+  if (chartsInited || typeof Chart === 'undefined') return;
   chartsInited = true;
 
   Chart.defaults.color = '#636366';
@@ -4470,7 +4495,7 @@ updateControlSurface();
 loadAlpacaTrades();
 async function fetchRuntimeHealth() {
   try {
-    const response = await fetch(API_BASE + '/health', {cache:'no-store'});
+    const response = await fetch(API_BASE + '/health', {cache:'no-store', signal:AbortSignal.timeout(15000)});
     const payload = await response.json();
     if (!response.ok || payload.ok !== true) throw new Error('Health unavailable');
     runtimeHealth = payload;
@@ -4561,6 +4586,8 @@ async function bootstrapAuth() {
   }
 }
 
+applyPortfolioOnboardingState('Restoring your secure account connection…');
+finishBootstrap();
 bootstrapAuth();
 window.addEventListener('hashchange', () => {
   if (!authSession?.access_token && window.location.hash.includes('access_token=')) {

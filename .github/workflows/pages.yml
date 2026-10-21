@@ -10,6 +10,7 @@ on:
     branches: [main]
     paths:
       - 'index.html'
+      - 'vendor/**'
       - 'workspace.css'
       - 'workspace-navigation.js'
       - 'workspace-status.js'
@@ -41,6 +42,7 @@ jobs:
       - name: Stage static site files
         run: |
           mkdir -p _site
+          cp -R vendor _site/
           cp index.html workspace.css workspace-navigation.js workspace-status.js logo.png privacy.html terms.html _site/
 
       - name: Setup Pages
