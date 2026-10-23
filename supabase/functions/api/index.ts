@@ -807,6 +807,7 @@ function serializeBrokerConnection(row: BrokerConnectionRow | null, decryptedApi
     enabled: row.enabled,
     last_verified_status: row.last_verified_status,
     last_verified_at: row.last_verified_at,
+    updated_at: row.updated_at ?? null,
     last_error: row.last_error,
     account_label: row.account_label,
     masked_api_key: maskCredential(decryptedApiKey),
