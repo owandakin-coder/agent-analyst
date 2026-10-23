@@ -43,6 +43,9 @@ execution. Account snapshots are not silently replaced by stale cached balances.
 2. The existing backtest gate still screens return/Sharpe/drawdown and rejects
    missing or non-finite metrics. It stages a candidate only; the production
    snapshot is restored even if the gate crashes.
+   This historical screen simulates the model and RiskManager; it does not replay
+   unanimous live votes, broker sizing/verification or fills. Stage reports label
+   this scope explicitly. Never present these returns as measured Paper execution.
 3. A pending candidate's forward window is preserved for at least 45 calendar
    days across retrains, unless its comparison base has been superseded.
 4. Daily governance uses paired observations from the same user and execution
@@ -150,6 +153,10 @@ Monitor the additional workflow for actual failures; do not rerun just to create
 market evidence during closures. No credentials should appear in job logs.
 
 ## Member comparison scorecard
+
+Live observation normalization uses the same float32 population standard deviation
+as TradingEnvironment. Regression tests compare every observation value at the
+same window and portfolio state; matching array dimensions alone is insufficient.
 
 ### Trend-history correction (2026-10-23)
 

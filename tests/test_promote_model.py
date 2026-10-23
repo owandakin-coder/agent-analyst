@@ -39,6 +39,29 @@ def _metrics(sharpe=1.0, max_drawdown=0.10, annualized_return=0.15):
     return {"sharpe": sharpe, "max_drawdown": max_drawdown, "annualized_return": annualized_return}
 
 
+def test_staged_backtest_declares_its_preliminary_scope(tmp_path, monkeypatch):
+    import json
+    import sys
+    import promote_model
+    import notifications
+
+    for folder, model in [(tmp_path, b"candidate"), (tmp_path / "snapshot", b"production")]:
+        folder.mkdir(exist_ok=True)
+        (folder / "final_model.zip").write_bytes(model)
+        (folder / "vec_normalize.pkl").write_bytes(b"norm")
+    monkeypatch.setattr(promote_model, "run_gate", lambda *args: (True, "screen passed", _metrics(), _metrics(), _metrics()))
+    monkeypatch.setattr(notifications, "send_operator_alert", lambda message: pytest.fail("Staging must not send a promotion alert"))
+    monkeypatch.setattr(sys, "argv", ["promote_model.py", "--candidate", str(tmp_path / "final_model.zip"),
+                                     "--candidate-norm", str(tmp_path / "vec_normalize.pkl"), "--stage-for-shadow"])
+
+    assert promote_model.main() == 0
+
+    manifest = json.loads((tmp_path / "challenger" / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "shadow_only"
+    assert manifest["backtest"]["evaluation_scope"] == "model_and_risk_only"
+    assert manifest["backtest"]["live_policy_replayed"] is False
+
+
 class TestShouldPromote:
 
     def test_first_model_always_promoted(self):

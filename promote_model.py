@@ -27,6 +27,11 @@ itself be bad. Comparing against SPY catches a model that's actively
 losing money while the market just sits there, which "beat the last
 model" alone would miss.
 
+This is a preliminary model/RiskManager simulation. It does not reproduce
+the live three-voter decision layer, broker sizing/verification or actual
+fills. A passing historical screen is not evidence of live-policy returns;
+staged candidates still require the separate paired forward-session gate.
+
 Usage (wired into retrain.yml around the existing training steps):
     python promote_model.py --previous models/previous_model.zip \
                              --previous-norm models/previous_vec_normalize.pkl
@@ -408,6 +413,7 @@ def main() -> int:
     )
 
     print(f"[Promote] Candidate: {_fmt(candidate_metrics)}")
+    print("[Promote] Scope: model/RiskManager simulation only; live voting and broker execution are not replayed.")
     if previous_metrics:
         print(f"[Promote] Previous : {_fmt(previous_metrics)}")
     if spy_metrics:
@@ -426,7 +432,10 @@ def main() -> int:
     if promote_ok:
         if args.stage_for_shadow:
             from model_registry import stage
-            staged = stage(model_dir, model_dir, {"candidate": candidate_metrics, "previous": previous_metrics, "benchmark": spy_metrics})
+            staged = stage(model_dir, model_dir, {
+                "candidate": candidate_metrics, "previous": previous_metrics, "benchmark": spy_metrics,
+                "evaluation_scope": "model_and_risk_only", "live_policy_replayed": False,
+            })
             print(f"[Promote] SHADOW ONLY — candidate {staged['candidate_id']} requires completed forward evidence before release")
             return 0
         print(f"[Promote] PROMOTED — {reason}")

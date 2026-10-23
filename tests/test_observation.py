@@ -15,6 +15,34 @@ import pytest
 from live_trader import WINDOW_SIZE, FEATURE_COLS
 
 
+@pytest.mark.parametrize("step", [0, 5])
+@pytest.mark.parametrize("invested", [False, True])
+def test_live_observation_values_match_training(multi_featured, step, invested):
+    """Compare actual values at the same time and portfolio, not just shape."""
+    from live_trader import LiveTrader
+    from trading_env import TradingEnvironment
+
+    env = TradingEnvironment(multi_featured)
+    env.reset()
+    env.current_step = step
+    if invested:
+        env.cash = 75_000.0
+        env.holdings = np.array([10.0, 20.0, 30.0])
+        env.peak_net_worth = 110_000.0
+    net_worth = env._compute_net_worth(env._get_current_prices())
+    drawdown = (env.peak_net_worth - net_worth) / (env.peak_net_worth + 1e-9)
+    expected = env._get_observation()
+    trader = LiveTrader.__new__(LiveTrader)
+    trader.tickers = env.tickers
+    trader.initial_capital = env.initial_cash
+    history = {ticker: df.iloc[step:step + WINDOW_SIZE] for ticker, df in multi_featured.items()}
+
+    actual = trader._build_observation(history, env.cash, net_worth, drawdown)
+
+    np.testing.assert_array_equal(actual, expected)
+    env.close()
+
+
 # ── fixtures מקומיים ──────────────────────────────────────────────────────────
 
 def _make_trader(multi_featured, tiny_model_and_norm):

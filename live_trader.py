@@ -732,9 +732,13 @@ class LiveTrader:
 
             slice_df = df[available].iloc[-WINDOW_SIZE:].copy()
 
-            # z-score נרמול תוך-חלון (כמו בסביבת האימון)
-            normed = (slice_df - slice_df.mean()) / (slice_df.std() + 1e-9)
-            frames.append(normed.values)
+            # Match TradingEnvironment's float32 population standard deviation.
+            # pandas.std() defaults to ddof=1 and changed every nonconstant
+            # feature relative to the observations used during training.
+            values = np.ascontiguousarray(slice_df.to_numpy(dtype=np.float32))
+            np.nan_to_num(values, nan=0.0, copy=False)
+            normed = (values - values.mean(axis=0)) / (values.std(axis=0) + 1e-9)
+            frames.append(normed)
 
         if not frames:
             return None
