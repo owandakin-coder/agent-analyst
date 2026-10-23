@@ -251,3 +251,17 @@ body.has-detail .tabbar { opacity:.7; }
 .readonly-controls p {line-height:1.8;margin-bottom:12px;}
 
 #pg-home > .workspace-guide, #pg-home > .readonly-controls { grid-column:1 / -1; }
+.evidence-scorecard {
+  padding: 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--c4);
+  border-radius: 14px;
+  line-height: 1.7;
+  background: var(--c1);
+  overflow-wrap: anywhere;
+}
+.evidence-scorecard > strong { color: var(--white); font-size: 15px; }
+.evidence-scorecard th, .evidence-scorecard td { padding: 9px 5px; border-bottom: 1px solid var(--c4); }
+.evidence-scorecard caption { text-align: right; padding: 8px 0; color: var(--g2); }
+.evidence-scorecard summary { cursor: pointer; padding: 8px 0; }
+.evidence-scorecard button { min-height: 44px; padding: 8px 14px; cursor: pointer; }

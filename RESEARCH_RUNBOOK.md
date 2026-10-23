@@ -148,3 +148,30 @@ Connection/account/credential changes invalidate stored and in-flight results.
 Scanner success is never forward execution or model performance evidence.
 Monitor the additional workflow for actual failures; do not rerun just to create
 market evidence during closures. No credentials should appear in job logs.
+
+## Member comparison scorecard
+
+The Research screen compares six shadow portfolios on a shared daily window.
+Only complete same-request/same-timestamp groups with one champion hash, schema 2
+and 10 bps costs are used. Account and model boundaries cannot be pooled. Today,
+weekends and observations outside normal regular hours are omitted. The last
+common observation per earlier date is normalized to the first common daily mark.
+These observations are not necessarily official closing marks. The scorecard is
+informational: holiday/early-close calendars, candidate staging boundaries and
+all release decisions remain the responsibility of `model_registry.py`.
+
+The API paginates up to 6,000 observations with an as-of cutoff and stable ordering,
+filters the current verified Paper connection, and labels a capped history.
+The UI discards responses after user, connection, credential-version or session
+changes. Downloads contain comparison statistics, not credentials or account IDs.
+Cash-only model behavior is explicitly disclosed; zero return is not a quality claim.
+
+For an offline review of a single scoped JSON export:
+
+```powershell
+node scripts/evidence_report.cjs scoped-observations.json results/strategy-quality.md
+```
+
+Keep raw account exports in an ignored local directory. The report does not train,
+stage, promote, resume or execute anything. Never use its 20-interval progress
+counter as a replacement for the candidate's own paired completed-session gate.

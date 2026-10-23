@@ -1152,7 +1152,7 @@ select.m-input { appearance:none; cursor:pointer; }
 }
 
 </style>
-<link rel="stylesheet" href="workspace.css?v=20261021b">
+<link rel="stylesheet" href="workspace.css?v=20261023a">
 </head>
 <body class="booting">
 <a class="skip-link" href="#pg-home">Skip to workspace</a>
@@ -1804,7 +1804,7 @@ select.m-input { appearance:none; cursor:pointer; }
     </div>
     <section id="execution-evidence-section" style="margin:16px 0;padding:14px;border:1px solid var(--c4);border-radius:16px;" aria-label="Paper evidence lab">
       <div style="font-size:15px;font-weight:800;margin-bottom:6px;">Paper Evidence Lab</div>
-      <p style="font-size:11px;color:var(--g2);line-height:1.6;margin-bottom:12px;">Broker fills and observed account equity are shown separately from simulated shadow portfolios. A model needs at least 20 completed forward sessions before automatic promotion.</p>
+      <p style="font-size:11px;color:var(--g2);line-height:1.6;margin-bottom:12px;" dir="rtl">ביצועי חשבון Paper וסימולציות המחקר מוצגים בנפרד. החלפת מודל מחייבת לפחות 21 נקודות יומיות מזווגות — 20 מרווחי תשואה שהושלמו — ובדיקות איכות נוספות.</p>
       <div id="research-evidence" aria-live="polite" style="font-size:12px;color:var(--g2);">Sign in and verify a Paper broker to view your evidence.</div>
     </section>
     <section id="execution-jobs-section" aria-label="Execution queue" hidden>
@@ -1909,6 +1909,7 @@ select.m-input { appearance:none; cursor:pointer; }
 <div id="toast"></div>
 
 <script src="workspace-status.js?v=20261016c"></script>
+<script src="workspace-evidence.js?v=20261023a"></script>
 <script>
 // ════════════════════════════════════════════════════════
 // NEURAL BACKGROUND CANVAS
@@ -2612,6 +2613,8 @@ function renderResearchEvidence(payload) {
   const root = document.getElementById('research-evidence');
   if (!root) return;
   if (!payload) {
+    currentEvidenceReport = null;
+    currentEvidenceScope = null;
     root.textContent = 'Sign in and verify a Paper broker to view your evidence.';
     return;
   }
@@ -2619,7 +2622,10 @@ function renderResearchEvidence(payload) {
   const percent = value => value != null && Number.isFinite(Number(value)) ? (Number(value) * 100).toFixed(2) + '%' : 'Unavailable';
   const fill = payload.fill_summary || {};
   const marks = Array.isArray(payload.account_marks) ? payload.account_marks : [];
-  let html = `<div class="profile-row"><span>Confirmed filled orders (latest 100)</span><strong>${Number(fill.filled_orders || 0)}</strong></div>`;
+  currentEvidenceReport = typeof WorkspaceEvidence !== 'undefined' ? WorkspaceEvidence.summarize(payload.observations || [], {truncated:payload.observations_truncated}) : null;
+  currentEvidenceScope = {user:currentUser?.id, connection:currentBrokerConnection?.id, version:currentBrokerConnection?.updated_at, token:authSession?.access_token};
+  let html = renderEvidenceScorecard(payload);
+  html += `<div class="profile-row"><span>Confirmed filled orders (latest 100)</span><strong>${Number(fill.filled_orders || 0)}</strong></div>`;
   html += `<div class="profile-row"><span>Confirmed fill notional</span><strong>${money(fill.filled_notional || 0)}</strong></div>`;
   html += `<div class="profile-row"><span>Fill vs decision price</span><strong>${fill.adverse_fill_vs_decision_bps == null ? 'Awaiting priced fills' : Number(fill.adverse_fill_vs_decision_bps).toFixed(2) + ' bps'}</strong></div>`;
   html += '<p style="font-size:10px;line-height:1.5;margin:8px 0 16px;">Positive bps means an adverse fill. Fees are unverified. Accepted orders are excluded until broker fills arrive.</p>';
@@ -2699,15 +2705,49 @@ async function refreshMarketScan() {
   }
 }
 
+let currentEvidenceReport = null;
+let currentEvidenceScope = null;
+function downloadEvidenceReport() {
+  if (!currentEvidenceReport || !currentEvidenceScope || !hasVerifiedBrokerConnection() || currentUser?.id !== currentEvidenceScope.user || currentBrokerConnection?.id !== currentEvidenceScope.connection || currentBrokerConnection?.updated_at !== currentEvidenceScope.version || authSession?.access_token !== currentEvidenceScope.token) return;
+  const report = {...currentEvidenceReport, generated_at:new Date().toISOString(), source:'paired_shadow_simulations_not_broker_returns'};
+  const url = URL.createObjectURL(new Blob([JSON.stringify(report,null,2)], {type:'application/json'}));
+  const link = document.createElement('a'); link.href=url; link.download='atzma-research-report.json';
+  link.click(); setTimeout(() => URL.revokeObjectURL(url),1000);
+}
+
+function renderEvidenceScorecard(payload) {
+  if (typeof WorkspaceEvidence === 'undefined') return '<p>דוח ההשוואה אינו זמין כרגע.</p>';
+  const report = WorkspaceEvidence.summarize(payload.observations || [], {truncated:payload.observations_truncated});
+  const percent = value => Number.isFinite(value) ? (value*100).toFixed(2)+'%' : '—';
+  const labels = {champion:'המודל הפעיל', benchmark_spy:'50% SPY ו־50% מזומן', cash:'מזומן', momentum:'מומנטום', mean_reversion:'חזרה לממוצע', defensive:'הגנתית'};
+  let html = '<section dir="rtl" class="evidence-scorecard"><strong>איכות האסטרטגיה — עדיין לא הוכחה</strong>';
+  html += `<p>${report.daily_marks} נקודות יומיות משותפות · ${report.return_intervals} מרווחי תשואה. ${report.remaining_intervals ? `חסרים לפחות ${report.remaining_intervals} מרווחים לסף הזמן המינימלי.` : 'סף הזמן לבדו אינו מספיק לאישור מודל או להוכחת רווחיות.'}</p>`;
+  html += '<p>זהו ותק המדידות של המודל הפעיל. למודל מועמד חדש מתחיל חלון השוואה נפרד לאחר הצבתו למחקר.</p>';
+  if (report.first_day) html += `<p>תקופת ההשוואה: <bdi>${esc(report.first_day)} — ${esc(report.last_day)}</bdi>. כל השורות מתחילות באותה נקודת בסיס.</p>`;
+  if (report.champion_exposure_observations && !report.champion_invested_cycles) html += `<p><strong>תיק המחקר של המודל היה ללא חשיפה בכל ${report.champion_exposure_observations} המחזורים שנמדדו. תשואה אפסית משקפת מזומן ואינה הוכחה לאיכות האסטרטגיה.</strong></p>`;
+  if (report.comparisons.length) {
+    html += '<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;text-align:right;border-collapse:collapse;"><caption>תיקי מחקר מדומים, לאחר עלויות משוערות</caption><thead><tr><th>אסטרטגיה</th><th>תשואה בתקופה</th><th>ירידה מרבית במדידות היומיות</th></tr></thead><tbody>';
+    for (const row of report.comparisons) html += `<tr><th scope="row">${labels[row.strategy]}</th><td dir="ltr">${percent(row.return)}</td><td dir="ltr">${percent(row.max_drawdown)}</td></tr>`;
+    html += `</tbody></table></div><p>פער המודל מול תיק SPY המקביל: <bdi>${percent(report.excess_vs_spy)}</bdi> נקודות אחוז.</p>`;
+  } else html += '<p>אין עדיין שתי נקודות יומיות משותפות לחישוב תשואה השוואתית.</p>';
+  if (report.truncated) html += '<p>מוצג חלון נתונים מוגבל; אין כאן היסטוריה מלאה.</p>';
+  if (report.incomplete_groups) html += `<p>${report.incomplete_groups} קבוצות תצפיות לא שלמות הושמטו מההשוואה.</p>`;
+  if (payload.evidence_as_of) html += `<p>הנתונים נמשכו: ${esc(fmtOrderTime(payload.evidence_as_of))}</p>`;
+  html += '<button type="button" class="btn-secondary" onclick="downloadEvidenceReport()">הורדת דוח המחקר</button>';
+  html += '<details><summary>מה הנתונים מוכיחים ומה עדיין חסר?</summary><p>ההשוואה משתמשת בתצפית המשותפת האחרונה בכל יום לפני היום הנוכחי, באותו מחזור ובאותה גרסת מודל. אלה אינן בהכרח מדידות בשער הסגירה. העלויות הן אומדן של 10 נקודות בסיס לכל מחזור כספי, עם תקרת חשיפה של 50%.</p><p>תשואה זו שייכת לסימולציות המחקר. יתרת חשבון Paper עשויה לכלול הפקדות ופעילות ידנית, ועמלות בפועל עדיין לא אומתו. תקופה קצרה אינה מספיקה להוכחת יתרון; לוח הבורסה, מועמד חדש וכל תנאי ההחלפה נבדקים בנפרד בתהליך אישור המודלים.</p></details></section>';
+  return html;
+}
+
 async function refreshResearchEvidence() {
-  const scope = currentUser?.id;
-  if (!scope || !hasVerifiedBrokerConnection()) { renderResearchEvidence(null); return; }
+  const scope = currentUser?.id, connection = currentBrokerConnection?.id, version = currentBrokerConnection?.updated_at, token = authSession?.access_token;
+  if (!scope || !token || !hasVerifiedBrokerConnection()) { renderResearchEvidence(null); return; }
+  const current = () => currentUser?.id === scope && currentBrokerConnection?.id === connection && currentBrokerConnection?.updated_at === version && authSession?.access_token === token && hasVerifiedBrokerConnection();
   try {
     const payload = await apiJSON('/me/research', {headers:getAuthHeaders(), cache:'no-store'});
-    if (currentUser?.id === scope && hasVerifiedBrokerConnection()) renderResearchEvidence(payload);
+    if (current()) renderResearchEvidence(payload);
   } catch (error) {
     const root = document.getElementById('research-evidence');
-    if (root && currentUser?.id === scope) root.textContent = 'Evidence unavailable. Retrying on the next workspace refresh.';
+    if (root && current()) root.textContent = 'Evidence unavailable. Retrying on the next workspace refresh.';
   }
 }
 

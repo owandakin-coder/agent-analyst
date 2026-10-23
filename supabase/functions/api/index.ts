@@ -1533,14 +1533,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const userId = encodeURIComponent(String(user.id));
       const broker = await fetchBrokerConnection(String(user.id));
       const accountId = encodeURIComponent(String(broker?.metadata?.account_number ?? ""));
-      const observations = await restAdmin(`/research_observations?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=observed_at.desc&limit=600&select=strategy,observed_at,equity,payload`);
-      const decisions = await restAdmin(`/decision_events?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=created_at.desc&limit=30&select=summary,model_version,created_at,regime,payload`);
-      const marks = await restAdmin(`/paper_account_marks?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=observed_at.desc&limit=1000&select=observed_at,equity,payload`);
-      const orders = await restAdmin(`/broker_orders?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=updated_at.desc&limit=100&select=symbol,side,quantity,requested_price,status,payload,updated_at`);
-      if (!observations.ok || !decisions.ok || !orders.ok || !marks.ok) throw new Error("Research evidence is unavailable");
+      if (!broker || broker.last_verified_status !== "verified" || broker.trading_mode !== "paper" || !accountId) return json({error:"Verified Paper account required"},409);
+      const connectionId = encodeURIComponent(String(broker.id));
+      const evidenceAsOf = new Date().toISOString();
+      // Keep complete cycles and enough history for daily comparisons. Stable ordering makes pagination deterministic.
+      const observationRows: JsonMap[] = [];
+      let observationsTruncated = false;
+      for (let offset = 0; offset < 6000; offset += 1000) {
+        const response = await restAdmin(`/research_observations?user_id=eq.${userId}&broker_account_id=eq.${accountId}&observed_at=lte.${encodeURIComponent(evidenceAsOf)}&execution_requests.broker_connection_id=eq.${connectionId}&execution_requests.requested_mode=eq.paper&order=observed_at.desc,execution_request_id.desc,strategy.asc&offset=${offset}&limit=1000&select=execution_request_id,strategy,observed_at,equity,payload,execution_requests!inner(broker_connection_id,requested_mode)`);
+        if (!response.ok) throw new Error("Research evidence is unavailable");
+        const batch = await response.json() as JsonMap[];
+        observationRows.push(...batch.map(({execution_requests: _request, ...sample}) => sample));
+        if (batch.length < 1000) break;
+        observationsTruncated = offset === 5000;
+      }
+      const [decisions, marks, orders] = await Promise.all([
+        restAdmin(`/decision_events?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=created_at.desc&limit=30&select=summary,model_version,created_at,regime,payload`),
+        restAdmin(`/paper_account_marks?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=observed_at.desc&limit=1000&select=observed_at,equity,payload`),
+        restAdmin(`/broker_orders?user_id=eq.${userId}&broker_account_id=eq.${accountId}&order=updated_at.desc&limit=100&select=symbol,side,quantity,requested_price,status,payload,updated_at`),
+      ]);
+      if (!decisions.ok || !orders.ok || !marks.ok) throw new Error("Research evidence is unavailable");
       const orderRows = await orders.json() as JsonMap[];
       const strategySummary = await restRpc<JsonMap[]>("research_summary", {p_user_id: String(user.id)});
-      return json({ observations: await observations.json(), decisions: await decisions.json(), orders: orderRows,
+      const currentBroker = await fetchBrokerConnection(String(user.id));
+      if (currentBroker?.id !== broker.id || currentBroker.updated_at !== broker.updated_at ||
+          currentBroker.last_verified_status !== "verified" || currentBroker.trading_mode !== "paper" ||
+          currentBroker.metadata?.account_number !== broker.metadata?.account_number) return json({error:"Broker connection changed; refresh evidence"},409);
+      return json({ observations: observationRows, observations_truncated: observationsTruncated, evidence_as_of:evidenceAsOf,
+        decisions: await decisions.json(), orders: orderRows,
         fill_summary: summarizeFills(orderRows), strategy_summary: strategySummary,
         account_marks: await marks.json(), source: "paper_broker_and_separate_shadow_simulations", performance_verified: false });
     }

@@ -4,7 +4,23 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const html=fs.readFileSync('index.html','utf8');
 
-for (const change of ['user','connection','token']) {
+for (const change of ['user','connection','token','version']) {
+ test(`research evidence discards delayed results after ${change} changes`,async()=>{
+  let release;
+  const pending=new Promise(resolve=>release=resolve);
+  const context={currentUser:{id:'first'},currentBrokerConnection:{id:'broker-first'},authSession:{access_token:'first'},
+   hasVerifiedBrokerConnection:()=>true,getAuthHeaders:()=>({}),apiJSON:()=>pending,
+   renderResearchEvidence:()=>{throw Error('Stale research rendered');},document:{getElementById:()=>null}};
+  vm.createContext(context);
+  vm.runInContext(html.slice(html.indexOf('async function refreshResearchEvidence()'),html.indexOf('function hasOpenExecutionJob()')),context);
+  const request=context.refreshResearchEvidence();
+  if(change==='user')context.currentUser={id:'second'};
+  if(change==='connection')context.currentBrokerConnection={id:'broker-second'};
+  if(change==='token')context.authSession={access_token:'second'};
+  if(change==='version')context.currentBrokerConnection.updated_at='changed';
+  release({observations:[]}); await request;
+ });
+ if (change==='version') continue;
  test(`market scanner discards delayed results after ${change} changes`,async()=>{
   let release;
   const pending=new Promise(resolve=>release=resolve);

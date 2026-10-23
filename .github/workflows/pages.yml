@@ -14,6 +14,7 @@ on:
       - 'workspace.css'
       - 'workspace-navigation.js'
       - 'workspace-status.js'
+      - 'workspace-evidence.js'
       - 'logo.png'
       - 'privacy.html'
       - 'terms.html'
@@ -43,7 +44,7 @@ jobs:
         run: |
           mkdir -p _site
           cp -R vendor _site/
-          cp index.html workspace.css workspace-navigation.js workspace-status.js logo.png privacy.html terms.html _site/
+          cp index.html workspace.css workspace-navigation.js workspace-status.js workspace-evidence.js logo.png privacy.html terms.html _site/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
