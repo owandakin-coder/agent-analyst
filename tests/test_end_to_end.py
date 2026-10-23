@@ -11,6 +11,21 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture
+def multi_featured(long_raw_ohlcv):
+    """A complete synthetic history where the fixed model's buy can clear
+    all three real voters. Short histories are tested separately below.
+    """
+    from data_manager import DataManager
+
+    frame = DataManager.__new__(DataManager)._compute_features(long_raw_ohlcv, "TEST")
+    frame["close"] = np.linspace(100, 140, len(frame))
+    frame["rsi"] = 34.0
+    frame["boll_pct"] = 0.18
+    frame["macd_hist"] = 0.8
+    return {ticker: frame.copy() for ticker in ["AAPL", "MSFT", "GOOGL"]}
+
+
 class FixedActionModel:
     def __init__(self, action):
         self._action = np.array(action, dtype=float)
@@ -104,6 +119,20 @@ def trading_mock():
 
 
 class TestLiveTradingEndToEnd:
+    def test_short_trend_history_blocks_order(self, monkeypatch, tmp_path, multi_featured, trading_mock):
+        broker = _make_broker(monkeypatch, tmp_path, trading_mock)
+        broker.get_latest_prices = MagicMock(return_value={"AAPL": 150.0, "MSFT": 300.0, "GOOGL": 130.0})
+        broker.get_latest_quotes_info = MagicMock(return_value={})
+        short = {ticker: frame.tail(199) for ticker, frame in multi_featured.items()}
+        trader = _make_trader(short, broker)
+
+        result = trader.run_once()
+
+        trading_mock.submit_order.assert_not_called()
+        trend = result["decisions"][0]["votes"][0]
+        assert trend["direction"] == "HOLD"
+        assert "200-session" in trend["reason"]
+
     def test_run_once_places_order_and_persists_state(self, monkeypatch, tmp_path, multi_featured, trading_mock):
         broker = _make_broker(monkeypatch, tmp_path, trading_mock)
         broker.get_latest_prices = MagicMock(return_value={"AAPL": 150.0, "MSFT": 300.0, "GOOGL": 130.0})
