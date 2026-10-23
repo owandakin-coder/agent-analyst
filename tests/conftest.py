@@ -49,6 +49,12 @@ def raw_ohlcv():
 
 
 @pytest.fixture
+def long_raw_ohlcv():
+    """Enough raw sessions for feature warm-up plus a 200-session trend."""
+    return _make_ohlcv(450)
+
+
+@pytest.fixture
 def featured_df():
     """
     DataFrame עם פיצ'רים מחושבים (כפי שמחזיר DataManager).

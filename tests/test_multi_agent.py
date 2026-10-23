@@ -2,9 +2,40 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from multi_agent import AgentDirection, MultiAgentDecisionEngine
 from regime_detector import Regime, RegimeDetector
+
+
+@pytest.mark.parametrize("rows", [30, 199])
+def test_trend_does_not_substitute_spot_for_missing_history(rows):
+    from multi_agent import TrendAgent
+    df = _frame(np.full(rows, 100.0), rsi=30, boll_pct=0.1, macd_hist=1)
+    vote = TrendAgent().vote("AAPL", df, None, AgentDirection.BUY, 0.7)
+    assert vote.direction == AgentDirection.HOLD
+    assert vote.confidence == 0
+    assert "200-session" in vote.reason
+    assert "ma200" not in vote.metrics
+
+
+def test_trend_uses_full_history_at_200_session_boundary():
+    from multi_agent import TrendAgent
+    df = _frame(np.linspace(100, 140, 200), rsi=30, boll_pct=0.1, macd_hist=1)
+    vote = TrendAgent().vote("AAPL", df, None, AgentDirection.BUY, 0.7)
+    assert vote.direction == AgentDirection.BUY
+    assert vote.metrics["ma200"] == pytest.approx(120)
+    assert vote.metrics["ma200"] != vote.metrics["price"]
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), 0.0, -1.0])
+def test_trend_blocks_approval_for_invalid_history(invalid):
+    from multi_agent import TrendAgent
+    df = _frame(np.linspace(100, 140, 220), rsi=30, boll_pct=0.1, macd_hist=1)
+    df.loc[50, "close"] = invalid
+    vote = TrendAgent().vote("AAPL", df, None, AgentDirection.BUY, 0.7)
+    assert vote.direction == AgentDirection.HOLD
+    assert vote.confidence == 0
 
 
 def _frame(close, rsi, boll_pct, macd_hist, atr_pct=0.02, vol=0.12):

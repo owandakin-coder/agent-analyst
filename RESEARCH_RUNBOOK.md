@@ -151,6 +151,23 @@ market evidence during closures. No credentials should appear in job logs.
 
 ## Member comparison scorecard
 
+### Trend-history correction (2026-10-23)
+
+The original live lookback counted calendar days, then discarded feature warm-up
+rows. It supplied fewer than 200 processed sessions. The trend voter silently
+substituted the spot close for MA200. Across the first 127 decision cycles all
+1,905 trend votes had MA200 equal to price; 762 buy proposals produced no approved
+buys. Those cash-only results cannot establish strategy quality.
+
+Live fetches now request at least two calendar years and require 200 processed
+rows per ticker after the primary/broker fallback. The trend voter independently
+returns an explicit HOLD for insufficient, non-finite or non-positive history.
+No trend average is fabricated from a spot price. Existing thresholds, risk
+stops and broker verification still apply; a corrected input does not guarantee
+an approved trade or positive returns. Record this correction as a break in
+strategy behavior when interpreting historical evidence. A newly staged candidate
+must still accumulate its own completed paired sessions after staging.
+
 The Research screen compares six shadow portfolios on a shared daily window.
 Only complete same-request/same-timestamp groups with one champion hash, schema 2
 and 10 bps costs are used. Account and model boundaries cannot be pooled. Today,

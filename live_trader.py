@@ -28,7 +28,7 @@ import model_registry
 from research_lab import evaluate_shadows, positive_action_weights
 from order_evidence import confirmed_fill, requires_reconciliation
 from execution_runtime import emit_execution_event, emit_risk_event
-from multi_agent import MultiAgentDecisionEngine
+from multi_agent import MultiAgentDecisionEngine, TREND_HISTORY_ROWS
 from notifications import send_operator_alert
 from regime_detector import RegimeDetector
 from alternative_data import AlternativeDataFetcher, enrich_observation
@@ -580,11 +580,13 @@ class LiveTrader:
         מוריד MIN_DATA_DAYS+ ימים של נתונים היסטוריים (מ-yfinance)
         ומחשב פיצ'רים. זהו אותו DataManager שהשתמשנו בו באימון.
         """
-        from datetime import date
-        end   = date.today().isoformat()
-        # לוקח 20% יותר ימים כדי לפצות על ימי חופשה
-        days_back = int(MIN_DATA_DAYS * 1.3)
-        start = (date.today() - timedelta(days=days_back)).isoformat()
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+        end = today.isoformat()
+        # Calendar days are not processed trading rows. Two years leave room
+        # for weekends, holidays and feature warm-up before a 200-session trend.
+        days_back = max(int(MIN_DATA_DAYS * 1.3), 730)
+        start = (today - timedelta(days=days_back)).isoformat()
 
         # עדכון טמפורלי של DataManager
         self.data_manager.start = start
@@ -593,19 +595,21 @@ class LiveTrader:
             data = self.data_manager.load_all(force_download=True)
         except Exception as exc:
             log.warning("Primary market data fetch failed: %s. Trying broker bars fallback.", exc)
-            data = self._fetch_broker_feature_data(start=start, end=end, tickers=self.tickers)
-            if not data:
-                raise
-            return data
+            data = {}
 
+        required_rows = max(WINDOW_SIZE, TREND_HISTORY_ROWS)
         missing = [
             ticker for ticker in self.tickers
-            if ticker not in data or data[ticker] is None or len(data[ticker]) < WINDOW_SIZE
+            if ticker not in data or data[ticker] is None or len(data[ticker]) < required_rows
         ]
         if missing:
             log.warning("Market data missing/incomplete for %s. Backfilling from broker bars.", missing)
             fallback = self._fetch_broker_feature_data(start=start, end=end, tickers=missing)
             data.update(fallback)
+        incomplete = [ticker for ticker in self.tickers
+                      if ticker not in data or data[ticker] is None or len(data[ticker]) < required_rows]
+        if incomplete:
+            raise ValueError(f"Insufficient processed history ({required_rows} rows required): {incomplete}")
         return data
 
     def _fetch_broker_feature_data(self, *, start: str, end: str, tickers: list[str]) -> dict[str, pd.DataFrame]:

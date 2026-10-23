@@ -178,7 +178,8 @@ def test_daily_gain_does_not_trigger_loss_limit(monkeypatch, multi_featured):
     assert trader._enforce_daily_loss_limits(snapshot, 102_000) is False
 
 
-def test_fetch_fresh_data_falls_back_to_broker_bars(monkeypatch, raw_ohlcv):
+def test_fetch_fresh_data_falls_back_to_broker_bars(monkeypatch, long_raw_ohlcv):
+    raw_ohlcv = long_raw_ohlcv
     trader = _build_trader()
     monkeypatch.setattr(trader.data_manager, "load_all", lambda force_download=True: (_ for _ in ()).throw(ValueError("yf down")))
     monkeypatch.setattr(
@@ -192,7 +193,46 @@ def test_fetch_fresh_data_falls_back_to_broker_bars(monkeypatch, raw_ohlcv):
 
     assert set(data.keys()) == {"AAPL", "MSFT", "GOOGL"}
     assert all("close" in df.columns for df in data.values())
-    assert all(len(df) >= 30 for df in data.values())
+    assert all(len(df) >= 200 for df in data.values())
+
+
+@pytest.mark.parametrize("primary_fails", [False, True])
+def test_fetch_requires_trend_history_after_primary_and_fallback(monkeypatch, primary_fails):
+    import pandas as pd
+    from live_trader import LiveTrader
+
+    trader = LiveTrader.__new__(LiveTrader)
+    trader.tickers = ["AAPL"]
+    short = {"AAPL": pd.DataFrame({"close": np.linspace(100, 120, 199)})}
+    def primary(force_download):
+        if primary_fails:
+            raise ValueError("primary unavailable")
+        return short
+    trader.data_manager = SimpleNamespace(load_all=primary)
+    monkeypatch.setattr(trader, "_fetch_broker_feature_data", lambda **kwargs: short)
+    with pytest.raises(ValueError, match="200 rows required"):
+        trader._fetch_fresh_data()
+
+
+def test_fetch_backfills_short_primary_with_real_trend_history(monkeypatch):
+    import pandas as pd
+    from live_trader import LiveTrader
+
+    trader = LiveTrader.__new__(LiveTrader)
+    trader.tickers = ["AAPL"]
+    short = pd.DataFrame({"close": np.linspace(100, 120, 80)})
+    complete = pd.DataFrame({"close": np.linspace(100, 140, 200)})
+    trader.data_manager = SimpleNamespace(load_all=lambda force_download: {"AAPL": short})
+    calls = []
+    def fallback(**kwargs):
+        calls.append(kwargs)
+        return {"AAPL": complete}
+    monkeypatch.setattr(trader, "_fetch_broker_feature_data", fallback)
+    assert trader._fetch_fresh_data()["AAPL"] is complete
+    assert calls[0]["tickers"] == ["AAPL"]
+    start = datetime.fromisoformat(calls[0]["start"])
+    end = datetime.fromisoformat(calls[0]["end"])
+    assert (end - start).days >= 730
 
 
 def test_detect_regime_uses_existing_spy_data(monkeypatch, featured_df):

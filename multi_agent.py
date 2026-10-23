@@ -17,6 +17,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+TREND_HISTORY_ROWS = 200
+
 
 class AgentDirection(Enum):
     BUY = "BUY"
@@ -106,19 +108,29 @@ def _latest(df: pd.DataFrame, column: str, default: float = 0.0) -> float:
     return _safe_float(df[column].iloc[-1], default)
 
 
-def _rolling_close(df: pd.DataFrame, window: int) -> float:
+def _rolling_close(df: pd.DataFrame, window: int) -> float | None:
     close = df.get("close")
     if close is None or len(close) < window:
-        return _safe_float(close.iloc[-1] if close is not None and len(close) else 0.0)
-    return _safe_float(close.rolling(window).mean().iloc[-1], 0.0)
+        return None
+    values = pd.to_numeric(close.iloc[-window:], errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(values).all() or (values <= 0).any():
+        return None
+    return float(values.mean())
 
 
 class TrendAgent:
     def vote(self, ticker: str, df: pd.DataFrame, regime_signal, proposed: AgentDirection, rl_action: float) -> AgentVote:
         price = _latest(df, "close")
         ma50 = _rolling_close(df, 50)
-        ma200 = _rolling_close(df, 200)
+        ma200 = _rolling_close(df, TREND_HISTORY_ROWS)
         macd_hist = _latest(df, "macd_hist")
+
+        if ma50 is None or ma200 is None:
+            return AgentVote(
+                agent="Trend Agent", direction=AgentDirection.HOLD, confidence=0.0,
+                reason="Insufficient valid close history for the 200-session trend; no approval.",
+                metrics={"history_rows": len(df), "required_rows": TREND_HISTORY_ROWS},
+            )
 
         direction = AgentDirection.HOLD
         confidence = 0.35
