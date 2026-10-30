@@ -236,8 +236,11 @@ def evaluate_window(
     # ── SPY benchmark ─────────────────────────────────────────────
     spy_return = 0.0
     if "SPY" in test_data and len(test_data["SPY"]) >= 2:
-        spy_prices = test_data["SPY"]["close"].values
-        spy_return = (spy_prices[-1] - spy_prices[0]) / spy_prices[0]
+        # The env's first step is `window_size` days in (see benchmark.trading_window);
+        # measure SPY over the same days the model traded.
+        spy_prices = test_data["SPY"]["close"].values[window_size:]
+        if len(spy_prices) >= 2:
+            spy_return = (spy_prices[-1] - spy_prices[0]) / spy_prices[0]
 
     result = {
         "window":       w,

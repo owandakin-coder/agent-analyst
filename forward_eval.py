@@ -31,7 +31,7 @@ LOG_PATH = Path("forward_log") / "forward_performance.csv"
 FIELDS = [
     "run_date", "data_last_date", "forward_start", "trading_days", "members",
     "model_return", "spy_return", "alpha",
-    "model_sharpe", "spy_sharpe", "model_max_dd", "spy_max_dd", "git_sha",
+    "model_sharpe", "spy_sharpe", "model_max_dd", "spy_max_dd", "git_sha", "spy_window",
 ]
 
 
@@ -55,6 +55,7 @@ def build_row(model_equity, spy_equity, *, run_date: str, data_last_date: str,
         "model_max_dd": round(model["max_drawdown"], 6),
         "spy_max_dd": round(spy["max_drawdown"], 6),
         "git_sha": git_sha,
+        "spy_window": "aligned",
     }
 
 
@@ -82,11 +83,13 @@ def _git_sha() -> str:
         return ""
 
 
-def run() -> dict:
+def compute_equities():
+    """Rolls the production model and SPY over FORWARD_START..today.
+    Returns (data, agent, model_equity, spy_equity, today)."""
     from config_loader import CFG
     from data_manager import DataManager
     from ensemble_agent import load_ensemble
-    from benchmark import spy_buy_hold
+    from benchmark import spy_buy_hold, trading_window
     from promote_model import backtest_ensemble_equity_curve
 
     today = date.today().isoformat()
@@ -100,13 +103,17 @@ def run() -> dict:
 
     agent = load_ensemble(dummy_data=data)
     model_equity = backtest_ensemble_equity_curve(agent, data)
-    spy_equity = spy_buy_hold(data, CFG.initial_capital)
+    spy_equity = spy_buy_hold(trading_window(data), CFG.initial_capital)
+    return data, agent, model_equity, spy_equity, today
 
+
+def run() -> dict:
+    data, agent, model_equity, spy_equity, today = compute_equities()
     return build_row(
         model_equity, spy_equity,
         run_date=today,
         data_last_date=str(next(iter(data.values())).index[-1].date()),
-        trading_days=days,
+        trading_days=len(next(iter(data.values()))),
         members=len(agent.members),
         git_sha=_git_sha(),
     )

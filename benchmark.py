@@ -49,6 +49,17 @@ PLOTS_DIR   = Path(CFG.plots_dir)
 # Benchmark strategies
 # ══════════════════════════════════════════════════════════════════
 
+def trading_window(test_data: dict[str, pd.DataFrame], window_size: int | None = None) -> dict[str, pd.DataFrame]:
+    """The days TradingEnvironment actually trades. The env needs `window_size`
+    days of history before its first step, so a model's equity curve starts
+    `window_size` days after the data does. Benchmarks must be built from this
+    slice or they get that many extra days of market return the model never
+    had a chance to earn (measured 2026-10-30: +6.1% alpha like-for-like vs
+    -1.3% against full-window SPY, forward window 2025-01-02..2026-10-30)."""
+    w = CFG.window_size if window_size is None else window_size
+    return {t: df.iloc[w:] for t, df in test_data.items()}
+
+
 def spy_buy_hold(test_data: dict[str, pd.DataFrame], initial_capital: float) -> np.ndarray:
     """SPY Buy & Hold — הבנצ'מרק הסטנדרטי."""
     if "SPY" not in test_data:
@@ -359,10 +370,11 @@ def run_benchmark(agent_equity: np.ndarray | None = None,
 
     initial_capital = float(agent_equity[0])
 
-    # בנצ'מרקים
-    spy_eq   = spy_buy_hold(test_data, initial_capital)
-    ew_eq    = equal_weight_buy_hold(test_data, initial_capital)
-    mom_eq   = momentum_strategy(test_data, initial_capital)
+    # בנצ'מרקים — על אותם ימים שהסוכן באמת סוחר בהם (ראה trading_window)
+    bench_data = trading_window(test_data)
+    spy_eq   = spy_buy_hold(bench_data, initial_capital)
+    ew_eq    = equal_weight_buy_hold(bench_data, initial_capital)
+    mom_eq   = momentum_strategy(bench_data, initial_capital)
 
     # חיתוך לאורך הקצר ביותר
     n = min(len(agent_equity), len(spy_eq), len(ew_eq), len(mom_eq))

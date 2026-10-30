@@ -42,3 +42,9 @@ def test_append_row_keeps_history_and_replaces_same_day(tmp_path):
         rows = list(csv.DictReader(f))
     assert [r["run_date"] for r in rows] == ["2026-10-03", "2026-10-04"]
     assert float(rows[1]["model_return"]) == pytest.approx(0.30, abs=1e-4)
+
+
+def test_build_row_marks_spy_window_as_aligned():
+    row = _row()
+    assert row["spy_window"] == "aligned"
+    assert "spy_window" in FIELDS

@@ -226,10 +226,10 @@ def metrics_from_equity(equity: np.ndarray) -> dict:
 
 def compute_spy_baseline(test_data: dict) -> dict | None:
     """SPY buy-and-hold over the same window, as the 'did nothing' baseline."""
-    from benchmark import spy_buy_hold
+    from benchmark import spy_buy_hold, trading_window
 
     try:
-        equity = spy_buy_hold(test_data, CFG.initial_capital)
+        equity = spy_buy_hold(trading_window(test_data), CFG.initial_capital)
     except (ValueError, KeyError):
         return None
     return metrics_from_equity(np.asarray(equity, dtype=float))
