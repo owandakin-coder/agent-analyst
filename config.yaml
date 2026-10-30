@@ -77,7 +77,7 @@ live:
   # the original rule) or "trend_defense" (Entry agent's pullback-only timing is
   # not a veto). Replay 2025-02..2026-10: unanimous approved orders on 24% of
   # days (+14.0%, Sharpe 0.86); trend_defense (+18.7%, Sharpe 1.10, maxDD 6.4%).
-  approval_rule: unanimous
+  approval_rule: trend_defense
   buy_threshold: 0.08
   sell_threshold: -0.05
   max_concentration: 0.08
