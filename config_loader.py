@@ -151,6 +151,10 @@ class Config:
         return int(self._data["live"]["min_data_days"])
 
     @property
+    def live_approval_rule(self) -> str:
+        return str(self.get("live", "approval_rule", default="unanimous"))
+
+    @property
     def live_buy_threshold(self) -> float:
         return float(self._data["live"]["buy_threshold"])
 

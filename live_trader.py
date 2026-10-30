@@ -85,6 +85,7 @@ try:
     MAX_SINGLE_ORDER_NOTIONAL_PCT = _CFG.live_max_single_order_notional_pct
     CASH_BUFFER_PCT = _CFG.live_cash_buffer_pct
     STOP_LOSS_PCT = _CFG.live_stop_loss_pct
+    APPROVAL_RULE = _CFG.live_approval_rule
     NO_MARGIN = _CFG.live_no_margin
     AUTO_DELEVERAGE = _CFG.live_auto_deleverage
     PRICE_MIN = _CFG.live_price_min
@@ -104,6 +105,7 @@ except Exception:
     MAX_SINGLE_ORDER_NOTIONAL_PCT = 0.04
     CASH_BUFFER_PCT = 0.05
     STOP_LOSS_PCT = 0.08
+    APPROVAL_RULE = "unanimous"
     NO_MARGIN = True
     AUTO_DELEVERAGE = True
     PRICE_MIN = 1.0
@@ -186,6 +188,7 @@ class LiveTrader:
             buy_threshold=BUY_THRESHOLD,
             sell_threshold=SELL_THRESHOLD,
             stop_loss_pct=STOP_LOSS_PCT,
+            approval_rule=APPROVAL_RULE,
         )
         self._alt_fetcher     = AlternativeDataFetcher()
         self.last_cycle_result: dict | None = None

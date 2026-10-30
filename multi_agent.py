@@ -76,9 +76,9 @@ class MultiAgentDecisionBundle:
     def top_summary(self) -> str:
         if not self.decisions:
             return "No trade candidates."
-        unanimous = [d for d in self.decisions if d.unanimous and abs(d.final_action) > 0]
-        if unanimous:
-            top = max(unanimous, key=lambda d: abs(d.final_action))
+        approved = [d for d in self.decisions if abs(d.final_action) > 0]
+        if approved:
+            top = max(approved, key=lambda d: abs(d.final_action))
             return top.explanation
         vetoed = max(self.decisions, key=lambda d: abs(d.proposed_action))
         return f"No unanimous trade. {vetoed.ticker}: {vetoed.explanation}"
@@ -272,8 +272,19 @@ class DefenseAgent:
         )
 
 
+APPROVAL_RULES = ("unanimous", "trend_defense")
+
+
 class MultiAgentDecisionEngine:
-    def __init__(self, buy_threshold: float = 0.05, sell_threshold: float = -0.05, stop_loss_pct: float = 0.08):
+    def __init__(self, buy_threshold: float = 0.05, sell_threshold: float = -0.05, stop_loss_pct: float = 0.08,
+                 approval_rule: str = "unanimous"):
+        # "unanimous": Trend, Entry and Defense must all agree (production default).
+        # "trend_defense": Trend and Defense must agree; the Entry agent's
+        # pullback-only timing is not a veto. See live_stack_replay.py for the
+        # measured difference.
+        if approval_rule not in APPROVAL_RULES:
+            raise ValueError(f"approval_rule must be one of {APPROVAL_RULES}, got {approval_rule!r}")
+        self.approval_rule = approval_rule
         self.buy_threshold = buy_threshold
         self.sell_threshold = sell_threshold
         self.trend_agent = TrendAgent()
@@ -346,14 +357,18 @@ class MultiAgentDecisionEngine:
                 ),
             ]
             unanimous = all(v.direction == proposed for v in votes)
-            final_action = rl_action if unanimous else 0.0
-            explanation = self._explain(ticker, proposed, votes, unanimous)
+            if self.approval_rule == "trend_defense":
+                approved = all(v.direction == proposed for v in votes if v.agent != "Entry Agent")
+            else:
+                approved = unanimous
+            final_action = rl_action if approved else 0.0
+            explanation = self._explain(ticker, proposed, votes, approved)
             decisions.append(TickerDecision(
                 ticker=ticker,
                 proposed_action=rl_action,
                 final_action=final_action,
                 unanimous=unanimous,
-                direction=proposed if unanimous else AgentDirection.HOLD,
+                direction=proposed if approved else AgentDirection.HOLD,
                 votes=votes,
                 explanation=explanation,
             ))
