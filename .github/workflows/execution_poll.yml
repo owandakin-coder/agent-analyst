@@ -41,6 +41,7 @@ on:
       - 'user_execution_worker.py'
       - 'live_trader.py'
       - 'broker_api.py'
+      - 'config.yaml'
 
 permissions:
   contents: read
