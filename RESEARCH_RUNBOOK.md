@@ -1,5 +1,22 @@
 # ATZMA evidence and release contract
 
+## Owner-authorized Paper policy and research panel
+
+The owner explicitly approved Entry as advisory in this chat on 2026-11-05.
+`live.approval_rule: trend_defense` requires Trend and Defense agreement; broker
+verification, pauses, risk stops, sizing and model release gates still apply.
+This approval supersedes the earlier instruction to preserve Entry's veto.
+
+`research_agents.count` enables up to 10,000 quantitative parameter variants
+(3,000 configured). Set it to 0 to disable. Momentum, moving-average distance
+and mean-reversion variants share 200 valid positive close observations and run
+as vectorized calculations, without LLM calls, subprocesses or broker access.
+`decision_ready.research_agents` retains per-ticker family counts and failures
+to obtain valid history. It grants no execution or model-release authority.
+These correlated variants are not 3,000 independently trained models, independent
+research observations, completed forward sessions or evidence of profitability.
+The historical model/RiskManager gate does not replay this research panel.
+
 The deployment runs Paper execution. Shadow portfolios and broker results have
 different provenance and are never treated as interchangeable returns.
 

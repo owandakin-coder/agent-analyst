@@ -29,6 +29,7 @@ from research_lab import evaluate_shadows, positive_action_weights
 from order_evidence import confirmed_fill, requires_reconciliation
 from execution_runtime import emit_execution_event, emit_risk_event
 from multi_agent import MultiAgentDecisionEngine, TREND_HISTORY_ROWS
+from research_agents import ResearchAgentPanel
 from notifications import send_operator_alert
 from regime_detector import RegimeDetector
 from alternative_data import AlternativeDataFetcher, enrich_observation
@@ -86,6 +87,7 @@ try:
     CASH_BUFFER_PCT = _CFG.live_cash_buffer_pct
     STOP_LOSS_PCT = _CFG.live_stop_loss_pct
     APPROVAL_RULE = _CFG.live_approval_rule
+    RESEARCH_AGENT_COUNT = _CFG.get("research_agents", "count", default=0)
     NO_MARGIN = _CFG.live_no_margin
     AUTO_DELEVERAGE = _CFG.live_auto_deleverage
     PRICE_MIN = _CFG.live_price_min
@@ -95,6 +97,7 @@ try:
     MIN_TRADE_VALUE = _CFG.min_trade_value
     MODEL_DIR = _CFG.model_dir
 except Exception:
+    RESEARCH_AGENT_COUNT = 0
     WINDOW_SIZE = 30
     MIN_DATA_DAYS = 200
     BUY_THRESHOLD = 0.05
@@ -184,6 +187,7 @@ class LiveTrader:
 
         # Regime detection + alternative data
         self._regime_detector = RegimeDetector()
+        self._research_agents = ResearchAgentPanel(RESEARCH_AGENT_COUNT)
         self._multi_agent = MultiAgentDecisionEngine(
             buy_threshold=BUY_THRESHOLD,
             sell_threshold=SELL_THRESHOLD,
@@ -483,10 +487,12 @@ class LiveTrader:
         action = decision_bundle.final_action_vector(self.tickers)
         log.info("Multi-agent summary: %s", decision_bundle.top_summary())
         emit_execution_event("decision_ready", {
+            "approval_rule": APPROVAL_RULE,
             "regime": decision_bundle.regime,
             "strategy_mode": decision_bundle.strategy_mode,
             "summary": decision_bundle.top_summary(),
             "decisions": [decision.as_dict() for decision in decision_bundle.decisions],
+            "research_agents": self._research_agents.evaluate(fresh_data),
         })
 
         # התאמת גודל פוזיציה לפי סיכון (with regime multiplier + kelly + correlation)

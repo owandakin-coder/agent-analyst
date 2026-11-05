@@ -386,6 +386,6 @@ class MultiAgentDecisionEngine:
     def _explain(ticker: str, proposed: AgentDirection, votes: list[AgentVote], unanimous: bool) -> str:
         if unanimous:
             dominant = max(votes, key=lambda vote: vote.confidence)
-            return f"{proposed.value} {ticker}: unanimous approval. {dominant.agent}: {dominant.reason}"
+            return f"{proposed.value} {ticker}: required agents approved. {dominant.agent}: {dominant.reason}"
         blocks = [f"{vote.agent}={vote.direction.value}" for vote in votes]
         return f"HOLD {ticker}: vote split ({', '.join(blocks)})."
