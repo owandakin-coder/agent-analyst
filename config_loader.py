@@ -155,6 +155,11 @@ class Config:
         return str(self.get("live", "approval_rule", default="unanimous"))
 
     @property
+    def live_reentry_cooldown_days(self) -> int:
+        # Calendar days a ticker stays un-buyable after any SELL of it. 0 disables.
+        return int(self.get("live", "reentry_cooldown_days", default=3))
+
+    @property
     def live_buy_threshold(self) -> float:
         return float(self._data["live"]["buy_threshold"])
 

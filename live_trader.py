@@ -87,6 +87,7 @@ try:
     CASH_BUFFER_PCT = _CFG.live_cash_buffer_pct
     STOP_LOSS_PCT = _CFG.live_stop_loss_pct
     APPROVAL_RULE = _CFG.live_approval_rule
+    REENTRY_COOLDOWN_DAYS = _CFG.live_reentry_cooldown_days
     RESEARCH_AGENT_COUNT = _CFG.get("research_agents", "count", default=0)
     NO_MARGIN = _CFG.live_no_margin
     AUTO_DELEVERAGE = _CFG.live_auto_deleverage
@@ -109,6 +110,7 @@ except Exception:
     CASH_BUFFER_PCT = 0.05
     STOP_LOSS_PCT = 0.08
     APPROVAL_RULE = "unanimous"
+    REENTRY_COOLDOWN_DAYS = 3
     NO_MARGIN = True
     AUTO_DELEVERAGE = True
     PRICE_MIN = 1.0
@@ -208,6 +210,21 @@ class LiveTrader:
 
     def _portfolio_market_value(self, prices: dict[str, float], positions: dict[str, float]) -> float:
         return float(sum(max(0.0, positions.get(t, 0.0)) * max(0.0, prices.get(t, 0.0)) for t in self.tickers))
+
+    def _recent_sell_tickers(self) -> set[str]:
+        """Tickers the broker shows as sold inside the cooldown window.
+
+        Read from broker history, not process memory: every cycle is a fresh
+        process. A failed lookup returns an empty set (no extra block); the
+        order path already fails closed on broker errors.
+        """
+        if REENTRY_COOLDOWN_DAYS <= 0 or not hasattr(self.broker, "recent_sell_tickers"):
+            return set()
+        try:
+            return set(self.broker.recent_sell_tickers(REENTRY_COOLDOWN_DAYS))
+        except Exception as exc:
+            log.warning("Re-entry cooldown lookup failed: %s", exc)
+            return set()
 
     def _active_positions_count(self, positions: dict[str, float]) -> int:
         return sum(1 for qty in positions.values() if qty and qty > 0)
@@ -910,8 +927,18 @@ class LiveTrader:
             log.info("Skipping buys: available cash after reserve is below minimum trade value.")
             return order_events
 
+        # A ticker sold in the last REENTRY_COOLDOWN_DAYS is not bought back.
+        # 2026-11-05 JNJ: trailing stop sold 26 shares at 19:17, the model asked
+        # for the same stock 13 minutes later and the cycle bought it again, so
+        # the stop only realised a loss and paid the spread twice.
+        cooling_down = self._recent_sell_tickers()
+
         for i, ticker in buy_actions:
             if ticker in exited_tickers:
+                continue
+            if ticker in cooling_down:
+                log.info("Skipping BUY %s: sold within the last %s days (re-entry cooldown).",
+                         ticker, REENTRY_COOLDOWN_DAYS)
                 continue
             act   = float(action[i])
             price = prices.get(ticker, 0.0)

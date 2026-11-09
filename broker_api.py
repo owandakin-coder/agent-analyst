@@ -493,6 +493,22 @@ class AlpacaBrokerAPI:
         request = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
         return list(self._call_with_retry("get_open_orders", self._trading.get_orders, filter=request))
 
+    def recent_sell_tickers(self, days: int) -> set[str]:
+        """Symbols with a live or filled SELL order submitted in the last `days` days."""
+        if GetOrdersRequest is None or QueryOrderStatus is None or days <= 0:
+            return set()
+        after = datetime.now(timezone.utc) - timedelta(days=days)
+        request = GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500, after=after)
+        orders = self._call_with_retry("get_orders", self._trading.get_orders, filter=request)
+        sold: set[str] = set()
+        for order in orders or []:
+            side = str(getattr(order, "side", "")).split(".")[-1].upper()
+            status = str(getattr(order, "status", "")).split(".")[-1].lower()
+            if side == "SELL" and status not in {"canceled", "cancelled", "expired", "rejected"}:
+                sold.add(getattr(order, "symbol", ""))
+        sold.discard("")
+        return sold
+
     def get_positions(self) -> dict[str, float]:
         positions: dict[str, float] = {}
         try:
