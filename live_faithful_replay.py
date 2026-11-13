@@ -105,6 +105,7 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
     patch = dict(overrides or {})
     if approval_rule:
         patch["APPROVAL_RULE"] = approval_rule
+    risk_over = {k[5:].lower(): bool(patch.pop(k)) for k in [k for k in patch if k.startswith("RISK_")]}
     for name, value in patch.items():
         if not hasattr(live_trader, name):
             raise ValueError(f"unknown live_trader constant: {name}")
@@ -122,6 +123,8 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
         agent = load_ensemble(dummy_data={t: df[df.index >= FORWARD_START] for t, df in full.items()})
         broker = SimBroker(CFG.initial_capital, CFG.slippage_pct, CFG.commission_pct)
         risk = RiskManager(CFG.initial_capital)
+        for name, value in risk_over.items():
+            setattr(risk, name, value)
         trader = live_trader.LiveTrader(
             model=agent, broker=broker, data_manager=_NoData(), risk_manager=risk,
             vec_norm=None, tickers=tickers, initial_capital=CFG.initial_capital,
@@ -129,6 +132,7 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
 
         days = [i for i, d in enumerate(index) if str(d.date()) >= start and (end is None or str(d.date()) <= end)]
         equity, gross, peak = [CFG.initial_capital], [0.0], CFG.initial_capital
+        raws, dates = [], []
         for k, i in enumerate(days[:-1]):
             d = index[i]
             broker.now = d.to_pydatetime().replace(tzinfo=timezone.utc)
@@ -153,6 +157,9 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
 
             obs = trader._build_observation(fresh, cash, net_worth, drawdown)
             raw = np.asarray(agent.predict(obs[np.newaxis], deterministic=True)).flatten()
+            raws.append(raw.copy())
+            raw = trader._apply_signal_source(raw, fresh, positions)
+            dates.append(d)
             bundle = trader._multi_agent.evaluate(
                 tickers=tickers, fresh_data=fresh, raw_action=raw, regime_signal=signal,
                 positions=positions, entry_prices=trader._entry_prices,
@@ -175,7 +182,7 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
             "avg_gross": float(np.mean(gross)), "end_gross": gross[-1],
             "live": metrics_from_equity(np.array(equity)),
             "spy": metrics_from_equity(np.asarray(spy, dtype=float)),
-            "equity": equity,
+            "equity": equity, "raw": np.array(raws), "dates": dates, "tickers": tickers,
         }
     finally:
         for name, value in saved.items():

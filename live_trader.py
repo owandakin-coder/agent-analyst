@@ -88,6 +88,7 @@ try:
     STOP_LOSS_PCT = _CFG.live_stop_loss_pct
     APPROVAL_RULE = _CFG.live_approval_rule
     REENTRY_COOLDOWN_DAYS = _CFG.live_reentry_cooldown_days
+    SIGNAL_SOURCE = _CFG.live_signal_source
     RESEARCH_AGENT_COUNT = _CFG.get("research_agents", "count", default=0)
     NO_MARGIN = _CFG.live_no_margin
     AUTO_DELEVERAGE = _CFG.live_auto_deleverage
@@ -111,6 +112,7 @@ except Exception:
     STOP_LOSS_PCT = 0.08
     APPROVAL_RULE = "unanimous"
     REENTRY_COOLDOWN_DAYS = 3
+    SIGNAL_SOURCE = "model"
     NO_MARGIN = True
     AUTO_DELEVERAGE = True
     PRICE_MIN = 1.0
@@ -185,6 +187,12 @@ class LiveTrader:
 
         # Detect ensemble mode (EnsembleAgent has its own normalisation)
         self._is_ensemble = hasattr(model, "members")
+        if SIGNAL_SOURCE == "trend":
+            # Kelly sizing scales a model's action by its own track record. The
+            # rules-based action carries no confidence, so it is sized by the caps
+            # (per-order, concentration, gross, cash buffer) and the regime
+            # multiplier instead; Kelly would shrink every buy below the threshold.
+            risk_manager.use_kelly = False
         self._model_version = _resolve_model_version()
 
         # Regime detection + alternative data
@@ -210,6 +218,13 @@ class LiveTrader:
 
     def _portfolio_market_value(self, prices: dict[str, float], positions: dict[str, float]) -> float:
         return float(sum(max(0.0, positions.get(t, 0.0)) * max(0.0, prices.get(t, 0.0)) for t in self.tickers))
+
+    def _apply_signal_source(self, raw_action: np.ndarray, fresh_data: dict, positions: dict) -> np.ndarray:
+        """The model's raw action, or the rules-based trend action when configured."""
+        if SIGNAL_SOURCE != "trend":
+            return raw_action
+        from trend_signal import trend_actions
+        return trend_actions(fresh_data, self.tickers, positions, top_n=MAX_POSITIONS)
 
     def _recent_sell_tickers(self) -> set[str]:
         """Tickers the broker shows as sold inside the cooldown window.
@@ -491,6 +506,7 @@ class LiveTrader:
             emit_execution_event("execution_aborted", {"reason": "invalid_model_action"})
             return
 
+        raw_action = self._apply_signal_source(raw_action, fresh_data, positions)
         decision_bundle = self._multi_agent.evaluate(
             tickers=self.tickers,
             fresh_data=fresh_data,

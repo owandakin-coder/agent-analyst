@@ -11,6 +11,14 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _model_signal_source(monkeypatch):
+    """These tests drive orders from the stubbed model action, whatever config.yaml says."""
+    import live_trader
+
+    monkeypatch.setattr(live_trader, "SIGNAL_SOURCE", "model")
+
+
 @pytest.fixture
 def multi_featured(long_raw_ohlcv):
     """A complete synthetic history where the fixed model's buy can clear
