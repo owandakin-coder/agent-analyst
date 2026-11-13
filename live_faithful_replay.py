@@ -105,6 +105,9 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
     patch = dict(overrides or {})
     if approval_rule:
         patch["APPROVAL_RULE"] = approval_rule
+    for k in [k for k in patch if k.startswith("TREND_")]:
+        import trend_signal
+        setattr(trend_signal, k[6:], patch.pop(k))
     risk_over = {k[5:].lower(): bool(patch.pop(k)) for k in [k for k in patch if k.startswith("RISK_")]}
     for name, value in patch.items():
         if not hasattr(live_trader, name):

@@ -74,3 +74,15 @@ def test_model_source_leaves_the_model_action_alone(monkeypatch):
     trader = _build_trader()
     raw = np.array([0.3, -0.2, 0.0])
     assert trader._apply_signal_source(raw, {}, {}) is raw
+
+
+def test_rank_by_lowvol_prefers_the_calmer_name(monkeypatch):
+    import trend_signal
+
+    rng = np.random.default_rng(1)
+    base = 100 * np.exp(np.arange(260) * 0.002)
+    calm = _frame(base * (1 + rng.normal(0, 0.002, 260)))
+    wild = _frame(base * 1.5 * (1 + rng.normal(0, 0.02, 260)))   # higher 6-month momentum, noisier
+    data = {"CALM": calm, "WILD": wild}
+    monkeypatch.setattr(trend_signal, "RANK_BY", "lowvol")
+    assert list(np.flatnonzero(trend_actions(data, ["CALM", "WILD"], {}, top_n=1))) == [0]

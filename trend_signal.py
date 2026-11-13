@@ -31,6 +31,7 @@ SMA_SLOW = 200
 SMA_FAST = 50
 MOMENTUM_DAYS = 126
 BUY_ACTION = 0.6
+RANK_BY = "momentum"   # "momentum" | "none" (ticker order) | "lowvol"
 
 
 def trend_actions(
@@ -57,8 +58,14 @@ def trend_actions(
         elif price > slow and fast > slow and is_held:
             action[i] = BUY_ACTION
         elif price > slow and fast > slow:
-            base = float(close.iloc[-MOMENTUM_DAYS - 1]) if len(close) > MOMENTUM_DAYS else float(close.iloc[0])
-            candidates.append((price / base - 1.0, i))
+            if RANK_BY == "momentum":
+                base = float(close.iloc[-MOMENTUM_DAYS - 1]) if len(close) > MOMENTUM_DAYS else float(close.iloc[0])
+                score = price / base - 1.0
+            elif RANK_BY == "lowvol":
+                score = -float(close.pct_change().iloc[-60:].std())
+            else:
+                score = -float(i)
+            candidates.append((score, i))
     held_on = sum(1 for t in tickers if held.get(t, 0.0) > 0)
     room = max(0, top_n - held_on)
     for _, i in sorted(candidates, reverse=True)[:room]:
