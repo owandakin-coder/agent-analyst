@@ -9,6 +9,7 @@ import { readStoredBrokerSecrets, replacementBrokerSecrets } from "./broker_secr
 import { brokerOrderEventPolicy } from "./broker_order_events.ts";
 import { ownsLease } from "./execution_lease.ts";
 import { eligibleAssets, screenSnapshots } from "./market_scanner.ts";
+import { ttlCached, type TtlEntry } from "./ttl_cache.ts";
 
 const PROJECT_REF = "sofowpweliticltlbxrj";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("ATZMA_SUPABASE_URL") ?? `https://${PROJECT_REF}.supabase.co`;
@@ -434,6 +435,18 @@ async function applyControlAction(action: string, actor: string): Promise<JsonMa
   return saveControlState(next, actor);
 }
 
+// Short-lived per-isolate cache with in-flight sharing. The page fires /account and
+// /positions together, and each used to repeat the same auth + broker-row lookups.
+// Failures are never cached. TTLs are kept short because other isolates and the
+// database can change underneath a cached value.
+const USER_CACHE_TTL_MS = 20_000;
+const BROKER_SESSION_TTL_MS = 20_000;
+const HEALTH_TTL_MS = 10_000;
+
+const userCache = new Map<string, TtlEntry<JsonMap>>();
+const brokerSessionCache = new Map<string, TtlEntry<AlpacaSession>>();
+const healthCache = new Map<string, TtlEntry<JsonMap>>();
+
 async function authRequest(path: string, init: RequestInit = {}, useServiceRole = false): Promise<Response> {
   const headers = new Headers(init.headers);
   const apiKey = useServiceRole ? SUPABASE_SERVICE_ROLE_KEY : SUPABASE_ANON_KEY;
@@ -449,6 +462,7 @@ async function restAdmin(path: string, init: RequestInit = {}): Promise<Response
   headers.set("apikey", SUPABASE_SERVICE_ROLE_KEY);
   headers.set("Authorization", `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`);
   if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
+  if (path.startsWith("/broker_connections") && (init.method ?? "GET").toUpperCase() !== "GET") brokerSessionCache.clear();
   return fetchWithRetry(`${SUPABASE_URL}/rest/v1${path}`, { ...init, headers });
 }
 
@@ -491,11 +505,13 @@ function extractServiceError(payload: unknown, fallback: string): string {
 async function requireUser(req: Request): Promise<JsonMap> {
   const token = getBearerToken(req);
   if (!token) throw new Error("Unauthorized");
-  const res = await authRequest("/auth/v1/user", {
-    headers: { "Authorization": `Bearer ${token}` },
+  return ttlCached(userCache, token, USER_CACHE_TTL_MS, async () => {
+    const res = await authRequest("/auth/v1/user", {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error("Unauthorized");
+    return await res.json() as JsonMap;
   });
-  if (!res.ok) throw new Error("Unauthorized");
-  return await res.json() as JsonMap;
 }
 
 // One request each instead of PATCH, SELECT, INSERT-if-missing (profiles) and
@@ -783,17 +799,20 @@ async function resolveScopedBrokerSession(req: Request): Promise<AlpacaSession |
 
 async function requireScopedBrokerSession(req: Request): Promise<AlpacaSession> {
   const user = await requireUser(req);
-  const row = await fetchBrokerConnection(String(user.id));
-  if (!row?.enabled || row.last_verified_status !== "verified" || !row.api_key_encrypted || !row.secret_key_encrypted) {
-    throw new Error("Verified broker connection required");
-  }
-  return {
-    apiKey: await decryptSecret(row.api_key_encrypted),
-    secretKey: await decryptSecret(row.secret_key_encrypted),
-    baseUrl: row.base_url,
-    scoped: true,
-    mode: row.trading_mode,
-  };
+  const userId = String(user.id);
+  return ttlCached(brokerSessionCache, userId, BROKER_SESSION_TTL_MS, async () => {
+    const row = await fetchBrokerConnection(userId);
+    if (!row?.enabled || row.last_verified_status !== "verified" || !row.api_key_encrypted || !row.secret_key_encrypted) {
+      throw new Error("Verified broker connection required");
+    }
+    return {
+      apiKey: await decryptSecret(row.api_key_encrypted),
+      secretKey: await decryptSecret(row.secret_key_encrypted),
+      baseUrl: row.base_url,
+      scoped: true,
+      mode: row.trading_mode,
+    };
+  });
 }
 
 function serializeBrokerConnection(row: BrokerConnectionRow | null, decryptedApiKey = "", decryptedSecretKey = "") {
@@ -1090,7 +1109,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     if (path === "/health") {
-      const runtime = await restRpc<JsonMap>("autonomous_runtime_status");
+      const runtime = await ttlCached(healthCache, "runtime", HEALTH_TTL_MS, () => restRpc<JsonMap>("autonomous_runtime_status"));
       return json({
         ok: true,
         system: "ATZMA",

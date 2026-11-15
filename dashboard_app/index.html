@@ -3145,6 +3145,7 @@ function populateTickerOptions() {
 }
 
 // Dynamic stocks — populated from Alpaca positions
+const PORTFOLIO_SNAPSHOT_KEY = 'atzma_portfolio_snap';
 let STOCKS = [];
 let ALL_TRADES = [];
 
@@ -3595,6 +3596,7 @@ async function fetchAlpacaData() {
 
     const t = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
     setDataStatus('LIVE', t);
+    try { localStorage.setItem(PORTFOLIO_SNAPSHOT_KEY, JSON.stringify({ scope, at: Date.now(), acc, positions })); } catch (_) {}
 
   } catch(e) {
     if (!stillScoped()) return;
@@ -3618,6 +3620,36 @@ async function fetchAlpacaData() {
 // Fetch every 30s
 fetchAlpacaData();
 setInterval(fetchAlpacaData, 30000);
+
+// Paint the last broker snapshot straight from this device while /me and the broker
+// calls are still in flight, so the portfolio is not blank for the first seconds.
+// Only for the same signed-in user; the live fetch replaces it as soon as it lands.
+function paintPortfolioSnapshot(userId) {
+  try {
+    const snap = JSON.parse(localStorage.getItem(PORTFOLIO_SNAPSHOT_KEY) || 'null');
+    if (!userId || !snap || snap.scope !== userId || !(Date.now() - snap.at < 24 * 3600 * 1000)) return;
+    const { acc, positions } = snap;
+    if (!acc || !Array.isArray(positions) || !Number.isFinite(acc.equity) || !Number.isFinite(acc.last_equity)) return;
+    portBase = acc.equity;
+    portOpen = acc.last_equity;
+    lastPort = portBase;
+    STOCKS.length = 0;
+    positions.forEach(p => {
+      const chgPct = p.change_today || 0;
+      STOCKS.push({
+        t: p.symbol, n: NAMES[p.symbol] || p.symbol, shares: p.qty, price: p.current_price,
+        base: p.current_price / (1 + chgPct) || p.current_price, cls: chgPct >= 0 ? 'bg' : 'br', vol: 0.5,
+        change_today: chgPct, unrealized_pl: p.unrealized_pl, unrealized_plpc: p.unrealized_plpc,
+        market_value: p.market_value, avg_entry: p.avg_entry,
+      });
+    });
+    STOCKS.sort((x, y) => (y.market_value || 0) - (x.market_value || 0));
+    renderStocks();
+    renderPositionsPage();
+    updateHeroUI();
+    setText('last-updated-lbl', 'Saved on this device · updating');
+  } catch (_) {}
+}
 
 function updateHeroUI() {
   const chg  = portBase - portOpen;
@@ -4669,6 +4701,7 @@ async function bootstrapAuth() {
   try {
     setBootMessage('Restoring your personal trading workspace.');
     storeAuthSession(JSON.parse(raw));
+    paintPortfolioSnapshot(authSession?.user?.id);
     await hydrateCurrentUser({ showOverlayOnAuthFailure: false });
     hideAuthOverlay();
     clearAuthUrlState();
