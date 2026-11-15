@@ -15,7 +15,7 @@ function fixture() {
     apiJSON: async () => { calls.me++; return { profile: { id: 'member' } }; },
     mergeRemotePreferences() {}, loadSettings() {}, updateIdentityUI() {},
     finishBootstrap() { calls.ready++; }, refreshMemberWorkspace: () => workspace,
-    isAuthFailure: () => false, console,
+    isAuthFailure: () => false, prefetchMemberWorkspace() {}, console,
   };
   vm.createContext(context);
   vm.runInContext(source, context);

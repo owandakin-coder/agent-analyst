@@ -58,7 +58,7 @@ for (const [fn,end] of [['fetchAlpacaData','// Fetch every 30s'],['loadAlpacaTra
    const pending=new Promise(resolve=>{release=resolve;});
    const context={authSession:{access_token:'fixture'},currentUser:{id:'first'},currentBrokerConnection:{id:'broker-first'},
     hasVerifiedBrokerConnection:()=>true,API_BASE:'https://fixture.invalid',getAuthHeaders:()=>({}),
-    fetch:()=>pending,console:{warn:()=>{}},alpacaAccount:null,ALL_TRADES:[],
+    fetch:()=>pending,console:{warn:()=>{}},alpacaAccount:null,ALL_TRADES:[],portfolioPrefetch:null,
     renderHomeAudit:()=>{throw new Error('A stale response rendered private data');}};
    vm.createContext(context);
    vm.runInContext(html.slice(html.indexOf(`async function ${fn}()`),html.indexOf(end,html.indexOf(`async function ${fn}()`))),context);
