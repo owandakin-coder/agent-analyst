@@ -12,6 +12,7 @@ For research purposes only.
 
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 import logging
 
@@ -31,6 +32,7 @@ try:
     KELLY_MAX        = CFG.kelly_max
     CORR_HIGH        = CFG.corr_threshold
     CORR_WINDOW      = CFG.corr_window
+    PEAK_HALF_LIFE_DAYS = float(CFG.get("risk", "peak_half_life_days", default=0) or 0)
 except Exception:
     # Fallback defaults
     DRAWDOWN_REDUCE  = 0.10
@@ -42,6 +44,7 @@ except Exception:
     KELLY_MAX        = 1.00
     CORR_HIGH        = 0.80
     CORR_WINDOW      = 60
+    PEAK_HALF_LIFE_DAYS = 0.0
 
 
 class RiskLevel(Enum):
@@ -84,6 +87,11 @@ class RiskManager:
         self.peak_value        = initial_capital
         self.risk_level        = RiskLevel.NORMAL
         self._current_drawdown = 0.0
+        # Drawdown is measured from a peak that fades toward the current value, so an
+        # account that is mostly in cash after a stop-out can start buying again
+        # (0 = never fade, the old behaviour).
+        self.peak_half_life_days = PEAK_HALF_LIFE_DAYS
+        self.peak_date: date | None = None
 
         # Kelly tracking: rolling trade outcomes per ticker
         self._trade_outcomes: dict[str, list[float]] = {}   # ticker → [+1/-1, ...]
@@ -94,6 +102,25 @@ class RiskManager:
     # ──────────────────────────────────────────────────────────────────────────
     # Public API
     # ──────────────────────────────────────────────────────────────────────────
+
+    def decay_peak(self, current_value: float, as_of: date) -> None:
+        """Fades the high-water mark toward current_value, once per new business day.
+
+        Without this, a drawdown of 10% or more with the account sitting in cash is a
+        permanent lock: the Defense agent pauses new buys at 10% drawdown, and a
+        portfolio that holds nothing cannot recover the peak, so it never buys again
+        (replay 2020-2021: stopped out in the March 2020 crash, then flat for two years).
+        """
+        if self.peak_date is None:
+            self.peak_date = as_of
+            return
+        days = int(np.busday_count(self.peak_date, as_of))
+        if days <= 0:
+            return
+        self.peak_date = as_of
+        if self.peak_half_life_days > 0 and self.peak_value > current_value:
+            keep = 0.5 ** (days / self.peak_half_life_days)
+            self.peak_value = current_value + (self.peak_value - current_value) * keep
 
     def update(self, current_value: float) -> RiskLevel:
         """Updates drawdown state. Returns current RiskLevel."""

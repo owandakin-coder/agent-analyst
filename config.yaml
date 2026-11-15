@@ -68,6 +68,10 @@ risk:
   kelly_max: 1.00
   corr_threshold: 0.80
   corr_window: 60
+  # The drawdown peak fades toward the current equity with this half-life in business
+  # days. Without it a 10% drawdown with the account in cash is a permanent lock (the
+  # Defense agent pauses buys at 10%, and cash cannot recover the peak).
+  peak_half_life_days: 60
 
 costs:
   commission_pct: 0.001
@@ -101,7 +105,7 @@ live:
   signal_source: trend
   buy_threshold: 0.08
   sell_threshold: -0.05
-  max_concentration: 0.08
+  max_concentration: 0.12
   # Hard, non-negotiable ceiling on total deployed capital as a multiple of
   # net worth (gross_exposure = market_value / net_worth). _execute_actions
   # enforces this independently of what the RL model's action vector wants
@@ -125,10 +129,14 @@ live:
   # level or the walk-forward (multi-window) methodology, not one-off
   # backtests. Reverted to the safe, already-validated no-leverage setting
   # rather than spend more multi-hour runs chasing a moving target.
-  max_gross_exposure: 0.65
+  # 2026-11-15 sizing for the trend source (live_faithful_replay.py, 4 windows 2016-2026,
+  # all positive: +10%/+33%/+17%/+42%, max drawdown 6-13% vs SPY 19-34%, ~50-60% invested
+  # vs ~10-35% at the previous caps: concentration 0.08, gross 0.65, buffer 0.30, order 0.04).
+  # Still cash-only (no_margin), so gross exposure cannot pass 100%.
+  max_gross_exposure: 0.90
   max_positions: 8
-  max_single_order_notional_pct: 0.04
-  cash_buffer_pct: 0.30
+  max_single_order_notional_pct: 0.06
+  cash_buffer_pct: 0.05
   stop_loss_pct: 0.06
   no_margin: true
   auto_deleverage: true

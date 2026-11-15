@@ -436,7 +436,9 @@ class LiveTrader:
         if net_worth <= 0:
             emit_execution_event("execution_aborted", {"reason": "nonpositive_account_equity"})
             return
-        self._peak_net_worth = max(self._peak_net_worth, self.risk_manager.peak_value, net_worth)
+        self.risk_manager.peak_value = max(self.risk_manager.peak_value, self._peak_net_worth)
+        self.risk_manager.decay_peak(net_worth, datetime.now(timezone.utc).date())
+        self._peak_net_worth = max(self.risk_manager.peak_value, net_worth)
         drawdown = (self._peak_net_worth - net_worth) / (self._peak_net_worth + 1e-9)
 
         log.info(

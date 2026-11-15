@@ -109,6 +109,7 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
         import trend_signal
         setattr(trend_signal, k[6:], patch.pop(k))
     risk_over = {k[5:].lower(): bool(patch.pop(k)) for k in [k for k in patch if k.startswith("RISK_")]}
+    half_life = patch.pop("PEAK_HALF_LIFE", None)
     for name, value in patch.items():
         if not hasattr(live_trader, name):
             raise ValueError(f"unknown live_trader constant: {name}")
@@ -128,6 +129,8 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
         risk = RiskManager(CFG.initial_capital)
         for name, value in risk_over.items():
             setattr(risk, name, value)
+        if half_life is not None:
+            risk.peak_half_life_days = float(half_life)
         trader = live_trader.LiveTrader(
             model=agent, broker=broker, data_manager=_NoData(), risk_manager=risk,
             vec_norm=None, tickers=tickers, initial_capital=CFG.initial_capital,
@@ -149,7 +152,9 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
             positions = dict(broker.positions)
             cash = broker.cash
             net_worth = cash + sum(positions.get(t, 0.0) * prices[t] for t in tickers)
-            peak = max(peak, net_worth)
+            risk.peak_value = max(risk.peak_value, peak)
+            risk.decay_peak(net_worth, d.date())
+            peak = max(risk.peak_value, net_worth)
             drawdown = (peak - net_worth) / peak if peak else 0.0
             risk.update(net_worth)
 

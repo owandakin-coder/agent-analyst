@@ -1,6 +1,7 @@
 """Validated state shared by sequential workers for one broker/strategy scope."""
 from __future__ import annotations
 import math
+from datetime import date
 
 
 def _positive(value):
@@ -18,6 +19,8 @@ def restore(trader, state: dict) -> None:
         raise ValueError("Unsupported persisted risk schema")
     trader._peak_net_worth = _positive(state["peak_net_worth"])
     trader.risk_manager.peak_value = _positive(state["risk_peak"])
+    if state.get("peak_date"):
+        trader.risk_manager.peak_date = date.fromisoformat(str(state["peak_date"]))
     trader._entry_prices = {t: _positive(p) for t, p in state.get("entry_prices", {}).items()}
     trader._trailing_highs = {t: _positive(p) for t, p in state.get("trailing_highs", {}).items()}
     outcomes = state.get("trade_outcomes", {})
@@ -31,6 +34,7 @@ def restore(trader, state: dict) -> None:
 def snapshot(trader) -> dict:
     return {"schema_version": 1, "peak_net_worth": trader._peak_net_worth,
             "risk_peak": trader.risk_manager.peak_value,
+            "peak_date": getattr(trader.risk_manager, "peak_date", None).isoformat() if getattr(trader.risk_manager, "peak_date", None) else None,
             "entry_prices": dict(trader._entry_prices), "trailing_highs": dict(trader._trailing_highs),
             "trade_outcomes": trader.risk_manager._trade_outcomes,
             "shadow_portfolios": trader._shadow_portfolios,
