@@ -498,37 +498,51 @@ async function requireUser(req: Request): Promise<JsonMap> {
   return await res.json() as JsonMap;
 }
 
-async function ensureUserRows(user: JsonMap): Promise<void> {
+// One request each instead of PATCH, SELECT, INSERT-if-missing (profiles) and
+// SELECT, INSERT-if-missing (user_preferences): about five sequential round trips
+// per call, on a path that runs at every sign-in. Both id columns are primary keys,
+// so on_conflict is safe. The profile row is overwritten with the sign-in identity
+// exactly as the PATCH did; an existing preferences row is left untouched.
+function upsertUserRows(user: JsonMap, returnProfile: boolean): [Promise<Response>, Promise<Response>] {
   const id = String(user.id);
   const email = String(user.email ?? "");
   const rawMeta = (user.user_metadata ?? {}) as JsonMap;
   const displayName = String(rawMeta.display_name ?? email.split("@")[0] ?? "Member");
-
-  await restAdmin("/profiles?id=eq." + encodeURIComponent(id), {
-    method: "PATCH",
-    headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ email, display_name: displayName, active_executor: "worker_pool" }),
+  const profile = restAdmin("/profiles?on_conflict=id", {
+    method: "POST",
+    headers: { "Prefer": `resolution=merge-duplicates,return=${returnProfile ? "representation" : "minimal"}` },
+    body: JSON.stringify({ id, email, display_name: displayName, active_executor: "worker_pool" }),
   });
+  const preferences = restAdmin("/user_preferences?on_conflict=user_id", {
+    method: "POST",
+    headers: { "Prefer": "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({ user_id: id }),
+  });
+  return [profile, preferences];
+}
 
-  const profileRes = await restAdmin(`/profiles?id=eq.${encodeURIComponent(id)}&select=id`);
-  const profileRows = await profileRes.json() as JsonMap[];
-  if (!profileRows.length) {
-    await restAdmin("/profiles", {
-      method: "POST",
-      headers: { "Prefer": "return=minimal" },
-      body: JSON.stringify({ id, email, display_name: displayName, active_executor: "worker_pool" }),
-    });
-  }
+async function ensureUserRows(user: JsonMap): Promise<void> {
+  await Promise.all(upsertUserRows(user, false));
+}
 
-  const prefsRes = await restAdmin(`/user_preferences?user_id=eq.${encodeURIComponent(id)}&select=user_id`);
-  const prefRows = await prefsRes.json() as JsonMap[];
-  if (!prefRows.length) {
-    await restAdmin("/user_preferences", {
-      method: "POST",
-      headers: { "Prefer": "return=minimal" },
-      body: JSON.stringify({ user_id: id }),
-    });
+// /me: create-or-refresh the rows and read them back in one round trip for an
+// existing user (the preferences SELECT runs alongside the writes; a brand-new user,
+// whose row may not exist yet at that instant, gets one more read).
+async function ensureUserBundle(user: JsonMap) {
+  const id = String(user.id);
+  const [[profileRes, prefsWrite], prefsRead] = await Promise.all([
+    Promise.all(upsertUserRows(user, true)),
+    restAdmin(`/user_preferences?user_id=eq.${encodeURIComponent(id)}&select=*`),
+  ]);
+  if (!profileRes.ok || !prefsWrite.ok) return await fetchUserBundle(id);
+  const profile = ((await profileRes.json()) as JsonMap[])[0] ?? null;
+  let preferences = prefsRead.ok ? ((await prefsRead.json()) as JsonMap[])[0] ?? null : null;
+  if (!preferences) {
+    const again = await restAdmin(`/user_preferences?user_id=eq.${encodeURIComponent(id)}&select=*`);
+    preferences = ((await again.json()) as JsonMap[])[0] ?? null;
   }
+  if (profile) profile.active_executor = "worker_pool";
+  return { profile, preferences };
 }
 
 async function fetchUserBundle(userId: string) {
@@ -1240,8 +1254,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (path === "/me" && req.method === "GET") {
       const user = await requireUser(req);
-      await ensureUserRows(user);
-      const bundle = await fetchUserBundle(String(user.id));
+      const bundle = await ensureUserBundle(user);
       return json({ user, ...bundle });
     }
 
