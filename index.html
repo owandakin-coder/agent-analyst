@@ -17,6 +17,7 @@
 <link rel="icon" type="image/png" href="logo.png">
 <link rel="apple-touch-icon" href="logo.png">
 <script defer src="vendor/chart.umd.min.js" onload="if(document.getElementById('pg-charts')?.classList.contains('active')) initCharts();"></script>
+<link rel="preconnect" href="https://sofowpweliticltlbxrj.supabase.co" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" media="print" onload="this.media='all'">
@@ -2412,6 +2413,9 @@ async function hydrateCurrentUserOnce(options = {}) {
   try {
     await refreshAuthSession(false);
     const sessionToken = authSession?.access_token;
+    // /me/broker and /me/execution/jobs need only the token, so they start with
+    // /me instead of after it (three sequential round trips before any data).
+    prefetchMemberWorkspace();
     const payload = await apiJSON('/me', {
       headers: getAuthHeaders(),
       cache: 'no-store',
@@ -2863,6 +2867,18 @@ function handleSyncStatusTap() {
 }
 
 let workspaceRefreshScope = null;
+let memberPrefetch = null;
+function prefetchMemberWorkspace() {
+  const headers = getAuthHeaders();
+  const settle = request => request.then(payload => ({ payload }), error => ({ error }));
+  memberPrefetch = {
+    token: authSession?.access_token,
+    at: Date.now(),
+    broker: settle(apiJSON('/me/broker', { headers, cache: 'no-store' })),
+    jobs: settle(apiJSON('/me/execution/jobs', { headers, cache: 'no-store' })),
+  };
+}
+
 async function refreshMemberWorkspace() {
   if (!authSession?.access_token) {
     applyPortfolioOnboardingState('Sign in to connect your personal Alpaca account.');
@@ -2872,9 +2888,18 @@ async function refreshMemberWorkspace() {
   if (!scope || workspaceRefreshScope === scope) return;
   workspaceRefreshScope = scope;
   try {
-    const jobsRequest = apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' })
+    const pre = memberPrefetch && memberPrefetch.token === authSession?.access_token && Date.now() - memberPrefetch.at < 15000 ? memberPrefetch : null;
+    memberPrefetch = null;
+    const jobsRequest = pre ? pre.jobs : apiJSON('/me/execution/jobs', { headers: getAuthHeaders(), cache: 'no-store' })
       .then(payload => ({ payload }), error => ({ error }));
-    const brokerPayload = await apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' });
+    let brokerPayload;
+    if (pre) {
+      const brokerResult = await pre.broker;
+      if (brokerResult.error) throw brokerResult.error;
+      brokerPayload = brokerResult.payload;
+    } else {
+      brokerPayload = await apiJSON('/me/broker', { headers: getAuthHeaders(), cache: 'no-store' });
+    }
     if (currentUser?.id !== scope) return;
     applyBrokerConnectionUI(brokerPayload.connection || null);
     if (hasVerifiedBrokerConnection()) {
