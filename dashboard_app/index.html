@@ -2402,6 +2402,7 @@ function hydrateCurrentUser(options = {}) {
   hydrationPromise = pending;
   return pending;
 }
+let lastHydratedAt = 0;
 async function hydrateCurrentUserOnce(options = {}) {
   const { retryOnAuthFailure = true, showOverlayOnAuthFailure = true } = options;
   if (!authSession?.access_token) {
@@ -2434,6 +2435,7 @@ async function hydrateCurrentUserOnce(options = {}) {
       applyPortfolioOnboardingState('Connect and verify your personal Alpaca Paper account to unlock live portfolio data.');
     }
     updateIdentityUI();
+    lastHydratedAt = Date.now();
     return payload;
   } catch (e) {
     if (retryOnAuthFailure && isAuthFailure(e) && authSession?.refresh_token) {
@@ -2877,7 +2879,24 @@ function prefetchMemberWorkspace() {
     broker: settle(apiJSON('/me/broker', { headers, cache: 'no-store' })),
     jobs: settle(apiJSON('/me/execution/jobs', { headers, cache: 'no-store' })),
   };
+  // The server checks the broker connection itself, so the portfolio requests do
+  // not have to wait for /me or /me/broker (they answer with an error if none).
+  const portfolio = path => fetch(API_BASE + path, { cache: 'no-store', headers }).then(
+    async res => {
+      let body = null, bodyError = null;
+      try { body = await res.json(); } catch (e) { bodyError = e; }
+      return { res, body, bodyError };
+    },
+    error => ({ error }),
+  );
+  portfolioPrefetch = {
+    token: authSession?.access_token,
+    at: Date.now(),
+    account: portfolio('/account'),
+    positions: portfolio('/positions'),
+  };
 }
+let portfolioPrefetch = null;
 
 async function refreshMemberWorkspace() {
   if (!authSession?.access_token) {
@@ -3504,12 +3523,22 @@ async function fetchAlpacaData() {
   const token = authSession.access_token;
   const stillScoped = () => currentUser?.id === scope && currentBrokerConnection?.id === connection && authSession?.access_token === token && hasVerifiedBrokerConnection();
   try {
-    const [accRes, posRes] = await Promise.all([
-      fetch(API_BASE + '/account',   { cache:'no-store', headers: getAuthHeaders() }),
-      fetch(API_BASE + '/positions', { cache:'no-store', headers: getAuthHeaders() }),
-    ]);
-    const acc = await accRes.json();
-    const positions = await posRes.json();
+    const pre = portfolioPrefetch && portfolioPrefetch.token === token && Date.now() - portfolioPrefetch.at < 15000 ? portfolioPrefetch : null;
+    portfolioPrefetch = null;
+    let accRes, posRes, acc, positions;
+    if (pre) {
+      const [a, p] = await Promise.all([pre.account, pre.positions]);
+      if (a.error || p.error) throw a.error || p.error;
+      if (a.bodyError || p.bodyError) throw a.bodyError || p.bodyError;
+      accRes = a.res; posRes = p.res; acc = a.body; positions = p.body;
+    } else {
+      [accRes, posRes] = await Promise.all([
+        fetch(API_BASE + '/account',   { cache:'no-store', headers: getAuthHeaders() }),
+        fetch(API_BASE + '/positions', { cache:'no-store', headers: getAuthHeaders() }),
+      ]);
+      acc = await accRes.json();
+      positions = await posRes.json();
+    }
     if (!stillScoped()) return;
     if (!accRes.ok || !posRes.ok || acc.error || !Array.isArray(positions)) throw new Error('Broker account or positions unavailable');
     if (['equity','last_equity','buying_power'].some(key => !Number.isFinite(acc[key]))) throw new Error('Incomplete broker account values');
@@ -4662,13 +4691,13 @@ window.addEventListener('hashchange', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !authSession?.refresh_token) return;
   refreshAuthSession(false)
-    .then(() => hydrateCurrentUser({ showOverlayOnAuthFailure: false }))
+    .then(() => Date.now() - lastHydratedAt < 120000 ? null : hydrateCurrentUser({ showOverlayOnAuthFailure: false }))
     .catch(err => console.warn('visibility auth refresh:', err.message));
 });
 window.addEventListener('pageshow', () => {
   if (!authSession?.refresh_token) return;
   refreshAuthSession(false)
-    .then(() => hydrateCurrentUser({ showOverlayOnAuthFailure: false }))
+    .then(() => Date.now() - lastHydratedAt < 120000 ? null : hydrateCurrentUser({ showOverlayOnAuthFailure: false }))
     .catch(err => console.warn('pageshow auth refresh:', err.message));
 });
 let authHashRecoveryAttempts = 0;
