@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from live_faithful_replay import SimBroker
+import numpy as np
+import pandas as pd
+
+from live_faithful_replay import SimBroker, spy_same_days
+
+
+def test_spy_baseline_starts_on_the_first_replayed_day():
+    idx = pd.date_range("2025-01-02", periods=100, freq="B")
+    full = {"SPY": pd.DataFrame({"close": np.arange(100.0, 200.0)}, index=idx)}
+    curve = spy_same_days(full, str(idx[10].date()), str(idx[59].date()), 1_000.0)
+    assert len(curve) == 50
+    assert np.isclose(curve[-1] / curve[0], 159.0 / 110.0)
 
 
 def _broker():

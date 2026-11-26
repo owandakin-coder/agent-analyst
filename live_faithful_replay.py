@@ -88,10 +88,19 @@ class SimBroker:
         return {t for t, when in self.sells.items() if when >= cutoff}
 
 
+def spy_same_days(full: dict, start: str, end: str | None, capital: float) -> np.ndarray:
+    """SPY buy and hold over exactly the replay's days. The replay trades from the
+    first day (history before `start` fills the indicators), so there is no
+    TradingEnvironment warm-up to drop (benchmark.trading_window)."""
+    from benchmark import spy_buy_hold
+
+    data = {t: df[(df.index >= start) & ((df.index <= end) if end else True)] for t, df in full.items()}
+    return np.asarray(spy_buy_hold(data, capital), dtype=float)
+
+
 def replay(overrides: dict | None = None, approval_rule: str | None = None,
            start: str | None = None, end: str | None = None) -> dict:
     import live_trader
-    from benchmark import spy_buy_hold, trading_window
     from config_loader import CFG
     from data_manager import DataManager
     from ensemble_agent import load_ensemble
@@ -183,13 +192,11 @@ def replay(overrides: dict | None = None, approval_rule: str | None = None,
             equity.append(nw)
             gross.append(value / nw if nw else 0.0)
 
-        spy_data = {t: df[(df.index >= start) & ((df.index <= end) if end else True)] for t, df in full.items()}
-        spy = spy_buy_hold(trading_window(spy_data), CFG.initial_capital)
         return {
             "days": len(equity) - 1, "orders": len(broker.orders),
             "avg_gross": float(np.mean(gross)), "end_gross": gross[-1],
             "live": metrics_from_equity(np.array(equity)),
-            "spy": metrics_from_equity(np.asarray(spy, dtype=float)),
+            "spy": metrics_from_equity(spy_same_days(full, start, end, CFG.initial_capital)),
             "equity": equity, "raw": np.array(raws), "dates": dates, "tickers": tickers,
         }
     finally:
