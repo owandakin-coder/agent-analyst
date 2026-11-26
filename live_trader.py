@@ -166,6 +166,9 @@ class LiveTrader:
     6. שולח לברוקר (עם/בלי אישור)
     """
 
+    # Tickers whose current price is not trustworthy; set per cycle.
+    _unreliable_tickers: frozenset = frozenset()
+
     def __init__(
         self,
         model: "PPO | EnsembleAgent",
@@ -213,6 +216,7 @@ class LiveTrader:
         # Per-stock trailing stop-loss tracking
         self._entry_prices:   dict[str, float] = {}
         self._trailing_highs: dict[str, float] = {}   # max price since entry
+        self._unreliable_tickers: set[str] = set()    # wide quote, no recent trade
         self.stop_loss_pct: float = STOP_LOSS_PCT
         risk_state.restore(self, load_execution_state())
 
@@ -412,6 +416,9 @@ class LiveTrader:
             log.error("Aborting execution due to stale or missing live quotes.")
             return
         self._execution_quotes = quote_info
+        self._unreliable_tickers = {t for t, info in quote_info.items() if info.get("reliable") is False}
+        if self._unreliable_tickers:
+            log.warning("Unreliable quotes, no stops or orders this cycle: %s", sorted(self._unreliable_tickers))
         log.info(f"Prices: {current_prices}")
 
         # ── שווי תיק עדכני ──────────────────────────────────────────────────
@@ -423,6 +430,7 @@ class LiveTrader:
         cash      = snapshot["cash"]
         buying_power = float(snapshot.get("buying_power", cash) or cash)
         self._hydrate_entry_state_from_broker(positions, snapshot, current_prices)
+        self._clamp_trailing_highs(fresh_data, current_prices)
         net_worth = float(snapshot["equity"] if snapshot.get("equity") is not None else cash + sum(
             positions.get(t, 0.0) * current_prices.get(t, 0.0) for t in self.tickers))
         if not np.isfinite(net_worth) or not np.isfinite(cash):
@@ -841,7 +849,7 @@ class LiveTrader:
             held  = positions.get(ticker, 0.0)
             price = prices.get(ticker, 0.0)
             entry = self._entry_prices.get(ticker, 0.0)
-            if held <= 0 or entry <= 0 or price <= 0:
+            if held <= 0 or entry <= 0 or price <= 0 or ticker in self._unreliable_tickers:
                 continue
 
             # Update trailing high-water mark
@@ -887,7 +895,7 @@ class LiveTrader:
             held  = positions.get(ticker, 0.0)
             price = prices.get(ticker, 0.0)
 
-            if act < sell_threshold and held > 0 and price > 0:
+            if act < sell_threshold and held > 0 and price > 0 and ticker not in self._unreliable_tickers:
                 shares_to_sell = max(1, int(held * abs(act)))
                 log.info(f"Action {act:.3f} -> SELL {shares_to_sell} {ticker} @ ${price:.2f}")
                 result = self._place_order("sell", ticker, shares_to_sell, price)
@@ -952,7 +960,7 @@ class LiveTrader:
         cooling_down = self._recent_sell_tickers()
 
         for i, ticker in buy_actions:
-            if ticker in exited_tickers:
+            if ticker in exited_tickers or ticker in self._unreliable_tickers:
                 continue
             if ticker in cooling_down:
                 log.info("Skipping BUY %s: sold within the last %s days (re-entry cooldown).",
@@ -1043,6 +1051,21 @@ class LiveTrader:
             if hasattr(self.broker, "is_market_open") and not self.broker.is_market_open():
                 return {"status": "REJECTED", "reason": "market_closed_before_submission"}
         return getattr(self.broker, side)(ticker, shares, price)
+
+    def _clamp_trailing_highs(self, fresh_data: dict[str, pd.DataFrame], prices: dict[str, float]) -> None:
+        """Lowers a stored trailing high that the market never traded at.
+
+        Highs persisted from bad quotes would otherwise fire the stop on a real price.
+        """
+        for ticker, high in list(self._trailing_highs.items()):
+            df = fresh_data.get(ticker)
+            if df is None or df.empty or "high" not in df.columns:
+                continue
+            cap = max(float(df["high"].tail(60).max()), self._entry_prices.get(ticker, 0.0),
+                      prices.get(ticker, 0.0))
+            if np.isfinite(cap) and high > cap:
+                log.warning("Trailing high for %s lowered from $%.2f to the traded high $%.2f", ticker, high, cap)
+                self._trailing_highs[ticker] = cap
 
     def _hydrate_entry_state_from_broker(
         self,

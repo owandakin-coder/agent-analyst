@@ -66,6 +66,18 @@ PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 LIVE_BASE_URL = "https://api.alpaca.markets"
 
 
+TRADE_MAX_AGE_SECONDS = 20
+MAX_QUOTE_SPREAD = 0.005
+
+
+def _age_seconds(timestamp, now: datetime) -> float:
+    if not isinstance(timestamp, datetime):
+        return float("inf")
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return (now - timestamp).total_seconds()
+
+
 class AlpacaBrokerAPI:
     broker_name = "alpaca"
 
@@ -566,57 +578,59 @@ class AlpacaBrokerAPI:
             raise
 
     def get_latest_prices(self, tickers: list[str]) -> dict[str, float]:
+        """Current price per ticker, from a real trade when one is recent.
+
+        The paper feed is IEX only, whose top of book is thin: the bid/ask midpoint
+        swung 3-7% between cycles. 2026-11-16 JPM traded 336.67-346.52 all day, yet the
+        midpoint read 353.38 (setting a false trailing high) and later 329.73 (firing a
+        false trailing stop). So: a trade at most TRADE_MAX_AGE_SECONDS old wins; else
+        the midpoint if the spread is tight; else the midpoint marked reliable=False,
+        and LiveTrader neither stops nor trades that ticker in this cycle.
+        """
         prices: dict[str, float] = {}
         # A failed refresh must not retain receipts from an earlier fetch.
         self._last_quotes_info = {}
-        observed_at = datetime.now(timezone.utc).isoformat()
+        quotes, trades = {}, {}
         try:
             request = StockLatestQuoteRequest(symbol_or_symbols=tickers)
-            quotes = self._call_with_retry("get_stock_latest_quote", self._data.get_stock_latest_quote, request)
-            for ticker in tickers:
-                if ticker not in quotes:
-                    continue
-                quote = quotes[ticker]
-                bid = float(getattr(quote, "bid_price", 0.0) or 0.0)
-                ask = float(getattr(quote, "ask_price", 0.0) or 0.0)
-                if bid > 0 and ask > 0:
-                    prices[ticker] = (bid + ask) / 2
-                elif ask > 0:
-                    prices[ticker] = ask
-                elif bid > 0:
-                    prices[ticker] = bid
-                timestamp = getattr(quote, "timestamp", None)
-                self._last_quotes_info[ticker] = {
-                    "price": prices.get(ticker),
-                    "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else (str(timestamp) if timestamp else None),
-                    "observed_at": observed_at,
-                    "source": "alpaca_latest_quote",
-                }
+            quotes = self._call_with_retry("get_stock_latest_quote", self._data.get_stock_latest_quote, request) or {}
         except Exception as exc:
             log.warning("Could not fetch prices: %s", exc)
-        missing = [ticker for ticker in tickers if ticker not in prices]
-        if missing and StockLatestTradeRequest is not None:
+        if StockLatestTradeRequest is not None:
             try:
-                request = StockLatestTradeRequest(symbol_or_symbols=missing)
-                trades = self._call_with_retry("get_stock_latest_trade", self._data.get_stock_latest_trade, request)
-                observed_at = datetime.now(timezone.utc).isoformat()
-                for ticker in missing:
-                    trade = trades.get(ticker) if hasattr(trades, "get") else None
-                    if trade is None:
-                        continue
-                    trade_price = float(getattr(trade, "price", 0.0) or 0.0)
-                    if trade_price <= 0:
-                        continue
-                    prices[ticker] = trade_price
-                    timestamp = getattr(trade, "timestamp", None)
-                    self._last_quotes_info[ticker] = {
-                        "price": trade_price,
-                        "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else (str(timestamp) if timestamp else None),
-                        "observed_at": observed_at,
-                        "source": "alpaca_latest_trade",
-                    }
+                request = StockLatestTradeRequest(symbol_or_symbols=tickers)
+                trades = self._call_with_retry("get_stock_latest_trade", self._data.get_stock_latest_trade, request) or {}
             except Exception as exc:
-                log.warning("Could not fetch latest trades for missing prices: %s", exc)
+                log.warning("Could not fetch latest trades: %s", exc)
+        observed = datetime.now(timezone.utc)
+        for ticker in tickers:
+            quote = quotes.get(ticker) if hasattr(quotes, "get") else None
+            trade = trades.get(ticker) if hasattr(trades, "get") else None
+            bid = float(getattr(quote, "bid_price", 0.0) or 0.0)
+            ask = float(getattr(quote, "ask_price", 0.0) or 0.0)
+            trade_price = float(getattr(trade, "price", 0.0) or 0.0)
+            trade_time = getattr(trade, "timestamp", None)
+            reliable = True
+            if trade_price > 0 and _age_seconds(trade_time, observed) <= TRADE_MAX_AGE_SECONDS:
+                price, timestamp, source = trade_price, trade_time, "alpaca_latest_trade"
+            elif bid > 0 or ask > 0:
+                price = (bid + ask) / 2 if bid > 0 and ask > 0 else (ask or bid)
+                timestamp, source = getattr(quote, "timestamp", None), "alpaca_latest_quote"
+                reliable = bid > 0 and ask > 0 and (ask - bid) / price <= MAX_QUOTE_SPREAD
+            elif trade_price > 0:
+                # No quote at all: the old trade is the only evidence; its own
+                # timestamp lets the freshness guard judge it.
+                price, timestamp, source = trade_price, trade_time, "alpaca_latest_trade"
+            else:
+                continue
+            prices[ticker] = price
+            self._last_quotes_info[ticker] = {
+                "price": price,
+                "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else (str(timestamp) if timestamp else None),
+                "observed_at": observed.isoformat(),
+                "source": source,
+                "reliable": reliable,
+            }
         return prices
 
     def get_latest_quotes_info(self, tickers: list[str]) -> dict[str, dict]:
