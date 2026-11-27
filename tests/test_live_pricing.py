@@ -63,3 +63,15 @@ def test_a_trailing_high_above_anything_traded_is_lowered():
     bars = {"SPY": pd.DataFrame({"high": [757.0, 749.8, 739.9], "close": [754.0, 740.0, 716.0]})}
     trader._clamp_trailing_highs(bars, {"SPY": 727.0})
     assert trader._trailing_highs["SPY"] == 757.0
+
+
+def test_an_unreliable_price_never_becomes_a_trailing_high():
+    trader = live_trader.LiveTrader.__new__(live_trader.LiveTrader)
+    trader._unreliable_tickers = {"JPM"}
+    trader._entry_prices, trader._trailing_highs = {}, {}
+    snapshot = {"position_details": {"JPM": {"avg_entry_price": 320.0}}}
+    trader._hydrate_entry_state_from_broker({"JPM": 5.0}, snapshot, {"JPM": 353.0})
+    assert trader._trailing_highs["JPM"] == 320.0
+    trader._trailing_highs["JPM"] = 353.0
+    trader._clamp_trailing_highs({"JPM": pd.DataFrame({"high": [330.0, 325.0]})}, {"JPM": 353.0})
+    assert trader._trailing_highs["JPM"] == 330.0

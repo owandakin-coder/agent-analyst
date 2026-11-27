@@ -565,7 +565,7 @@ class LiveTrader:
             sample["decision_regime"] = decision_bundle.regime
         self._latest_research_samples = research_samples
         for ticker, held in positions.items():
-            if held > 0 and ticker in current_prices:
+            if held > 0 and ticker in current_prices and ticker not in self._unreliable_tickers:
                 self._trailing_highs[ticker] = max(self._trailing_highs.get(ticker, current_prices[ticker]), current_prices[ticker])
         # Save protection levels and shadow marks BEFORE any broker mutation.
         save_execution_state(risk_state.snapshot(self))
@@ -1061,8 +1061,8 @@ class LiveTrader:
             df = fresh_data.get(ticker)
             if df is None or df.empty or "high" not in df.columns:
                 continue
-            cap = max(float(df["high"].tail(60).max()), self._entry_prices.get(ticker, 0.0),
-                      prices.get(ticker, 0.0))
+            live = 0.0 if ticker in self._unreliable_tickers else prices.get(ticker, 0.0)
+            cap = max(float(df["high"].tail(60).max()), self._entry_prices.get(ticker, 0.0), live)
             if np.isfinite(cap) and high > cap:
                 log.warning("Trailing high for %s lowered from $%.2f to the traded high $%.2f", ticker, high, cap)
                 self._trailing_highs[ticker] = cap
@@ -1106,7 +1106,8 @@ class LiveTrader:
             else:
                 log.info("Recovered entry price for %s from broker: $%.2f", ticker, avg_entry)
             self._entry_prices[ticker] = avg_entry
-            self._trailing_highs[ticker] = max(avg_entry, current_prices.get(ticker, avg_entry))
+            live = avg_entry if ticker in self._unreliable_tickers else current_prices.get(ticker, avg_entry)
+            self._trailing_highs[ticker] = max(avg_entry, live)
 
     def _reconcile_snapshot(self) -> dict | None:
         try:
